@@ -1,0 +1,48 @@
+#! /bin/bash
+
+export VERSION="1"
+export SYSTEM_DESC="ChimeraOS Zero"
+export SYSTEM_NAME="chimeraos-zero"
+export USERNAME="gamer"
+export SIZE="2000MB"
+export ARCHIVE_DATE=$(date -d 'yesterday' +%Y/%m/%d)
+export WEBSITE="https://chimeraos.org"
+export DOCUMENTATION_URL="https://chimeraos.org/about"
+export BUG_REPORT_URL="https://github.com/ChimeraOS/chimeraos/issues"
+
+export KERNEL_PACKAGE="linux"
+
+export PACKAGES="\
+	gamescope \
+	htop \
+	less \
+	lightdm \
+	nvidia-open-dkms \
+	sudo \
+	wireplumber \
+"
+
+export AUR_PACKAGES="\
+	downgrade \
+	frzr \
+	pikaur \
+"
+
+export SERVICES="\
+	fstrim.timer \
+	inputplumber \
+	lightdm \
+"
+
+export FILES_TO_DELETE="\
+	/boot/initramfs-linux-fallback.img \
+	/usr/share/SFML \
+	/usr/share/doc \
+	/usr/share/gtk-doc \
+	/usr/share/help \
+	/usr/share/man \
+"
+
+postinstallhook() {
+	:
+}
