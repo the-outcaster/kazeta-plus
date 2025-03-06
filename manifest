@@ -15,6 +15,7 @@ export KERNEL_PACKAGE="linux"
 export PACKAGES="\
 	gamescope \
 	htop \
+	inputplumber \
 	less \
 	lightdm \
 	nvidia-open-dkms \
