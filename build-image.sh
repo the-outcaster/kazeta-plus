@@ -132,10 +132,14 @@ rm -rf /var/cache/pacman/pkg
 yes | pacman -S iptables-nft
 
 # enable services
-systemctl enable ${SERVICES}
+if [ -n "${SERVICES}" ]; then
+	systemctl enable ${SERVICES}
+fi
 
 # enable user services
-systemctl --global enable ${USER_SERVICES}
+if [ -n "${USER_SERVICES}" ]; then
+	systemctl --global enable ${USER_SERVICES}
+fi
 
 # disable root login
 passwd --lock root
