@@ -64,7 +64,10 @@ mkdir ${BUILD_PATH}/own_pkgs
 mkdir ${BUILD_PATH}/extra_pkgs
 
 cp -rv aur-pkgs/*.pkg.tar* ${BUILD_PATH}/extra_pkgs
-cp -rv pkgs/*.pkg.tar* ${BUILD_PATH}/own_pkgs
+
+if [ -n "$(ls -A 'pkgs')" ]; then
+	cp -rv pkgs/*.pkg.tar* ${BUILD_PATH}/own_pkgs
+fi
 
 if [ -n "${PACKAGE_OVERRIDES}" ]; then
 	wget --directory-prefix=/tmp/extra_pkgs ${PACKAGE_OVERRIDES}
