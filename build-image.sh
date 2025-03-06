@@ -110,8 +110,10 @@ else
 fi
 
 # install own override packages
-pacman --noconfirm -U --overwrite '*' /own_pkgs/*
-rm -rf /var/cache/pacman/pkg
+if [ -n "$(ls -A '/own_pkgs')" ]; then
+	pacman --noconfirm -U --overwrite '*' /own_pkgs/*
+	rm -rf /var/cache/pacman/pkg
+fi
 
 # install packages
 pacman --noconfirm -S --overwrite '*' --disable-download-timeout ${PACKAGES}
