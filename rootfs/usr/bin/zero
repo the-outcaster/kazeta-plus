@@ -1,7 +1,5 @@
 #! /bin/bash
 
-script=$(find /run/media -maxdepth 3 -name "0run" | head -n 1)
-dir=$(dirname $script)
-cd $dir
-$script
+cd /home/gamer
+./0run
 poweroff
