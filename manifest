@@ -49,4 +49,6 @@ export FILES_TO_DELETE="\
 postinstallhook() {
 	# Add sudo permissions
 	sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //g' /etc/sudoers
+
+	mkdir -p /home/gamer
 }
