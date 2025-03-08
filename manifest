@@ -20,8 +20,11 @@ export PACKAGES="\
 	less \
 	lightdm \
 	nvidia-open-dkms \
+	nvidia-utils \
 	sudo \
 	vim \
+	vulkan-intel \
+	vulkan-radeon \
 	wireplumber \
 "
 
