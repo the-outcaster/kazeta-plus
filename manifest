@@ -25,6 +25,7 @@ export PACKAGES="\
 	sudo \
 	vim \
 	vulkan-intel \
+	vulkan-mesa-layers \
 	vulkan-radeon \
 	wireplumber \
 "
