@@ -21,6 +21,7 @@ export PACKAGES="\
 	lightdm \
 	nvidia-open-dkms \
 	nvidia-utils \
+	pipewire-pulse \
 	sudo \
 	vim \
 	vulkan-intel \
@@ -52,4 +53,7 @@ export FILES_TO_DELETE="\
 postinstallhook() {
 	# Add sudo permissions
 	sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //g' /etc/sudoers
+
+	# Disable SPDIF/IEC958 audio output
+	sudo sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
 }
