@@ -1,5 +1,6 @@
 #! /bin/bash
 
+inputplumber devices manage-all --enable
 cd /home/gamer
 ./0run
 poweroff
