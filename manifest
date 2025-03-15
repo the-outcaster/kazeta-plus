@@ -20,7 +20,8 @@ export PACKAGES="\
 	inputplumber \
 	less \
 	lightdm \
-	nvidia-open-dkms \
+	linux-firmware \
+	nvidia-open \
 	nvidia-utils \
 	pipewire-jack \
 	pipewire-pulse \
