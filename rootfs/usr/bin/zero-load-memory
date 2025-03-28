@@ -1,0 +1,22 @@
+#! /bin/bash
+
+cartid="$1"
+
+lower="/var/zero/ext/carts"
+upper="/var/zero/int/memory/${cartid}"
+work="/var/zero/run/work"
+target="/var/zero/run/cart"
+
+if [[ ! -d "${upper}" ]]; then
+	rm -f "${upper}"
+	mkdir -p "${upper}"
+fi
+
+rm -rf "/var/zero/run"
+mkdir -p "${work}"
+mkdir -p "${target}"
+
+chown -R gamer:gamer "${upper}"
+chown -R gamer:gamer "/var/zero/run"
+
+mount -t overlay overlay -o lowerdir="${lower}",upperdir="${upper}",workdir="${work}" "${target}"

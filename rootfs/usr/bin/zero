@@ -1,6 +1,12 @@
 #! /bin/bash
 
 inputplumber devices manage-all --enable
-cd /home/gamer
+pkexec zero-load-memory "$(cat /var/zero/ext/carts/0id)"
+export HOME="/var/zero/run/cart"
+unset XDG_CONFIG_HOME
+unset XDG_CACHE_HOME
+unset XDG_DATA_HOME
+unset XDG_STATE_HOME
+cd "${HOME}"
 ./0run
 poweroff
