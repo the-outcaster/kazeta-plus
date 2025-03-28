@@ -175,7 +175,6 @@ echo "
 LABEL=frzr_root /var       btrfs     defaults,subvolid=256,rw,noatime,nodatacow,nofail                                                                                                                                                                                                                      0   0
 LABEL=zerocart  /var/zero/ext/carts auto      defaults,ro,noatime,nofail     0   1
 LABEL=frzr_root /frzr_root btrfs     defaults,subvolid=5,rw,noatime,nodatacow,x-initrd.mount                                                                                                                                                                                                                0   2
-overlay         /etc       overlay   defaults,x-systemd.requires-mounts-for=/frzr_root,x-systemd.requires-mounts-for=/sysroot/frzr_root,x-systemd.rw-only,lowerdir=/sysroot/etc,upperdir=/sysroot/frzr_root/etc,workdir=/sysroot/frzr_root/.etc,index=off,metacopy=off,comment=etcoverlay,x-initrd.mount    0   0
 " > /etc/fstab
 
 echo "
