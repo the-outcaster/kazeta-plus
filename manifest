@@ -14,6 +14,7 @@ export KERNEL_PACKAGE="linux"
 
 export PACKAGES="\
 	accountsservice \
+	fuse2 \
 	fuse3 \
 	gamescope \
 	htop \
