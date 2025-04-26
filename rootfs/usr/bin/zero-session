@@ -1,6 +1,0 @@
-#! /bin/bash
-
-inputplumber devices manage-all --enable
-mv /var/zero/session.log /var/zero/session.log.old
-/usr/bin/zero /var/zero/ext/cart > /var/zero/session.log 2>&1
-poweroff

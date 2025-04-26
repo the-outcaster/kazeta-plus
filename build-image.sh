@@ -173,7 +173,7 @@ Subsystem	sftp	/usr/lib/ssh/sftp-server
 
 echo "
 LABEL=frzr_root /var       btrfs     defaults,subvolid=256,rw,noatime,nodatacow,nofail                                                                                                                                                                                                                      0   0
-LABEL=zerocart  /var/zero/ext/cart auto      defaults,ro,noatime,nofail     0   1
+LABEL=kazeta_cart  /var/kazeta/ext/cart auto      defaults,ro,noatime,nofail     0   1
 LABEL=frzr_root /frzr_root btrfs     defaults,subvolid=5,rw,noatime,nodatacow,x-initrd.mount                                                                                                                                                                                                                0   2
 " > /etc/fstab
 
@@ -229,9 +229,11 @@ rm -rf ${FILES_TO_DELETE}
 
 # create necessary directories
 mkdir -p /var
-mkdir -p /var/zero
+mkdir -p /var/kazeta
 mkdir -p /frzr_root
 mkdir -p /efi
+
+chown ${USERNAME}:${USERNAME} /var/kazeta
 EOF
 
 #defrag the image

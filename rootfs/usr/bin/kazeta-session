@@ -1,0 +1,6 @@
+#! /bin/bash
+
+inputplumber devices manage-all --enable
+mv /var/kazeta/session.log /var/kazeta/session.log.old
+/usr/bin/kazeta /var/kazeta/ext/cart > /var/kazeta/session.log 2>&1
+poweroff

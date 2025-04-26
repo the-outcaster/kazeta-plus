@@ -2,7 +2,7 @@
 
 set -x
 
-BASE_DIR="$HOME/.local/share/zero"
+BASE_DIR="$HOME/.local/share/kazeta"
 if [[ ! -d "${BASE_DIR}" ]]; then
 	mkdir -p "${BASE_DIR}"
 fi
@@ -14,7 +14,7 @@ function get_attribute {
 }
 
 cart_path="$1"
-cart_info="${cart_path}/0info.zpi"
+cart_info="${cart_path}/info.kzi"
 
 if [[ ! -f ${cart_info} ]]; then
 	echo "Cart metadata info file not found at ${cart_info}"

@@ -1,14 +1,14 @@
 #! /bin/bash
 
 export VERSION="1"
-export SYSTEM_DESC="ChimeraOS Zero"
-export SYSTEM_NAME="chimeraos-zero"
+export SYSTEM_DESC="kazeta"
+export SYSTEM_NAME="kazeta"
 export USERNAME="gamer"
 export SIZE="5000MB"
 export ARCHIVE_DATE=$(date -d 'yesterday' +%Y/%m/%d)
-export WEBSITE="https://chimeraos.org"
-export DOCUMENTATION_URL="https://chimeraos.org/about"
-export BUG_REPORT_URL="https://github.com/ChimeraOS/chimeraos/issues"
+export WEBSITE="https://kazeta.org"
+export DOCUMENTATION_URL="https://kazeta.org"
+export BUG_REPORT_URL="https://github.com/kazetaos/kazeta/issues"
 
 export KERNEL_PACKAGE="linux"
 
@@ -66,5 +66,5 @@ postinstallhook() {
 	ln -s /usr/share/zoneinfo/UTC /etc/localtime
 
 	mkdir -p /home/${USERNAME}/.local/share
-	ln -s /var/zero /home/${USERNAME}/.local/share/zero
+	ln -s /var/kazeta /home/${USERNAME}/.local/share/kazeta
 }
