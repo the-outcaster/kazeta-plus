@@ -1,12 +1,59 @@
 #! /bin/bash
 
-inputplumber devices manage-all --enable
-pkexec zero-load-memory "$(cat /var/zero/ext/carts/0id)"
-export HOME="/var/zero/run/cart"
+set -x
+
+BASE_DIR="$HOME/.local/share/zero"
+if [[ ! -d "${BASE_DIR}" ]]; then
+	mkdir -p "${BASE_DIR}"
+fi
+
+function get_attribute {
+	info_file="$1"
+	attribute=$2
+	cat ${info_file} | grep "^${attribute}=" | head -1 | cut -d= -f2-
+}
+
+cart_path="$1"
+cart_info="${cart_path}/0info.zpi"
+
+if [[ ! -f ${cart_info} ]]; then
+	echo "Cart metadata info file not found at ${cart_info}"
+	exit 1
+fi
+
+cart_id="$(get_attribute ${cart_info} 'Id')"
+cart_icon="${cart_path}/$(get_attribute ${cart_info} 'Icon')"
+
+mkdir -p "${BASE_DIR}/cache/${cart_id}"
+cp ${cart_info} "${BASE_DIR}/cache/${cart_id}/"
+if [[ -f "${cart_icon}" ]]; then
+	cp "${cart_icon}" "${BASE_DIR}/cache/${cart_id}/icon.png"
+fi
+
+lower="${cart_path}"
+upper="${BASE_DIR}/data/${cart_id}"
+work="${BASE_DIR}/run/work"
+target="${BASE_DIR}/run/cart"
+
+if [[ ! -d "${upper}" ]]; then
+	rm -f "${upper}"
+	mkdir -p "${upper}"
+fi
+
+rm -rf "${BASE_DIR}/run"
+mkdir -p "${work}"
+mkdir -p "${target}"
+
+fuse-overlayfs -o lowerdir="${lower}",upperdir="${upper}",workdir="${work}" "${target}"
+trap "popd; fusermount3 -u ${target}" EXIT
+
+export HOME="${BASE_DIR}/run/cart"
 unset XDG_CONFIG_HOME
 unset XDG_CACHE_HOME
 unset XDG_DATA_HOME
 unset XDG_STATE_HOME
-cd "${HOME}"
-./0run
-poweroff
+pushd "${HOME}"
+
+cart_exec="$(get_attribute ${cart_info} 'Exec')"
+cart_gsopts="$(get_attribute ${cart_info} 'GamescopeOptions')"
+gamescope ${cart_gsopts} -- ${cart_exec}

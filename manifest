@@ -60,8 +60,11 @@ postinstallhook() {
 	sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //g' /etc/sudoers
 
 	# Disable SPDIF/IEC958 audio output
-	sudo sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
+	sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
 
 	# Set a default timezone, FNA/XNA (and probably others) need it
 	ln -s /usr/share/zoneinfo/UTC /etc/localtime
+
+	mkdir -p /home/${USERNAME}/.local/share
+	ln -s /var/zero /home/${USERNAME}/.local/share/zero
 }

@@ -2,5 +2,5 @@
 Encoding=UTF-8
 Name=Zero
 Comment=Zero session
-Exec=/usr/bin/zero
+Exec=/usr/bin/zero-session
 Type=Application

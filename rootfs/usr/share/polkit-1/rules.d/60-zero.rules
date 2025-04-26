@@ -1,5 +1,0 @@
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.policykit.exec" && subject.isInGroup("wheel") && action.lookup("program") == "/usr/bin/zero-load-memory") {
-        return polkit.Result.YES;
-    }
-});
