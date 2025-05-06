@@ -68,5 +68,8 @@ postinstallhook() {
 	ln -s /usr/share/zoneinfo/UTC /etc/localtime
 
 	mkdir -p /home/${USERNAME}/.local/share
+	mkdir -p /var/kazeta
+	chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+	chown -R ${USERNAME}:${USERNAME} /var/kazeta
 	ln -s /var/kazeta /home/${USERNAME}/.local/share/kazeta
 }
