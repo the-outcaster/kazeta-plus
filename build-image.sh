@@ -172,9 +172,8 @@ Subsystem	sftp	/usr/lib/ssh/sftp-server
 " > /etc/ssh/sshd_config
 
 echo "
-LABEL=frzr_root /var       btrfs     defaults,subvolid=256,rw,noatime,nodatacow,nofail                                                                                                                                                                                                                      0   0
-LABEL=kazeta_cart  /var/kazeta/ext/cart auto      defaults,ro,noatime,nofail     0   1
-LABEL=frzr_root /frzr_root btrfs     defaults,subvolid=5,rw,noatime,nodatacow,x-initrd.mount                                                                                                                                                                                                                0   2
+LABEL=frzr_root /var       btrfs defaults,subvol=var,rw,noatime,nodatacow 0 0
+LABEL=frzr_root /frzr_root btrfs defaults,subvol=/,rw,noatime,nodatacow 0 0
 " > /etc/fstab
 
 echo "

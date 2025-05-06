@@ -38,6 +38,7 @@ export AUR_PACKAGES="\
 	downgrade \
 	frzr \
 	pikaur \
+	udev-media-automount \
 "
 
 export SERVICES="\
