@@ -16,6 +16,7 @@ export PACKAGES="\
 	accountsservice \
 	fuse2 \
 	fuse3 \
+	fuse-overlayfs \
 	gamescope \
 	htop \
 	inputplumber \
