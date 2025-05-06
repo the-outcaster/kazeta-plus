@@ -1,10 +1,13 @@
 #! /bin/bash
 
-set -x
-
 BASE_DIR="$HOME/.local/share/kazeta"
 if [[ ! -d "${BASE_DIR}" ]]; then
 	mkdir -p "${BASE_DIR}"
+fi
+
+BASE_EXT="/run/media/${USER}"
+if [[ ! -d "${BASE_EXT}" ]]; then
+	BASE_EXT="/run/media"
 fi
 
 function get_attribute {
@@ -13,11 +16,182 @@ function get_attribute {
 	cat ${info_file} | grep "^${attribute}=" | head -1 | cut -d= -f2-
 }
 
-cart_path="$1"
-cart_info="${cart_path}/info.kzi"
+function device_list {
+	echo "internal"
+	for dir in "${BASE_EXT}"/*; do
+		if [[ -d "${dir}" ]]; then
+			echo $(basename "${dir}")
+		fi
+	done
+}
 
-if [[ ! -f ${cart_info} ]]; then
-	echo "Cart metadata info file not found at ${cart_info}"
+function get_save_dir_from_drive_name {
+	DRIVE_NAME="$1"
+	if [[ ${DRIVE_NAME} == "internal" ]] || [[ -z ${DRIVE_NAME} ]]; then
+		SAVE_DIR="${BASE_DIR}/saves/default"
+	else
+		if [[ ! -d "${BASE_EXT}/${DRIVE_NAME}" ]]; then
+			>&2 echo "No such device: ${DRIVE_NAME}"
+			exit 1
+		fi
+
+		SAVE_DIR="${BASE_EXT}/${DRIVE_NAME}/kazeta/saves"
+	fi
+
+	if [[ ! -d "${SAVE_DIR}" ]]; then
+		mkdir -p "${SAVE_DIR}" &> /dev/null
+	fi
+
+	echo "${SAVE_DIR}"
+}
+
+function get_cache_dir_from_drive_name {
+	DRIVE_NAME="$1"
+	if [[ ${DRIVE_NAME} == "internal" ]] || [[ -z ${DRIVE_NAME} ]]; then
+		CACHE_DIR="${BASE_DIR}/cache"
+	else
+		if [[ ! -d "${BASE_EXT}/${DRIVE_NAME}" ]]; then
+			>&2 echo "No such device: ${DRIVE_NAME}"
+			exit 1
+		fi
+
+		CACHE_DIR="${BASE_EXT}/${DRIVE_NAME}/kazeta/cache"
+	fi
+
+	if [[ ! -d "${CACHE_DIR}" ]]; then
+		mkdir -p "${CACHE_DIR}" &> /dev/null
+	fi
+
+	echo "${CACHE_DIR}"
+}
+
+function save_list {
+	SAVE_DIR=$(get_save_dir_from_drive_name "$1")
+	ls -1 "${SAVE_DIR}" | sed 's/.kzs$//'
+}
+
+function save_details {
+	SAVE_DIR=$(get_save_dir_from_drive_name "$1")
+	CACHE_DIR=$(get_cache_dir_from_drive_name "$1")
+
+	for entry in "${SAVE_DIR}"/*; do
+		cart_id=$(basename "${entry}" | sed 's/.kzs$//')
+		if [[ -e "${entry}" ]]; then
+			name=$(get_attribute "${CACHE_DIR}/${cart_id}/metadata.kzi" 'Name')
+			icon="${CACHE_DIR}/${cart_id}/icon.png"
+			echo "${cart_id}:::${name}:::${icon}"
+		fi
+	done
+}
+
+function save_copy {
+	CART_ID="$1"
+	FROM_DRIVE="$2"
+	TO_DRIVE="$3"
+
+	FROM_DIR=$(get_save_dir_from_drive_name "${FROM_DRIVE}")
+	TO_DIR=$(get_save_dir_from_drive_name "${TO_DRIVE}")
+	FROM_CACHE=$(get_cache_dir_from_drive_name "${FROM_DRIVE}")
+	TO_CACHE=$(get_cache_dir_from_drive_name "${TO_DRIVE}")
+
+	if [[ "${FROM_DRIVE}" == "${TO_DRIVE}" ]]; then
+		echo "ERROR: Cannot copy to same location"
+		exit 1
+	fi
+
+	if [[ ! -e "${FROM_DIR}/${CART_ID}" ]] && [[ ! -e "${FROM_DIR}/${CART_ID}.kzs" ]]; then
+		echo "ERROR: Save file for ${CART_ID} does not exist on '${FROM_DRIVE}' drive"
+		exit 1
+	fi
+
+	if [[ -e "${TO_DIR}/${CART_ID}" ]] || [[ -e "${TO_DIR}/${CART_ID}.kzs" ]]; then
+		echo "ERROR: Save file for ${CART_ID} already exists on '${TO_DRIVE}'"
+		exit 1
+	fi
+
+	if [[ "${FROM_DRIVE}" == "internal" ]]; then
+		tar c --exclude='./.cache' --directory="${FROM_DIR}/${CART_ID}" . | \
+		pv --progress --numeric --direct-io --output "${TO_DIR}/${CART_ID}.kzs" \
+			--size $(du --bytes --summarize "${FROM_DIR}/${CART_ID}" | cut -f1)
+	elif [[ "${TO_DRIVE}" == "internal" ]]; then
+		mkdir -p "${TO_DIR}/${CART_ID}"
+		cat "${FROM_DIR}/${CART_ID}.kzs" | pv --progress --numeric \
+			--size $(du --bytes --summarize "${FROM_DIR}/${CART_ID}.kzs" | cut -f1) | \
+		tar xf - --directory="${TO_DIR}/${CART_ID}"
+	else
+		cat "${FROM_DIR}/${CART_ID}.kzs" | pv --progress --numeric --direct-io --output "${TO_DIR}/${CART_ID}.kzs" \
+			--size $(du --bytes --summarize "${FROM_DIR}/${CART_ID}.kzs" | cut -f1)
+	fi
+
+	rm -rf "${TO_CACHE}/${CART_ID}"
+	mkdir -p "${TO_CACHE}/${CART_ID}"
+	cat "${FROM_CACHE}/${CART_ID}/metadata.kzi" | pv --quiet --direct-io --output "${TO_CACHE}/${CART_ID}/metadata.kzi"
+	cat "${FROM_CACHE}/${CART_ID}/icon.png" | pv --quiet --direct-io --output "${TO_CACHE}/${CART_ID}/icon.png"
+}
+
+function save_delete {
+	CART_ID="$1"
+	FROM_DRIVE="$2"
+
+	FROM_DIR=$(get_save_dir_from_drive_name "${FROM_DRIVE}")
+	FROM_CACHE=$(get_cache_dir_from_drive_name "${FROM_DRIVE}")
+
+	if [[ ! -e "${FROM_DIR}/${CART_ID}" ]] && [[ ! -e "${FROM_DIR}/${CART_ID}.kzs" ]]; then
+		echo "ERROR: Save file for ${CART_ID} does not exist on '${FROM_DRIVE}' drive"
+		exit 1
+	fi
+
+	if [[ "${FROM_DRIVE}" == "internal" ]]; then
+		rm -rf "${FROM_DIR}/${CART_ID}"
+	else
+		rm -f "${FROM_DIR}/${CART_ID}.kzs"
+	fi
+
+	rm -rf "${FROM_CACHE}/${CART_ID}"
+}
+
+
+if [[ "$1" == "device" ]]; then
+	case "$2" in
+		"list")
+			shift 2
+			device_list "$1"
+			;;
+	esac
+	exit 0;
+fi
+
+if [[ "$1" == "save" ]]; then
+	case "$2" in
+		"list")
+			shift 2
+			save_list "$1"
+			;;
+		"details")
+			shift 2
+			save_details "$1"
+			;;
+		"copy")
+			shift 2
+			save_copy "$1" "$2" "$3"
+			;;
+		"delete")
+			shift 2
+			save_delete "$1" "$2"
+			;;
+	esac
+	exit 0;
+fi
+
+
+
+
+
+cart_info=$(find /run/media -maxdepth 3 -name "*.kzi" | head -1)
+cart_path=$(dirname "${cart_info}")
+
+if [[ ! -f "${cart_info}" ]]; then
+	echo "No cart found"
 	exit 1
 fi
 
@@ -25,13 +199,13 @@ cart_id="$(get_attribute ${cart_info} 'Id')"
 cart_icon="${cart_path}/$(get_attribute ${cart_info} 'Icon')"
 
 mkdir -p "${BASE_DIR}/cache/${cart_id}"
-cp ${cart_info} "${BASE_DIR}/cache/${cart_id}/"
+cp ${cart_info} "${BASE_DIR}/cache/${cart_id}/metadata.kzi"
 if [[ -f "${cart_icon}" ]]; then
 	cp "${cart_icon}" "${BASE_DIR}/cache/${cart_id}/icon.png"
 fi
 
 lower="${cart_path}"
-upper="${BASE_DIR}/data/${cart_id}"
+upper="${BASE_DIR}/saves/default/${cart_id}"
 work="${BASE_DIR}/run/work"
 target="${BASE_DIR}/run/cart"
 
