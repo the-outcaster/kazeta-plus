@@ -5,9 +5,13 @@ if [[ ! -d "${BASE_DIR}" ]]; then
 	mkdir -p "${BASE_DIR}"
 fi
 
-BASE_EXT="/run/media/${USER}"
-if [[ ! -d "${BASE_EXT}" ]]; then
-	BASE_EXT="/run/media"
+BASE_EXT="/media"
+result=$(ls -1 /media | wc -l)
+if [[ "$result" == "0" ]]; then
+	BASE_EXT="/run/media/${USER}"
+	if [[ ! -d "${BASE_EXT}" ]]; then
+		BASE_EXT="/run/media"
+	fi
 fi
 
 function get_attribute {
@@ -187,7 +191,7 @@ fi
 
 
 
-cart_info=$(find /run/media -maxdepth 3 -name "*.kzi" | head -1)
+cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
 cart_path=$(dirname "${cart_info}")
 
 if [[ ! -f "${cart_info}" ]]; then
