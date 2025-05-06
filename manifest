@@ -67,9 +67,13 @@ postinstallhook() {
 	# Set a default timezone, FNA/XNA (and probably others) need it
 	ln -s /usr/share/zoneinfo/UTC /etc/localtime
 
+	# Create necessary directories and set permissions
 	mkdir -p /home/${USERNAME}/.local/share
 	mkdir -p /var/kazeta
 	chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 	chown -R ${USERNAME}:${USERNAME} /var/kazeta
 	ln -s /var/kazeta /home/${USERNAME}/.local/share/kazeta
+
+	# Automount storage to /run/media
+	sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
 }
