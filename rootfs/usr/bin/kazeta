@@ -17,7 +17,7 @@ fi
 function get_attribute {
 	info_file="$1"
 	attribute=$2
-	cat ${info_file} | grep "^${attribute}=" | head -1 | cut -d= -f2-
+	cat "${info_file}" | grep "^${attribute}=" | head -1 | cut -d= -f2-
 }
 
 function device_list {
