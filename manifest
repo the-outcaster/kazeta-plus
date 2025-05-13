@@ -45,8 +45,6 @@ export AUR_PACKAGES="\
 	frzr \
 	pikaur \
 	udev-media-automount \
-	xone-dkms-git \
-	xone-dongle-firmware \
 "
 
 export SERVICES="\
