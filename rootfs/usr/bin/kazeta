@@ -83,7 +83,12 @@ function save_details {
 		if [[ -e "${entry}" ]]; then
 			name=$(get_attribute "${CACHE_DIR}/${cart_id}/metadata.kzi" 'Name')
 			icon="${CACHE_DIR}/${cart_id}/icon.png"
-			echo "${cart_id}:::${name}:::${icon}"
+			if [[ -f "${SAVE_DIR}/${cart_id}.kzs" ]]; then
+				size=$(du --summarize -m "${SAVE_DIR}/${cart_id}.kzs" | cut -f1)
+			else
+				size=$(du --exclude="${SAVE_DIR}/${cart_id}/.cache" --summarize -m "${SAVE_DIR}/${cart_id}" | cut -f1)
+			fi
+			echo "${cart_id}:::${name}:::${icon}:::${size}"
 		fi
 	done
 }
