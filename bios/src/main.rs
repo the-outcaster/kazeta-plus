@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::io::{BufRead, BufReader};
 use std::thread;
 use std::time;
+use std::collections::HashMap;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -37,7 +38,6 @@ fn window_conf() -> Conf {
 struct Memory {
     id: String,
     name: Option<String>,
-    icon: Option<Texture2D>,
     size: u16,
 }
 
@@ -124,7 +124,7 @@ async fn remove_memory(memory: &Memory, from_media: &StorageMedia) {
     .unwrap();
 }
 
-async fn load_memories(media: &StorageMedia) -> Vec<Memory> {
+async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>) -> Vec<Memory> {
     let mut memories = Vec::new();
 
     let results = Command::new(KAZETA_BIN)
@@ -141,13 +141,16 @@ async fn load_memories(media: &StorageMedia) -> Vec<Memory> {
 
         let cart_id = parts[0].trim().to_string();
         let name = parts[1].trim().to_string();
-        let icon = parts[2].trim().to_string();
+        let icon_path = parts[2].trim().to_string();
         let size = parts[3].trim().to_string().parse::<u16>().unwrap();
+
+        if !cache.contains_key(&cart_id) {
+            cache.insert(cart_id.clone(), load_texture(&icon_path).await.unwrap());
+        }
 
         let m = Memory {
             id: cart_id,
             name: Some(name),
-            icon: load_texture(&icon).await.ok(), // TODO: use a cache so we don't reload every time
             size: size,
         };
         memories.push(m);
@@ -191,6 +194,7 @@ async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
     let font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
     let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
+    let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
 
 
     let ctx : DrawContext = DrawContext {
@@ -210,7 +214,7 @@ async fn main() {
     }
 
     let mut selected_media = 0;
-    let mut memories = load_memories(&media[selected_media]).await;
+    let mut memories = load_memories(&media[selected_media], &mut icon_cache).await;
     let mut selected_memory = 0;
 
     let copy_op_state = Arc::new(Mutex::new(CopyOperationState {
@@ -287,7 +291,7 @@ async fn main() {
                             continue;
                         };
 
-                        let Some(icon) = &mem.icon  else {
+                        let Some(icon) = icon_cache.get(&mem.id) else {
                             continue;
                         };
 
@@ -340,7 +344,7 @@ async fn main() {
 
                 if is_key_pressed(KeyCode::Tab) {
                     selected_media = (selected_media + 1) % media.len();
-                    memories = load_memories(&media[selected_media]).await;
+                    memories = load_memories(&media[selected_media], &mut icon_cache).await;
                 }
 
                 if is_key_pressed(KeyCode::Enter) {
@@ -367,7 +371,7 @@ async fn main() {
 
                 // draw game icon and name
                 if let Some(mem) = memories.get(selected_memory) {
-                    if let Some(icon) = &mem.icon {
+                    if let Some(icon) = icon_cache.get(&mem.id) {
                         let params = DrawTextureParams {
                             dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
                             source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
@@ -468,7 +472,7 @@ async fn main() {
                                 dialogs.clear();
                             } else if selected_option.text == "DELETE" {
                                 remove_memory(&memories[selected_memory], &media[selected_media]).await;
-                                memories = load_memories(&media[selected_media]).await;
+                                memories = load_memories(&media[selected_media], &mut icon_cache).await;
                                 dialogs.clear();
                             }
                         } else if dialog.id == "copy_storage_select" {
