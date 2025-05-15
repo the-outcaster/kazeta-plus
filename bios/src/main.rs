@@ -46,10 +46,16 @@ struct StorageMedia {
     id: String,
 }
 
+#[derive(Clone, Debug)]
+struct DialogOption {
+    text: String,
+    disabled: bool,
+}
+
 struct Dialog {
     id: String,
     desc: Option<String>,
-    options: Vec<String>,
+    options: Vec<DialogOption>,
     selection: usize,
 }
 
@@ -164,6 +170,21 @@ fn text(ctx : &DrawContext, text : &str, x : f32, y: f32) {
     });
 }
 
+fn text_disabled(ctx : &DrawContext, text : &str, x : f32, y: f32) {
+    draw_text_ex(&text.to_uppercase(), x+1.0, y+1.0, TextParams {
+        font: Some(&ctx.font),
+        font_size: FONT_SIZE,
+        color: Color {r:0.0, g:0.0, b:0.0, a:0.4},
+        ..Default::default()
+    });
+    draw_text_ex(&text.to_uppercase(), x, y, TextParams {
+        font: Some(&ctx.font),
+        font_size: FONT_SIZE,
+        color: Color {r:0.5, g:0.5, b:0.5, a:0.5},
+        ..Default::default()
+    });
+}
+
 
 #[macroquad::main(window_conf)]
 async fn main() {
@@ -191,7 +212,6 @@ async fn main() {
     let mut selected_media = 0;
     let mut memories = load_memories(&media[selected_media]).await;
     let mut selected_memory = 0;
-
 
     let copy_op_state = Arc::new(Mutex::new(CopyOperationState {
         progress: 0,
@@ -325,7 +345,14 @@ async fn main() {
 
                 if is_key_pressed(KeyCode::Enter) {
                     if let Some(_) = memories.get(selected_memory) {
-                        dialogs.push(Dialog { id: "main".to_string(), desc: None, options: vec![ "COPY".to_string(), "DELETE".to_string(), "CANCEL".to_string() ], selection: 0 });
+                        // Check if there are any external devices to copy to
+                        let has_external_devices = media.len() > 1;
+                        let options = vec![
+                            DialogOption { text: "COPY".to_string(), disabled: !has_external_devices },
+                            DialogOption { text: "DELETE".to_string(), disabled: false },
+                            DialogOption { text: "CANCEL".to_string(), disabled: false },
+                        ];
+                        dialogs.push(Dialog { id: "main".to_string(), desc: None, options: options, selection: 0 });
                     }
                 }
             },
@@ -383,7 +410,11 @@ async fn main() {
                     }
 
                     for (i, option) in dialog.options.iter().enumerate() {
-                        text(&ctx, &option, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+                        if option.disabled {
+                            text_disabled(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+                        } else {
+                            text(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+                        }
                     }
 
                     draw_rectangle_lines((FONT_SIZE*3) as f32, (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32, (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32, 1.2*FONT_SIZE as f32, 4.0, Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
@@ -401,40 +432,53 @@ async fn main() {
                     dialog.selection = selection as usize % dialog.options.len();
 
 
-                    if is_key_pressed(KeyCode::Enter) {
+                    let selected_option = &dialog.options[dialog.selection];
+                    if is_key_pressed(KeyCode::Enter) && !selected_option.disabled {
                         if dialog.id == "main" {
-                            if dialog.options[dialog.selection] == "COPY" {
+                            if selected_option.text == "COPY" {
                                 let mut options = Vec::new();
                                 for drive in media.iter() {
                                     if drive.id == media[selected_media].id {
                                         continue;
                                     }
-                                    options.push(drive.id.clone());
+                                    options.push(DialogOption { text: drive.id.clone(), disabled: false });
                                 }
-                                options.push("CANCEL".to_string());
-                                dialogs.push(Dialog { id: "copy_storage_select".to_string(), desc: Some("COPY TO WHERE?".to_string()), options: options, selection: 0 });
-                            } else if dialog.options[dialog.selection] == "DELETE" {
-                                dialogs.push(Dialog { id: "confirm_delete".to_string(), desc: Some("CONFIRM DELETE?".to_string()), options: vec![ "DELETE".to_string(), "CANCEL".to_string() ], selection: 1 });
-
-                            } else if dialog.options[dialog.selection] == "CANCEL" {
+                                options.push(DialogOption { text: "CANCEL".to_string(), disabled: false });
+                                dialogs.push(Dialog {
+                                    id: "copy_storage_select".to_string(),
+                                    desc: Some("COPY TO WHERE?".to_string()),
+                                    options: options,
+                                    selection: 0
+                                });
+                            } else if selected_option.text == "DELETE" {
+                                dialogs.push(Dialog {
+                                    id: "confirm_delete".to_string(),
+                                    desc: Some("CONFIRM DELETE?".to_string()),
+                                    options: vec![
+                                        DialogOption { text: "DELETE".to_string(), disabled: false },
+                                        DialogOption { text: "CANCEL".to_string(), disabled: false }
+                                    ],
+                                    selection: 1
+                                });
+                            } else if selected_option.text == "CANCEL" {
                                 dialogs.pop();
                             }
                         } else if dialog.id == "confirm_delete" {
-                            if dialog.options[dialog.selection] == "CANCEL" {
+                            if selected_option.text == "CANCEL" {
                                 dialogs.clear();
-                            } else if dialog.options[dialog.selection] == "DELETE" {
+                            } else if selected_option.text == "DELETE" {
                                 remove_memory(&memories[selected_memory], &media[selected_media]).await;
                                 memories = load_memories(&media[selected_media]).await;
                                 dialogs.clear();
                             }
                         } else if dialog.id == "copy_storage_select" {
-                            if dialog.options[dialog.selection] == "CANCEL" {
+                            if selected_option.text == "CANCEL" {
                                 dialogs.clear();
                             } else {
                                 let thread_state = copy_op_state.clone();
                                 let mem = memories[selected_memory].clone();
                                 let from_media = media[selected_media].clone();
-                                let to_media = StorageMedia { id: dialog.options[dialog.selection].clone() };
+                                let to_media = StorageMedia { id: selected_option.text.clone() };
                                 thread::spawn(move || {
                                     copy_memory(&mem, &from_media, &to_media, thread_state);
                                 });
