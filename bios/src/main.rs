@@ -188,6 +188,53 @@ fn text_disabled(ctx : &DrawContext, text : &str, x : f32, y: f32) {
     });
 }
 
+#[derive(Clone, Debug)]
+struct StorageMediaState {
+    media: Vec<StorageMedia>,
+    selected: usize,
+    needs_memory_refresh: bool,
+}
+
+impl StorageMediaState {
+    fn new() -> Self {
+        StorageMediaState {
+            media: Vec::new(),
+            selected: 0,
+            needs_memory_refresh: false,
+        }
+    }
+
+    fn update_media(&mut self) {
+        let device_list_raw = Command::new(KAZETA_BIN)
+            .args([ "device", "list" ])
+            .output()
+            .unwrap();
+
+        let mut new_media = Vec::new();
+        for device in String::from_utf8(device_list_raw.stdout).unwrap().lines() {
+            let storage = StorageMedia { id: device.to_string() };
+            new_media.push(storage);
+        }
+
+        // Done if media list has not changed
+        if self.media.len() == new_media.len() &&
+           !self.media.iter().zip(new_media.iter()).any(|(a, b)| a.id != b.id) {
+            return;
+        }
+
+        // Try to keep the same device selected if it still exists
+        let mut new_pos = 0;
+        if let Some(old_selected_media) = self.media.get(self.selected) {
+            if let Some(pos) = new_media.iter().position(|m| m.id == old_selected_media.id) {
+                new_pos = pos;
+            }
+        }
+
+        self.selected = new_pos;
+        self.media = new_media;
+        self.needs_memory_refresh = true;
+    }
+}
 
 #[macroquad::main(window_conf)]
 async fn main() {
@@ -201,20 +248,26 @@ async fn main() {
         font: font,
     };
 
-    let mut media = Vec::new();
+    // Create thread-safe storage media state
+    let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
 
-    let device_list_raw = Command::new(KAZETA_BIN)
-        .args([ "device", "list" ])
-        .output()
-        .unwrap();
+    // Initialize storage media list
+    if let Ok(mut state) = storage_state.lock() {
+        state.update_media();
+    };
 
-    for (_, device) in String::from_utf8(device_list_raw.stdout).unwrap().lines().enumerate() {
-        let storage = StorageMedia { id: device.to_string() };
-        media.push(storage);
-    }
+    // Spawn background thread for storage media detection
+    let thread_storage_state = storage_state.clone();
+    thread::spawn(move || {
+        loop {
+            thread::sleep(time::Duration::from_secs(1));
+            if let Ok(mut state) = thread_storage_state.lock() {
+                state.update_media();
+            }
+        }
+    });
 
-    let mut selected_media = 0;
-    let mut memories = load_memories(&media[selected_media], &mut icon_cache).await;
+    let mut memories = Vec::new();
     let mut selected_memory = 0;
 
     let copy_op_state = Arc::new(Mutex::new(CopyOperationState {
@@ -272,6 +325,19 @@ async fn main() {
             tg_color = color_targets[target].clone();
         }
 
+        // Check if memories need to be refreshed due to storage media changes
+        if let Ok(mut state) = storage_state.lock() {
+            if state.needs_memory_refresh {
+                if !state.media.is_empty() {
+                    memories = load_memories(&state.media[state.selected], &mut icon_cache).await;
+                } else {
+                    memories = Vec::new();
+                }
+                state.needs_memory_refresh = false;
+                dialogs.clear();
+            }
+        }
+
         match dialogs.last_mut() {
             None => {
                 let xp = (selected_memory % GRID_WIDTH) as f32;
@@ -317,8 +383,12 @@ async fn main() {
                 draw_rectangle( 16.0,16.0, 608.0, 36.0, UI_BG_COLOR);
                 draw_rectangle_lines(16.0-4.0, 16.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
 
-                text(&ctx, &media[selected_media].id, 18.0, 33.0);
-                text(&ctx, "1 / 512 GB", 18.0, 49.0);
+                if let Ok(state) = storage_state.lock() {
+                    if !state.media.is_empty() {
+                        text(&ctx, &state.media[state.selected].id, 18.0, 33.0);
+                        text(&ctx, "1 / 512 GB", 18.0, 49.0);
+                    }
+                }
 
                 if let Some(selected_mem) = memories.get(selected_memory) {
                     let desc = match selected_mem.name.clone() {
@@ -343,28 +413,36 @@ async fn main() {
                 }
 
                 if is_key_pressed(KeyCode::Tab) {
-                    selected_media = (selected_media + 1) % media.len();
-                    memories = load_memories(&media[selected_media], &mut icon_cache).await;
+                    if let Ok(mut state) = storage_state.lock() {
+                        if state.media.len() > 1 {
+                            state.selected = (state.selected + 1) % state.media.len();
+                            memories = load_memories(&state.media[state.selected], &mut icon_cache).await;
+                        }
+                    }
                 }
 
                 if is_key_pressed(KeyCode::Enter) {
                     if let Some(_) = memories.get(selected_memory) {
-                        // Check if there are any external devices to copy to
-                        let has_external_devices = media.len() > 1;
-                        let options = vec![
-                            DialogOption { text: "COPY".to_string(), disabled: !has_external_devices },
-                            DialogOption { text: "DELETE".to_string(), disabled: false },
-                            DialogOption { text: "CANCEL".to_string(), disabled: false },
-                        ];
-                        dialogs.push(Dialog { id: "main".to_string(), desc: None, options: options, selection: 0 });
+                        if let Ok(state) = storage_state.lock() {
+                            let has_external_devices = state.media.len() > 1;
+                            let options = vec![
+                                DialogOption { text: "COPY".to_string(), disabled: !has_external_devices },
+                                DialogOption { text: "DELETE".to_string(), disabled: false },
+                                DialogOption { text: "CANCEL".to_string(), disabled: false },
+                            ];
+                            dialogs.push(Dialog { id: "main".to_string(), desc: None, options: options, selection: 0 });
+                        }
                     }
                 }
             },
             Some(dialog) => {
 
                 let (copy_progress, copy_running, _copy_done) = {
-                    let state = copy_op_state.lock().unwrap();
-                    (state.progress, state.running, state.done)
+                    if let Ok(state) = copy_op_state.lock() {
+                        (state.progress, state.running, state.done)
+                    } else {
+                        (0, false, false)
+                    }
                 };
 
                 draw_rectangle( 0.0,0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
@@ -441,11 +519,13 @@ async fn main() {
                         if dialog.id == "main" {
                             if selected_option.text == "COPY" {
                                 let mut options = Vec::new();
-                                for drive in media.iter() {
-                                    if drive.id == media[selected_media].id {
-                                        continue;
+                                if let Ok(state) = storage_state.lock() {
+                                    for drive in state.media.iter() {
+                                        if drive.id == state.media[state.selected].id {
+                                            continue;
+                                        }
+                                        options.push(DialogOption { text: drive.id.clone(), disabled: false });
                                     }
-                                    options.push(DialogOption { text: drive.id.clone(), disabled: false });
                                 }
                                 options.push(DialogOption { text: "CANCEL".to_string(), disabled: false });
                                 dialogs.push(Dialog {
@@ -471,8 +551,10 @@ async fn main() {
                             if selected_option.text == "CANCEL" {
                                 dialogs.clear();
                             } else if selected_option.text == "DELETE" {
-                                remove_memory(&memories[selected_memory], &media[selected_media]).await;
-                                memories = load_memories(&media[selected_media], &mut icon_cache).await;
+                                if let Ok(state) = storage_state.lock() {
+                                    remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache).await;
+                                }
                                 dialogs.clear();
                             }
                         } else if dialog.id == "copy_storage_select" {
@@ -481,11 +563,13 @@ async fn main() {
                             } else {
                                 let thread_state = copy_op_state.clone();
                                 let mem = memories[selected_memory].clone();
-                                let from_media = media[selected_media].clone();
-                                let to_media = StorageMedia { id: selected_option.text.clone() };
-                                thread::spawn(move || {
-                                    copy_memory(&mem, &from_media, &to_media, thread_state);
-                                });
+                                if let Ok(state) = storage_state.lock() {
+                                    let from_media = state.media[state.selected].clone();
+                                    let to_media = StorageMedia { id: selected_option.text.clone() };
+                                    thread::spawn(move || {
+                                        copy_memory(&mem, &from_media, &to_media, thread_state);
+                                    });
+                                }
                             }
                         }
                     }
