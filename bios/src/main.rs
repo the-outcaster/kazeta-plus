@@ -124,7 +124,7 @@ async fn remove_memory(memory: &Memory, from_media: &StorageMedia) {
     .unwrap();
 }
 
-async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>) -> Vec<Memory> {
+async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>, queue: &mut Vec<(String, String)>) -> Vec<Memory> {
     let mut memories = Vec::new();
 
     let results = Command::new(KAZETA_BIN)
@@ -145,7 +145,7 @@ async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture
         let size = parts[3].trim().to_string().parse::<u16>().unwrap();
 
         if !cache.contains_key(&cart_id) {
-            cache.insert(cart_id.clone(), load_texture(&icon_path).await.unwrap());
+            queue.push((cart_id.clone(), icon_path.clone()));
         }
 
         let m = Memory {
@@ -242,6 +242,7 @@ async fn main() {
     let font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
     let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
+    let mut icon_queue: Vec<(String, String)> = Vec::new();
 
 
     let ctx : DrawContext = DrawContext {
@@ -329,7 +330,7 @@ async fn main() {
         if let Ok(mut state) = storage_state.lock() {
             if state.needs_memory_refresh {
                 if !state.media.is_empty() {
-                    memories = load_memories(&state.media[state.selected], &mut icon_cache).await;
+                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                 } else {
                     memories = Vec::new();
                 }
@@ -416,7 +417,7 @@ async fn main() {
                     if let Ok(mut state) = storage_state.lock() {
                         if state.media.len() > 1 {
                             state.selected = (state.selected + 1) % state.media.len();
-                            memories = load_memories(&state.media[state.selected], &mut icon_cache).await;
+                            memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                         }
                     }
                 }
@@ -553,7 +554,7 @@ async fn main() {
                             } else if selected_option.text == "DELETE" {
                                 if let Ok(state) = storage_state.lock() {
                                     remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
-                                    memories = load_memories(&state.media[state.selected], &mut icon_cache).await;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                 }
                                 dialogs.clear();
                             }
@@ -576,6 +577,13 @@ async fn main() {
                 }
             },
         };
+
+        if !icon_queue.is_empty() {
+            let (cart_id, icon_path) = icon_queue.remove(0);
+            if let Ok(texture) = load_texture(&icon_path).await {
+                icon_cache.insert(cart_id.clone(), texture);
+            }
+        }
 
         next_frame().await
     }
