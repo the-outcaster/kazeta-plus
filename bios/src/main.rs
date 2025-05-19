@@ -460,7 +460,7 @@ fn render_dialog(
         }
     };
 
-    draw_rectangle( 0.0,0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
 
     // draw game icon and name
     let memory_index = get_memory_index(selected_memory, scroll_offset);
@@ -504,18 +504,50 @@ fn render_dialog(
         );
     } else {
         if let Some(desc) = dialog.desc.clone() {
-            text(&ctx, &desc, 10.0, (FONT_SIZE*5) as f32);
+            text(&ctx, &desc, (FONT_SIZE*5) as f32, (FONT_SIZE*5) as f32);
         }
 
+        // Find the longest option text for centering
+        let longest_option = dialog.options.iter()
+            .map(|opt| opt.text.len())
+            .max()
+            .unwrap_or(0);
+
+        // Calculate the width of the longest option in pixels
+        let longest_width = measure_text(&dialog.options.iter()
+            .find(|opt| opt.text.len() == longest_option)
+            .map(|opt| opt.text.to_uppercase())
+            .unwrap_or_default(),
+            Some(&ctx.font),
+            FONT_SIZE,
+            1.0).width;
+
+        // Calculate the starting X position to center all options
+        let options_start_x = (SCREEN_WIDTH as f32 - longest_width) / 2.0;
+
+        // Add padding to the selection rectangle
+        const SELECTION_PADDING_X: f32 = 16.0;  // Padding on each side
+        const SELECTION_PADDING_Y: f32 = 4.0;   // Padding on top and bottom
+
         for (i, option) in dialog.options.iter().enumerate() {
+            let y_pos = (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32;
             if option.disabled {
-                text_disabled(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+                text_disabled(&ctx, &option.text, options_start_x, y_pos);
             } else {
-                text(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+                text(&ctx, &option.text, options_start_x, y_pos);
             }
         }
 
-        draw_rectangle_lines((FONT_SIZE*3) as f32, (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32, (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32, 1.2*FONT_SIZE as f32, 4.0, Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
+        // Draw selection rectangle with padding
+        let selection_y = (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
+        draw_rectangle_lines(
+            options_start_x - SELECTION_PADDING_X,
+            selection_y - SELECTION_PADDING_Y,
+            longest_width + (SELECTION_PADDING_X * 2.0),
+            1.2*FONT_SIZE as f32 + (SELECTION_PADDING_Y * 2.0),
+            4.0,
+            Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+        );
     }
 }
 
