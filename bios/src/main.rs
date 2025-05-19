@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::thread;
 use std::time;
 use std::collections::HashMap;
+use gilrs::{Gilrs, Button, Axis};
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -68,6 +69,99 @@ struct CopyOperationState {
 
 struct DrawContext {
     font: Font,
+}
+
+struct InputState {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    select: bool,
+    next: bool,
+    prev: bool,
+    analog_was_neutral: bool,
+}
+
+impl InputState {
+    const ANALOG_DEADZONE: f32 = 0.5;  // Increased deadzone for less sensitivity
+
+    fn new() -> Self {
+        InputState {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            select: false,
+            next: false,
+            prev: false,
+            analog_was_neutral: true,
+        }
+    }
+
+    fn update_keyboard(&mut self) {
+        self.up = is_key_pressed(KeyCode::Up);
+        self.down = is_key_pressed(KeyCode::Down);
+        self.left = is_key_pressed(KeyCode::Left);
+        self.right = is_key_pressed(KeyCode::Right);
+        self.select = is_key_pressed(KeyCode::Enter);
+        self.next = is_key_pressed(KeyCode::Tab);
+        self.prev = false;  // No keyboard mapping for prev
+    }
+
+    fn update_controller(&mut self, gilrs: &mut Gilrs) {
+        // Handle button events
+        while let Some(ev) = gilrs.next_event() {
+            match ev.event {
+                gilrs::EventType::ButtonPressed(Button::DPadUp, _) => self.up = true,
+                gilrs::EventType::ButtonReleased(Button::DPadUp, _) => self.up = false,
+                gilrs::EventType::ButtonPressed(Button::DPadDown, _) => self.down = true,
+                gilrs::EventType::ButtonReleased(Button::DPadDown, _) => self.down = false,
+                gilrs::EventType::ButtonPressed(Button::DPadLeft, _) => self.left = true,
+                gilrs::EventType::ButtonReleased(Button::DPadLeft, _) => self.left = false,
+                gilrs::EventType::ButtonPressed(Button::DPadRight, _) => self.right = true,
+                gilrs::EventType::ButtonReleased(Button::DPadRight, _) => self.right = false,
+                gilrs::EventType::ButtonPressed(Button::South, _) => self.select = true,
+                gilrs::EventType::ButtonReleased(Button::South, _) => self.select = false,
+                gilrs::EventType::ButtonPressed(Button::RightTrigger, _) => self.next = true,
+                gilrs::EventType::ButtonReleased(Button::RightTrigger, _) => self.next = false,
+                gilrs::EventType::ButtonPressed(Button::LeftTrigger, _) => self.prev = true,
+                gilrs::EventType::ButtonReleased(Button::LeftTrigger, _) => self.prev = false,
+                _ => {}
+            }
+        }
+
+        // Handle analog stick input
+        for (_, gamepad) in gilrs.gamepads() {
+            let x = gamepad.value(Axis::LeftStickX);
+            let y = gamepad.value(Axis::LeftStickY);
+
+            // Apply deadzone to analog values
+            let apply_deadzone = |value: f32| {
+                if value.abs() < Self::ANALOG_DEADZONE {
+                    0.0
+                } else {
+                    value
+                }
+            };
+
+            let x = apply_deadzone(x);
+            let y = apply_deadzone(y);
+
+            // Check if stick is in neutral position
+            let is_neutral = x.abs() < Self::ANALOG_DEADZONE && y.abs() < Self::ANALOG_DEADZONE;
+
+            // Only trigger movement if stick was in neutral position last frame
+            if self.analog_was_neutral {
+                self.up = self.up || y > Self::ANALOG_DEADZONE;
+                self.down = self.down || y < -Self::ANALOG_DEADZONE;
+                self.left = self.left || x < -Self::ANALOG_DEADZONE;
+                self.right = self.right || x > Self::ANALOG_DEADZONE;
+            }
+
+            // Update neutral state for next frame
+            self.analog_was_neutral = is_neutral;
+        }
+    }
 }
 
 fn pixel_pos(v: f32) -> f32 {
@@ -519,6 +613,10 @@ async fn main() {
         font: font,
     };
 
+    // Initialize gamepad support
+    let mut gilrs = Gilrs::new().unwrap();
+    let mut input_state = InputState::new();
+
     // Create thread-safe storage media state
     let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
 
@@ -610,17 +708,21 @@ async fn main() {
         let mut action_dialog_id = String::new();
         let mut action_option_value = String::new();
 
+        // Update input state from both keyboard and controller
+        input_state.update_keyboard();
+        input_state.update_controller(&mut gilrs);
+
         match dialogs.last_mut() {
             None => {
                 render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, scroll_offset);
 
-                if is_key_pressed(KeyCode::Right) && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
+                if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                     selected_memory += 1;
                 }
-                if is_key_pressed(KeyCode::Left) && selected_memory >= 1 {
+                if input_state.left && selected_memory >= 1 {
                     selected_memory -= 1;
                 }
-                if is_key_pressed(KeyCode::Down) {
+                if input_state.down {
                     if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
                         selected_memory += GRID_WIDTH;
                     } else {
@@ -631,7 +733,7 @@ async fn main() {
                         }
                     }
                 }
-                if is_key_pressed(KeyCode::Up) {
+                if input_state.up {
                     if selected_memory >= GRID_WIDTH {
                         selected_memory -= GRID_WIDTH;
                     } else if scroll_offset > 0 {
@@ -639,17 +741,21 @@ async fn main() {
                     }
                 }
 
-                if is_key_pressed(KeyCode::Tab) {
+                if input_state.next || input_state.prev {
                     if let Ok(mut state) = storage_state.lock() {
                         if state.media.len() > 1 {
-                            state.selected = (state.selected + 1) % state.media.len();
+                            if input_state.next {
+                                state.selected = (state.selected + 1) % state.media.len();
+                            } else {
+                                state.selected = (state.selected + state.media.len() - 1) % state.media.len();
+                            }
                             memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                             scroll_offset = 0;  // Reset scroll offset when switching media
                         }
                     }
                 }
 
-                if is_key_pressed(KeyCode::Enter) {
+                if input_state.select {
                     let memory_index = get_memory_index(selected_memory, scroll_offset);
                     if let Some(_) = memories.get(memory_index) {
                         dialogs.push(create_main_dialog(&storage_state));
@@ -660,11 +766,11 @@ async fn main() {
                 render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, scroll_offset);
 
                 let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
-                if is_key_pressed(KeyCode::Up) {
+                if input_state.up {
                     selection -= 1;
                 }
 
-                if is_key_pressed(KeyCode::Down) {
+                if input_state.down {
                     selection += 1;
                 }
 
@@ -673,7 +779,7 @@ async fn main() {
                     dialog.selection = next_selection;
                 }
 
-                if is_key_pressed(KeyCode::Enter) {
+                if input_state.select {
                     let selected_option = &dialog.options[dialog.selection];
                     if !selected_option.disabled {
                         action_dialog_id = dialog.id.clone();
