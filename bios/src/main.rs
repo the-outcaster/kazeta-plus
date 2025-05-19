@@ -248,6 +248,146 @@ impl StorageMediaState {
     }
 }
 
+fn render_main_view(
+    ctx: &DrawContext,
+    selected_memory: usize,
+    memories: &Vec<Memory>,
+    icon_cache: &HashMap<String, Texture2D>,
+    storage_state: &Arc<Mutex<StorageMediaState>>,
+) {
+    let xp = (selected_memory % GRID_WIDTH) as f32;
+    let yp = (selected_memory / GRID_WIDTH) as f32;
+    draw_rectangle_lines(pixel_pos(xp)-3.0-SELECTED_OFFSET, pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+
+    for x in 0..GRID_WIDTH {
+        for y in 0..GRID_HEIGHT {
+            if xp as usize == x && yp as usize == y {
+                draw_rectangle( pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+            } else {
+                draw_rectangle( pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+            }
+
+            let Some(mem) = memories.get(x+GRID_WIDTH*y) else {
+                continue;
+            };
+
+            let Some(icon) = icon_cache.get(&mem.id) else {
+                continue;
+            };
+
+            let params = DrawTextureParams {
+                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
+                rotation: 0.0,
+                flip_x: false,
+                flip_y: false,
+                pivot: None
+            };
+            if xp as usize == x && yp as usize == y {
+                draw_texture_ex(&icon, pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, WHITE, params);
+            } else {
+                draw_texture_ex(&icon, pixel_pos(x as f32), pixel_pos(y as f32)+GRID_OFFSET, WHITE, params);
+            }
+        }
+    }
+
+    draw_rectangle( 16.0,310.0, 608.0, 36.0, UI_BG_COLOR);
+    draw_rectangle_lines(16.0-4.0, 310.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
+
+    draw_rectangle( 16.0,16.0, 608.0, 36.0, UI_BG_COLOR);
+    draw_rectangle_lines(16.0-4.0, 16.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
+
+    if let Ok(state) = storage_state.lock() {
+        if !state.media.is_empty() {
+            text(&ctx, &state.media[state.selected].id, 18.0, 32.0);
+            text(&ctx, &format!("{} MB Free", state.media[state.selected].free), 18.0, 50.0);
+        }
+    }
+
+    if let Some(selected_mem) = memories.get(selected_memory) {
+        let desc = match selected_mem.name.clone() {
+            Some(name) => name,
+            None => selected_mem.id.clone(),
+        };
+        text(&ctx, &desc, 18.0, 326.0);
+        text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 18.0, 344.0);
+    }
+}
+
+fn render_dialog(
+    ctx: &DrawContext,
+    dialog: &mut Dialog,
+    memories: &Vec<Memory>,
+    selected_memory: usize,
+    icon_cache: &HashMap<String, Texture2D>,
+    copy_op_state: &Arc<Mutex<CopyOperationState>>,
+) {
+    let (copy_progress, copy_running, _copy_done) = {
+        if let Ok(state) = copy_op_state.lock() {
+            (state.progress, state.running, state.done)
+        } else {
+            (0, false, false)
+        }
+    };
+
+    draw_rectangle( 0.0,0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+
+    // draw game icon and name
+    if let Some(mem) = memories.get(selected_memory) {
+        if let Some(icon) = icon_cache.get(&mem.id) {
+            let params = DrawTextureParams {
+                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
+                rotation: 0.0,
+                flip_x: false,
+                flip_y: false,
+                pivot: None
+            };
+
+            draw_texture_ex(&icon, PADDING as f32, PADDING as f32, WHITE, params);
+        };
+
+        let desc = match mem.name.clone() {
+            Some(name) => name,
+            None => mem.id.clone(),
+        };
+        text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
+        text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+    };
+
+    if copy_running {
+        draw_rectangle_lines(
+            (FONT_SIZE*3) as f32,
+            SCREEN_HEIGHT as f32 / 2.0,
+            (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32,
+            1.2*FONT_SIZE as f32,
+            4.0,
+            Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+        );
+        draw_rectangle(
+            (FONT_SIZE*3) as f32 + 0.2*FONT_SIZE as f32,
+            SCREEN_HEIGHT as f32 / 2.0 + 0.2*FONT_SIZE as f32,
+            ((SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32 - 0.4*FONT_SIZE as f32) * (copy_progress as f32 / 100.0),
+            0.8*FONT_SIZE as f32,
+            Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+        );
+    } else {
+        if let Some(desc) = dialog.desc.clone() {
+            text(&ctx, &desc, 10.0, (FONT_SIZE*5) as f32);
+        }
+
+        for (i, option) in dialog.options.iter().enumerate() {
+            if option.disabled {
+                text_disabled(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+            } else {
+                text(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
+            }
+        }
+
+        draw_rectangle_lines((FONT_SIZE*3) as f32, (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32, (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32, 1.2*FONT_SIZE as f32, 4.0, Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
@@ -353,64 +493,7 @@ async fn main() {
 
         match dialogs.last_mut() {
             None => {
-                let xp = (selected_memory % GRID_WIDTH) as f32;
-                let yp = (selected_memory / GRID_WIDTH) as f32;
-                draw_rectangle_lines(pixel_pos(xp)-3.0-SELECTED_OFFSET, pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
-
-                for x in 0..GRID_WIDTH {
-                    for y in 0..GRID_HEIGHT {
-
-                        if xp as usize == x && yp as usize == y {
-                            draw_rectangle( pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
-                        } else {
-                            draw_rectangle( pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
-                        }
-
-                        let Some(mem) = memories.get(x+GRID_WIDTH*y) else {
-                            continue;
-                        };
-
-                        let Some(icon) = icon_cache.get(&mem.id) else {
-                            continue;
-                        };
-
-                        let params = DrawTextureParams {
-                            dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-                            source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                            rotation: 0.0,
-                            flip_x: false,
-                            flip_y: false,
-                            pivot: None
-                        };
-                        if xp as usize == x && yp as usize == y {
-                            draw_texture_ex(&icon, pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, WHITE, params);
-                        } else {
-                            draw_texture_ex(&icon, pixel_pos(x as f32), pixel_pos(y as f32)+GRID_OFFSET, WHITE, params);
-                        }
-                    }
-                }
-
-                draw_rectangle( 16.0,310.0, 608.0, 36.0, UI_BG_COLOR);
-                draw_rectangle_lines(16.0-4.0, 310.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
-
-                draw_rectangle( 16.0,16.0, 608.0, 36.0, UI_BG_COLOR);
-                draw_rectangle_lines(16.0-4.0, 16.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
-
-                if let Ok(state) = storage_state.lock() {
-                    if !state.media.is_empty() {
-                        text(&ctx, &state.media[state.selected].id, 18.0, 32.0);
-                        text(&ctx, &format!("{} MB Free", state.media[state.selected].free), 18.0, 50.0);
-                    }
-                }
-
-                if let Some(selected_mem) = memories.get(selected_memory) {
-                    let desc = match selected_mem.name.clone() {
-                        Some(name) => name,
-                        None => selected_mem.id.clone(),
-                    };
-                    text(&ctx, &desc, 18.0, 326.0);
-                    text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 18.0, 344.0);
-                }
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state);
 
                 if is_key_pressed(KeyCode::Right) && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                     selected_memory += 1;
@@ -449,140 +532,74 @@ async fn main() {
                 }
             },
             Some(dialog) => {
+                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state);
 
-                let (copy_progress, copy_running, _copy_done) = {
-                    if let Ok(state) = copy_op_state.lock() {
-                        (state.progress, state.running, state.done)
-                    } else {
-                        (0, false, false)
-                    }
-                };
+                let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
+                if is_key_pressed(KeyCode::Up) {
+                    selection -= 1;
+                }
 
-                draw_rectangle( 0.0,0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+                if is_key_pressed(KeyCode::Down) {
+                    selection += 1;
+                }
 
-                // draw game icon and name
-                if let Some(mem) = memories.get(selected_memory) {
-                    if let Some(icon) = icon_cache.get(&mem.id) {
-                        let params = DrawTextureParams {
-                            dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-                            source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                            rotation: 0.0,
-                            flip_x: false,
-                            flip_y: false,
-                            pivot: None
-                        };
+                dialog.selection = selection as usize % dialog.options.len();
 
-                        draw_texture_ex(&icon, PADDING as f32, PADDING as f32, WHITE, params);
-                    };
-
-                    let desc = match mem.name.clone() {
-                        Some(name) => name,
-                        None => mem.id.clone(),
-                    };
-                    text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
-                    text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
-                };
-
-                if copy_running {
-                    draw_rectangle_lines(
-                        (FONT_SIZE*3) as f32,
-                        SCREEN_HEIGHT as f32 / 2.0,
-                        (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32,
-                        1.2*FONT_SIZE as f32,
-                        4.0,
-                        Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
-                    );
-                    draw_rectangle(
-                        (FONT_SIZE*3) as f32 + 0.2*FONT_SIZE as f32,
-                        SCREEN_HEIGHT as f32 / 2.0 + 0.2*FONT_SIZE as f32,
-                        ((SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32 - 0.4*FONT_SIZE as f32) * (copy_progress as f32 / 100.0),
-                        0.8*FONT_SIZE as f32,
-                        Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
-                    );
-                } else {
-                    if let Some(desc) = dialog.desc.clone() {
-                        text(&ctx, &desc, 10.0, (FONT_SIZE*5) as f32);
-                    }
-
-                    for (i, option) in dialog.options.iter().enumerate() {
-                        if option.disabled {
-                            text_disabled(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
-                        } else {
-                            text(&ctx, &option.text, (FONT_SIZE*8) as f32, (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32);
-                        }
-                    }
-
-                    draw_rectangle_lines((FONT_SIZE*3) as f32, (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32, (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32, 1.2*FONT_SIZE as f32, 4.0, Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
-
-
-                    let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
-                    if is_key_pressed(KeyCode::Up) {
-                        selection -= 1;
-                    }
-
-                    if is_key_pressed(KeyCode::Down) {
-                        selection += 1;
-                    }
-
-                    dialog.selection = selection as usize % dialog.options.len();
-
-
-                    let selected_option = &dialog.options[dialog.selection];
-                    if is_key_pressed(KeyCode::Enter) && !selected_option.disabled {
-                        if dialog.id == "main" {
-                            if selected_option.value == "COPY" {
-                                let mut options = Vec::new();
-                                if let Ok(state) = storage_state.lock() {
-                                    for drive in state.media.iter() {
-                                        if drive.id == state.media[state.selected].id {
-                                            continue;
-                                        }
-                                        options.push(DialogOption { text: format!("{} ({} MB Free)", drive.id.clone(), drive.free), value: drive.id.clone(), disabled: false });
+                let selected_option = &dialog.options[dialog.selection];
+                if is_key_pressed(KeyCode::Enter) && !selected_option.disabled {
+                    if dialog.id == "main" {
+                        if selected_option.value == "COPY" {
+                            let mut options = Vec::new();
+                            if let Ok(state) = storage_state.lock() {
+                                for drive in state.media.iter() {
+                                    if drive.id == state.media[state.selected].id {
+                                        continue;
                                     }
+                                    options.push(DialogOption { text: format!("{} ({} MB Free)", drive.id.clone(), drive.free), value: drive.id.clone(), disabled: false });
                                 }
-                                options.push(DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false });
-                                dialogs.push(Dialog {
-                                    id: "copy_storage_select".to_string(),
-                                    desc: Some("COPY TO WHERE?".to_string()),
-                                    options: options,
-                                    selection: 0
-                                });
-                            } else if selected_option.value == "DELETE" {
-                                dialogs.push(Dialog {
-                                    id: "confirm_delete".to_string(),
-                                    desc: Some("CONFIRM DELETE?".to_string()),
-                                    options: vec![
-                                        DialogOption { text: "DELETE".to_string(), value: "DELETE".to_string(), disabled: false },
-                                        DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false }
-                                    ],
-                                    selection: 1
-                                });
-                            } else if selected_option.value == "CANCEL" {
-                                dialogs.pop();
                             }
-                        } else if dialog.id == "confirm_delete" {
-                            if selected_option.value == "CANCEL" {
-                                dialogs.clear();
-                            } else if selected_option.value == "DELETE" {
-                                if let Ok(state) = storage_state.lock() {
-                                    remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
-                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                }
-                                dialogs.clear();
+                            options.push(DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false });
+                            dialogs.push(Dialog {
+                                id: "copy_storage_select".to_string(),
+                                desc: Some("COPY TO WHERE?".to_string()),
+                                options: options,
+                                selection: 0
+                            });
+                        } else if selected_option.value == "DELETE" {
+                            dialogs.push(Dialog {
+                                id: "confirm_delete".to_string(),
+                                desc: Some("CONFIRM DELETE?".to_string()),
+                                options: vec![
+                                    DialogOption { text: "DELETE".to_string(), value: "DELETE".to_string(), disabled: false },
+                                    DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false }
+                                ],
+                                selection: 1
+                            });
+                        } else if selected_option.value == "CANCEL" {
+                            dialogs.pop();
+                        }
+                    } else if dialog.id == "confirm_delete" {
+                        if selected_option.value == "CANCEL" {
+                            dialogs.clear();
+                        } else if selected_option.value == "DELETE" {
+                            if let Ok(state) = storage_state.lock() {
+                                remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
+                                memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                             }
-                        } else if dialog.id == "copy_storage_select" {
-                            if selected_option.value == "CANCEL" {
-                                dialogs.clear();
-                            } else {
-                                let thread_state = copy_op_state.clone();
-                                let mem = memories[selected_memory].clone();
-                                if let Ok(state) = storage_state.lock() {
-                                    let from_media = state.media[state.selected].clone();
-                                    let to_media = StorageMedia { id: selected_option.value.clone(), free: 0 };
-                                    thread::spawn(move || {
-                                        copy_memory(&mem, &from_media, &to_media, thread_state);
-                                    });
-                                }
+                            dialogs.clear();
+                        }
+                    } else if dialog.id == "copy_storage_select" {
+                        if selected_option.value == "CANCEL" {
+                            dialogs.clear();
+                        } else {
+                            let thread_state = copy_op_state.clone();
+                            let mem = memories[selected_memory].clone();
+                            if let Ok(state) = storage_state.lock() {
+                                let from_media = state.media[state.selected].clone();
+                                let to_media = StorageMedia { id: selected_option.value.clone(), free: 0 };
+                                thread::spawn(move || {
+                                    copy_memory(&mem, &from_media, &to_media, thread_state);
+                                });
                             }
                         }
                     }
