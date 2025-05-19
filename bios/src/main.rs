@@ -47,7 +47,6 @@ struct StorageMedia {
     free: u32,
 }
 
-#[derive(Clone, Debug)]
 struct DialogOption {
     text: String,
     value: String,
@@ -64,7 +63,7 @@ struct Dialog {
 struct CopyOperationState {
     progress: u16,
     running: bool,
-    done: bool,
+    should_clear_dialogs: bool,
 }
 
 struct DrawContext {
@@ -80,7 +79,6 @@ fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMed
     if let Ok(mut copy_state) = state.lock() {
         copy_state.progress = 0;
         copy_state.running = true;
-        copy_state.done = false;
     }
 
     thread::sleep(time::Duration::from_millis(1000));
@@ -114,9 +112,8 @@ fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMed
 
     if let Ok(mut copy_state) = state.lock() {
         copy_state.running = false;
-        copy_state.done = true;
+        copy_state.should_clear_dialogs = true;
     }
-
 }
 
 async fn remove_memory(memory: &Memory, from_media: &StorageMedia) {
@@ -316,17 +313,17 @@ fn render_main_view(
 
 fn render_dialog(
     ctx: &DrawContext,
-    dialog: &mut Dialog,
+    dialog: &Dialog,
     memories: &Vec<Memory>,
     selected_memory: usize,
     icon_cache: &HashMap<String, Texture2D>,
     copy_op_state: &Arc<Mutex<CopyOperationState>>,
 ) {
-    let (copy_progress, copy_running, _copy_done) = {
+    let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
-            (state.progress, state.running, state.done)
+            (state.progress, state.running)
         } else {
-            (0, false, false)
+            (0, false)
         }
     };
 
@@ -388,6 +385,87 @@ fn render_dialog(
     }
 }
 
+fn create_confirm_delete_dialog() -> Dialog {
+    Dialog {
+        id: "confirm_delete".to_string(),
+        desc: Some("CONFIRM DELETE?".to_string()),
+        options: vec![
+            DialogOption {
+                text: "DELETE".to_string(),
+                value: "DELETE".to_string(),
+                disabled: false,
+            },
+            DialogOption {
+                text: "CANCEL".to_string(),
+                value: "CANCEL".to_string(),
+                disabled: false,
+            }
+        ],
+        selection: 1,
+    }
+}
+
+fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
+    let mut options = Vec::new();
+    if let Ok(state) = storage_state.lock() {
+        for drive in state.media.iter() {
+            if drive.id == state.media[state.selected].id {
+                continue;
+            }
+            options.push(DialogOption {
+                text: format!("{} ({} MB Free)", drive.id.clone(), drive.free),
+                value: drive.id.clone(),
+                disabled: false,
+            });
+        }
+    }
+    options.push(DialogOption {
+        text: "CANCEL".to_string(),
+        value: "CANCEL".to_string(),
+        disabled: false,
+    });
+
+    Dialog {
+        id: "copy_storage_select".to_string(),
+        desc: Some("SELECT DESTINATION".to_string()),
+        options,
+        selection: 0,
+    }
+}
+
+fn create_main_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
+    let has_external_devices = if let Ok(state) = storage_state.lock() {
+        state.media.len() > 1
+    } else {
+        false
+    };
+
+    let options = vec![
+        DialogOption {
+            text: "COPY".to_string(),
+            value: "COPY".to_string(),
+            disabled: !has_external_devices,
+        },
+        DialogOption {
+            text: "DELETE".to_string(),
+            value: "DELETE".to_string(),
+            disabled: false,
+        },
+        DialogOption {
+            text: "CANCEL".to_string(),
+            value: "CANCEL".to_string(),
+            disabled: false,
+        },
+    ];
+
+    Dialog {
+        id: "main".to_string(),
+        desc: None,
+        options,
+        selection: 0,
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
@@ -426,7 +504,7 @@ async fn main() {
     let copy_op_state = Arc::new(Mutex::new(CopyOperationState {
         progress: 0,
         running: false,
-        done: false,
+        should_clear_dialogs: false,
     }));
 
 
@@ -449,8 +527,6 @@ async fn main() {
     const DELTA: f32 = 0.0001;
 
     loop {
-        clear_background(GREEN);
-
         draw_texture(&background, bgx-(SCREEN_WIDTH as f32), 0.0, bg_color);
         draw_texture(&background, bgx, 0.0, bg_color);
         bgx = (bgx + 0.1) % (SCREEN_WIDTH as f32);
@@ -491,6 +567,9 @@ async fn main() {
             }
         }
 
+        let mut action_dialog_id = String::new();
+        let mut action_option_value = String::new();
+
         match dialogs.last_mut() {
             None => {
                 render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state);
@@ -519,15 +598,7 @@ async fn main() {
 
                 if is_key_pressed(KeyCode::Enter) {
                     if let Some(_) = memories.get(selected_memory) {
-                        if let Ok(state) = storage_state.lock() {
-                            let has_external_devices = state.media.len() > 1;
-                            let options = vec![
-                                DialogOption { text: "COPY".to_string(), value: "COPY".to_string(), disabled: !has_external_devices },
-                                DialogOption { text: "DELETE".to_string(), value: "DELETE".to_string(), disabled: false },
-                                DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false },
-                            ];
-                            dialogs.push(Dialog { id: "main".to_string(), desc: None, options: options, selection: 0 });
-                        }
+                        dialogs.push(create_main_dialog(&storage_state));
                     }
                 }
             },
@@ -543,69 +614,66 @@ async fn main() {
                     selection += 1;
                 }
 
-                dialog.selection = selection as usize % dialog.options.len();
+                let next_selection = selection as usize % dialog.options.len();
+                if next_selection != dialog.selection {
+                    dialog.selection = next_selection;
+                }
 
-                let selected_option = &dialog.options[dialog.selection];
-                if is_key_pressed(KeyCode::Enter) && !selected_option.disabled {
-                    if dialog.id == "main" {
-                        if selected_option.value == "COPY" {
-                            let mut options = Vec::new();
-                            if let Ok(state) = storage_state.lock() {
-                                for drive in state.media.iter() {
-                                    if drive.id == state.media[state.selected].id {
-                                        continue;
-                                    }
-                                    options.push(DialogOption { text: format!("{} ({} MB Free)", drive.id.clone(), drive.free), value: drive.id.clone(), disabled: false });
-                                }
-                            }
-                            options.push(DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false });
-                            dialogs.push(Dialog {
-                                id: "copy_storage_select".to_string(),
-                                desc: Some("COPY TO WHERE?".to_string()),
-                                options: options,
-                                selection: 0
-                            });
-                        } else if selected_option.value == "DELETE" {
-                            dialogs.push(Dialog {
-                                id: "confirm_delete".to_string(),
-                                desc: Some("CONFIRM DELETE?".to_string()),
-                                options: vec![
-                                    DialogOption { text: "DELETE".to_string(), value: "DELETE".to_string(), disabled: false },
-                                    DialogOption { text: "CANCEL".to_string(), value: "CANCEL".to_string(), disabled: false }
-                                ],
-                                selection: 1
-                            });
-                        } else if selected_option.value == "CANCEL" {
-                            dialogs.pop();
-                        }
-                    } else if dialog.id == "confirm_delete" {
-                        if selected_option.value == "CANCEL" {
-                            dialogs.clear();
-                        } else if selected_option.value == "DELETE" {
-                            if let Ok(state) = storage_state.lock() {
-                                remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
-                                memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                            }
-                            dialogs.clear();
-                        }
-                    } else if dialog.id == "copy_storage_select" {
-                        if selected_option.value == "CANCEL" {
-                            dialogs.clear();
-                        } else {
-                            let thread_state = copy_op_state.clone();
-                            let mem = memories[selected_memory].clone();
-                            if let Ok(state) = storage_state.lock() {
-                                let from_media = state.media[state.selected].clone();
-                                let to_media = StorageMedia { id: selected_option.value.clone(), free: 0 };
-                                thread::spawn(move || {
-                                    copy_memory(&mem, &from_media, &to_media, thread_state);
-                                });
-                            }
-                        }
+                if is_key_pressed(KeyCode::Enter) {
+                    let selected_option = &dialog.options[dialog.selection];
+                    if !selected_option.disabled {
+                        action_dialog_id = dialog.id.clone();
+                        action_option_value = selected_option.value.clone();
+                    }
+                }
+
+                if let Ok(mut state) = copy_op_state.lock() {
+                    if state.should_clear_dialogs {
+                        dialogs.clear();
+                        state.should_clear_dialogs = false;
                     }
                 }
             },
-        };
+        }
+
+        // Handle dialog actions
+        match (action_dialog_id.as_str(), action_option_value.as_str()) {
+            ("main", "COPY") => {
+                dialogs.push(create_copy_storage_dialog(&storage_state));
+            },
+            ("main", "DELETE") => {
+                dialogs.push(create_confirm_delete_dialog());
+            },
+            ("main", "CANCEL") => {
+                dialogs.clear();
+            },
+            ("confirm_delete", "DELETE") => {
+                if let Ok(mut state) = storage_state.lock() {
+                    remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
+                    state.needs_memory_refresh = true;
+                }
+                dialogs.clear();
+            },
+            ("confirm_delete", "CANCEL") => {
+                dialogs.clear();
+            },
+            ("copy_storage_select", target_id) if target_id != "CANCEL" => {
+                let thread_state = copy_op_state.clone();
+                let mem = memories[selected_memory].clone();
+                let target_id = target_id.to_string();
+                if let Ok(state) = storage_state.lock() {
+                    let from_media = state.media[state.selected].clone();
+                    let to_media = StorageMedia { id: target_id, free: 0 };
+                    thread::spawn(move || {
+                        copy_memory(&mem, &from_media, &to_media, thread_state);
+                    });
+                }
+            },
+            ("copy_storage_select", "CANCEL") => {
+                dialogs.clear();
+            },
+            _ => {}
+        }
 
         if !icon_queue.is_empty() {
             let (cart_id, icon_path) = icon_queue.remove(0);
