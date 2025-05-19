@@ -245,12 +245,17 @@ impl StorageMediaState {
     }
 }
 
+fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
+    selected_memory + GRID_WIDTH * scroll_offset
+}
+
 fn render_main_view(
     ctx: &DrawContext,
     selected_memory: usize,
     memories: &Vec<Memory>,
     icon_cache: &HashMap<String, Texture2D>,
     storage_state: &Arc<Mutex<StorageMediaState>>,
+    scroll_offset: usize,
 ) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
@@ -258,13 +263,15 @@ fn render_main_view(
 
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_HEIGHT {
+            let memory_index = get_memory_index(x + GRID_WIDTH * y, scroll_offset);
+
             if xp as usize == x && yp as usize == y {
-                draw_rectangle( pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                draw_rectangle(pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
             } else {
-                draw_rectangle( pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+                draw_rectangle(pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
             }
 
-            let Some(mem) = memories.get(x+GRID_WIDTH*y) else {
+            let Some(mem) = memories.get(memory_index) else {
                 continue;
             };
 
@@ -301,13 +308,44 @@ fn render_main_view(
         }
     }
 
-    if let Some(selected_mem) = memories.get(selected_memory) {
+    let memory_index = get_memory_index(selected_memory, scroll_offset);
+    if let Some(selected_mem) = memories.get(memory_index) {
         let desc = match selected_mem.name.clone() {
             Some(name) => name,
             None => selected_mem.id.clone(),
         };
         text(&ctx, &desc, 18.0, 326.0);
         text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 18.0, 344.0);
+    }
+
+    // Draw scroll indicators last so they appear on top
+    const SCROLL_INDICATOR_SIZE: f32 = 8.0;  // Size from center to edge
+    const SCROLL_INDICATOR_DISTANCE_TOP: f32 = -13.0;  // Distance from grid edge
+    const SCROLL_INDICATOR_DISTANCE_BOTTOM: f32 = 4.0;  // Distance from grid edge
+    const SCROLL_INDICATOR_OUTLINE: f32 = 1.0;  // Outline thickness
+
+    if scroll_offset > 0 {
+        // Up arrow (pointing up)
+        let points = [
+            Vec2::new(SCREEN_WIDTH as f32 / 2.0, GRID_OFFSET - SCROLL_INDICATOR_DISTANCE_TOP - SCROLL_INDICATOR_SIZE),
+            Vec2::new(SCREEN_WIDTH as f32 / 2.0 - SCROLL_INDICATOR_SIZE, GRID_OFFSET - SCROLL_INDICATOR_DISTANCE_TOP),
+            Vec2::new(SCREEN_WIDTH as f32 / 2.0 + SCROLL_INDICATOR_SIZE, GRID_OFFSET - SCROLL_INDICATOR_DISTANCE_TOP),
+        ];
+        draw_triangle(points[0], points[1], points[2], WHITE);
+        draw_triangle_lines(points[0], points[1], points[2], SCROLL_INDICATOR_OUTLINE, BLACK);
+    }
+
+    let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
+    if next_row_start < memories.len() {
+        // Down arrow (pointing down)
+        let grid_bottom = GRID_OFFSET + GRID_HEIGHT as f32 * (TILE_SIZE + PADDING);
+        let points = [
+            Vec2::new(SCREEN_WIDTH as f32 / 2.0, grid_bottom + SCROLL_INDICATOR_DISTANCE_BOTTOM + SCROLL_INDICATOR_SIZE),
+            Vec2::new(SCREEN_WIDTH as f32 / 2.0 - SCROLL_INDICATOR_SIZE, grid_bottom + SCROLL_INDICATOR_DISTANCE_BOTTOM),
+            Vec2::new(SCREEN_WIDTH as f32 / 2.0 + SCROLL_INDICATOR_SIZE, grid_bottom + SCROLL_INDICATOR_DISTANCE_BOTTOM),
+        ];
+        draw_triangle(points[0], points[1], points[2], WHITE);
+        draw_triangle_lines(points[0], points[1], points[2], SCROLL_INDICATOR_OUTLINE, BLACK);
     }
 }
 
@@ -318,6 +356,7 @@ fn render_dialog(
     selected_memory: usize,
     icon_cache: &HashMap<String, Texture2D>,
     copy_op_state: &Arc<Mutex<CopyOperationState>>,
+    scroll_offset: usize,
 ) {
     let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
@@ -330,7 +369,8 @@ fn render_dialog(
     draw_rectangle( 0.0,0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
 
     // draw game icon and name
-    if let Some(mem) = memories.get(selected_memory) {
+    let memory_index = get_memory_index(selected_memory, scroll_offset);
+    if let Some(mem) = memories.get(memory_index) {
         if let Some(icon) = icon_cache.get(&mem.id) {
             let params = DrawTextureParams {
                 dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
@@ -473,7 +513,7 @@ async fn main() {
     let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut icon_queue: Vec<(String, String)> = Vec::new();
-
+    let mut scroll_offset = 0;
 
     let ctx : DrawContext = DrawContext {
         font: font,
@@ -572,7 +612,7 @@ async fn main() {
 
         match dialogs.last_mut() {
             None => {
-                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state);
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, scroll_offset);
 
                 if is_key_pressed(KeyCode::Right) && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                     selected_memory += 1;
@@ -580,11 +620,23 @@ async fn main() {
                 if is_key_pressed(KeyCode::Left) && selected_memory >= 1 {
                     selected_memory -= 1;
                 }
-                if is_key_pressed(KeyCode::Down) && selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
-                    selected_memory += GRID_WIDTH;
+                if is_key_pressed(KeyCode::Down) {
+                    if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
+                        selected_memory += GRID_WIDTH;
+                    } else {
+                        // Check if there are any saves in the next row
+                        let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
+                        if next_row_start < memories.len() {
+                            scroll_offset += 1;
+                        }
+                    }
                 }
-                if is_key_pressed(KeyCode::Up) && selected_memory >= GRID_WIDTH {
-                    selected_memory -= GRID_WIDTH;
+                if is_key_pressed(KeyCode::Up) {
+                    if selected_memory >= GRID_WIDTH {
+                        selected_memory -= GRID_WIDTH;
+                    } else if scroll_offset > 0 {
+                        scroll_offset -= 1;
+                    }
                 }
 
                 if is_key_pressed(KeyCode::Tab) {
@@ -592,18 +644,20 @@ async fn main() {
                         if state.media.len() > 1 {
                             state.selected = (state.selected + 1) % state.media.len();
                             memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                            scroll_offset = 0;  // Reset scroll offset when switching media
                         }
                     }
                 }
 
                 if is_key_pressed(KeyCode::Enter) {
-                    if let Some(_) = memories.get(selected_memory) {
+                    let memory_index = get_memory_index(selected_memory, scroll_offset);
+                    if let Some(_) = memories.get(memory_index) {
                         dialogs.push(create_main_dialog(&storage_state));
                     }
                 }
             },
             Some(dialog) => {
-                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state);
+                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, scroll_offset);
 
                 let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                 if is_key_pressed(KeyCode::Up) {
