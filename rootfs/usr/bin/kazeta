@@ -21,10 +21,13 @@ function get_attribute {
 }
 
 function device_list {
-	echo "internal"
+	free=$(df -m "${BASE_DIR}" | tail -n +2 | head -1 | tr -s ' ' | cut -d' ' -f4)
+	echo "internal:::${free}"
 	for dir in "${BASE_EXT}"/*; do
 		if [[ -d "${dir}" ]]; then
-			echo $(basename "${dir}")
+			name=$(basename "${dir}")
+			free=$(df -m "${dir}" | tail -n +2 | head -1 | tr -s ' ' | cut -d' ' -f4)
+			echo "${name}:::${free}"
 		fi
 	done
 }
