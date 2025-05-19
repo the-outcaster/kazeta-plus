@@ -398,8 +398,8 @@ async fn main() {
 
                 if let Ok(state) = storage_state.lock() {
                     if !state.media.is_empty() {
-                        text(&ctx, &state.media[state.selected].id, 18.0, 33.0);
-                        text(&ctx, &format!("{} MB Free", state.media[state.selected].free), 18.0, 49.0);
+                        text(&ctx, &state.media[state.selected].id, 18.0, 32.0);
+                        text(&ctx, &format!("{} MB Free", state.media[state.selected].free), 18.0, 50.0);
                     }
                 }
 
@@ -408,8 +408,8 @@ async fn main() {
                         Some(name) => name,
                         None => selected_mem.id.clone(),
                     };
-                    text(&ctx, &desc, 18.0, 327.0);
-                    text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 18.0, 343.0);
+                    text(&ctx, &desc, 18.0, 326.0);
+                    text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 18.0, 344.0);
                 }
 
                 if is_key_pressed(KeyCode::Right) && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
@@ -479,8 +479,8 @@ async fn main() {
                         Some(name) => name,
                         None => mem.id.clone(),
                     };
-                    text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE);
-                    text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5);
+                    text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
+                    text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
                 };
 
                 if copy_running {
