@@ -879,7 +879,8 @@ async fn main() {
                 dialogs.clear();
             },
             ("copy_storage_select", target_id) if target_id != "CANCEL" => {
-                let mem = memories[selected_memory].clone();
+                let memory_index = get_memory_index(selected_memory, scroll_offset);
+                let mem = memories[memory_index].clone();
                 let target_id = target_id.to_string();
                 if let Ok(state) = storage_state.lock() {
                     let to_media = StorageMedia { id: target_id, free: 0 };
