@@ -6,6 +6,8 @@ use std::thread;
 use std::time;
 use std::collections::HashMap;
 use gilrs::{Gilrs, Button, Axis};
+use std::panic;
+use futures;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -876,7 +878,12 @@ async fn main() {
 
         if !icon_queue.is_empty() {
             let (cart_id, icon_path) = icon_queue.remove(0);
-            if let Ok(texture) = load_texture(&icon_path).await {
+            let texture_future = load_texture(&icon_path);
+            let texture_result = panic::catch_unwind(|| {
+                futures::executor::block_on(texture_future)
+            });
+
+            if let Ok(Ok(texture)) = texture_result {
                 icon_cache.insert(cart_id.clone(), texture);
             }
         }
