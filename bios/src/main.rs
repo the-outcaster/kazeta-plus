@@ -349,6 +349,7 @@ fn render_main_view(
     memories: &Vec<Memory>,
     icon_cache: &HashMap<String, Texture2D>,
     storage_state: &Arc<Mutex<StorageMediaState>>,
+    placeholder: &Texture2D,
     scroll_offset: usize,
 ) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
@@ -369,8 +370,9 @@ fn render_main_view(
                 continue;
             };
 
-            let Some(icon) = icon_cache.get(&mem.id) else {
-                continue;
+            let icon = match icon_cache.get(&mem.id) {
+                Some(icon) => icon,
+                None => placeholder,
             };
 
             let params = DrawTextureParams {
@@ -450,6 +452,7 @@ fn render_dialog(
     selected_memory: usize,
     icon_cache: &HashMap<String, Texture2D>,
     copy_op_state: &Arc<Mutex<CopyOperationState>>,
+    placeholder: &Texture2D,
     scroll_offset: usize,
 ) {
     let (copy_progress, copy_running) = {
@@ -465,18 +468,21 @@ fn render_dialog(
     // draw game icon and name
     let memory_index = get_memory_index(selected_memory, scroll_offset);
     if let Some(mem) = memories.get(memory_index) {
-        if let Some(icon) = icon_cache.get(&mem.id) {
-            let params = DrawTextureParams {
-                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                rotation: 0.0,
-                flip_x: false,
-                flip_y: false,
-                pivot: None
-            };
-
-            draw_texture_ex(&icon, PADDING as f32, PADDING as f32, WHITE, params);
+        let icon = match icon_cache.get(&mem.id) {
+            Some(icon) => icon,
+            None => placeholder,
         };
+
+        let params = DrawTextureParams {
+            dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+            source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
+            rotation: 0.0,
+            flip_x: false,
+            flip_y: false,
+            pivot: None
+        };
+
+        draw_texture_ex(&icon, PADDING as f32, PADDING as f32, WHITE, params);
 
         let desc = match mem.name.clone() {
             Some(name) => name,
@@ -637,6 +643,7 @@ async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
     let font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
     let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
+    let placeholder = Texture2D::from_file_with_format(include_bytes!("../placeholder.png"), Some(ImageFormat::Png));
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut icon_queue: Vec<(String, String)> = Vec::new();
     let mut scroll_offset = 0;
@@ -746,7 +753,7 @@ async fn main() {
 
         match dialogs.last_mut() {
             None => {
-                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, scroll_offset);
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset);
 
                 if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                     selected_memory += 1;
@@ -795,7 +802,7 @@ async fn main() {
                 }
             },
             Some(dialog) => {
-                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, scroll_offset);
+                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset);
 
                 let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                 if input_state.up {
