@@ -137,8 +137,14 @@ function save_copy {
 
 	rm -rf "${TO_CACHE}/${CART_ID}"
 	mkdir -p "${TO_CACHE}/${CART_ID}"
-	cat "${FROM_CACHE}/${CART_ID}/metadata.kzi" | pv --quiet --direct-io --output "${TO_CACHE}/${CART_ID}/metadata.kzi"
-	cat "${FROM_CACHE}/${CART_ID}/icon.png" | pv --quiet --direct-io --output "${TO_CACHE}/${CART_ID}/icon.png"
+
+	if [[ -f "${FROM_CACHE}/${CART_ID}/metadata.kzi" ]]; then
+		cat "${FROM_CACHE}/${CART_ID}/metadata.kzi" | pv --quiet --direct-io --output "${TO_CACHE}/${CART_ID}/metadata.kzi"
+	fi
+
+	if [[ -f "${FROM_CACHE}/${CART_ID}/icon.png" ]]; then
+		cat "${FROM_CACHE}/${CART_ID}/icon.png" | pv --quiet --direct-io --output "${TO_CACHE}/${CART_ID}/icon.png"
+	fi
 }
 
 function save_delete {
