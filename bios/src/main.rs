@@ -1,13 +1,14 @@
 use macroquad::prelude::*;
-use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::io::{BufRead, BufReader};
 use std::thread;
 use std::time;
 use std::collections::HashMap;
 use gilrs::{Gilrs, Button, Axis};
 use std::panic;
 use futures;
+use std::sync::atomic::{AtomicU16, Ordering};
+
+mod save;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -21,7 +22,6 @@ const UI_BG_COLOR: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.5 };
 const UI_BG_COLOR_DARK: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.3 };
 const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
-const KAZETA_BIN: &'static str = "kazeta";
 
 
 fn window_conf() -> Conf {
@@ -171,7 +171,6 @@ fn pixel_pos(v: f32) -> f32 {
 }
 
 fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMedia, state: Arc<Mutex<CopyOperationState>>) {
-
     if let Ok(mut copy_state) = state.lock() {
         copy_state.progress = 0;
         copy_state.running = true;
@@ -179,25 +178,26 @@ fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMed
 
     thread::sleep(time::Duration::from_millis(1000));
 
-    let mut cmd = Command::new(KAZETA_BIN)
-    .args([ "save", "copy", &memory.id, &from_media.id, &to_media.id ])
-    .stderr(Stdio::piped())
-    .spawn()
-    .expect("Failed to start command");
+    let progress = Arc::new(AtomicU16::new(0));
+    let progress_clone = progress.clone();
 
-    let stderr = cmd.stderr.take().expect("Failed to capture stdout");
-    let reader = BufReader::new(stderr);
-
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            if let Ok(value) = line.trim().parse::<u16>() {
-                if value > 0 {
-                    if let Ok(mut copy_state) = state.lock() {
-                        copy_state.progress = value.min(100);
-                    }
-                }
+    // Spawn a thread to update the progress
+    let state_clone = state.clone();
+    thread::spawn(move || {
+        while progress_clone.load(Ordering::SeqCst) < 100 {
+            if let Ok(mut copy_state) = state_clone.lock() {
+                copy_state.progress = progress_clone.load(Ordering::SeqCst);
             }
+            thread::sleep(time::Duration::from_millis(100));
         }
+    });
+
+    if let Err(e) = save::copy_save(&memory.id, &from_media.id, &to_media.id, progress) {
+        if let Ok(mut copy_state) = state.lock() {
+            copy_state.running = false;
+            copy_state.should_clear_dialogs = true;
+        }
+        return;
     }
 
     if let Ok(mut copy_state) = state.lock() {
@@ -212,43 +212,22 @@ fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMed
     }
 }
 
-async fn remove_memory(memory: &Memory, from_media: &StorageMedia) {
-    Command::new(KAZETA_BIN)
-    .args([ "save", "delete", &memory.id, &from_media.id ])
-    .output()
-    .unwrap();
-}
-
 async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>, queue: &mut Vec<(String, String)>) -> Vec<Memory> {
     let mut memories = Vec::new();
 
-    let results = Command::new(KAZETA_BIN)
-    .args([ "save", "details", &media.id ])
-    .output()
-    .unwrap();
+    if let Ok(details) = save::get_save_details(&media.id) {
+        for (cart_id, name, icon_path, size) in details {
+            if !cache.contains_key(&cart_id) {
+                queue.push((cart_id.clone(), icon_path.clone()));
+            }
 
-    for (_, line) in String::from_utf8(results.stdout).unwrap().lines().enumerate() {
-        let parts: Vec<&str> = line.split(":::").collect();
-
-        if parts.len() != 4 {
-            continue;
+            let m = Memory {
+                id: cart_id,
+                name: Some(name),
+                size: size,
+            };
+            memories.push(m);
         }
-
-        let cart_id = parts[0].trim().to_string();
-        let name = parts[1].trim().to_string();
-        let icon_path = parts[2].trim().to_string();
-        let size = parts[3].trim().to_string().parse::<u16>().unwrap();
-
-        if !cache.contains_key(&cart_id) {
-            queue.push((cart_id.clone(), icon_path.clone()));
-        }
-
-        let m = Memory {
-            id: cart_id,
-            name: Some(name),
-            size: size,
-        };
-        memories.push(m);
     }
 
     memories
@@ -300,24 +279,15 @@ impl StorageMediaState {
     }
 
     fn update_media(&mut self) {
-        let device_list_raw = Command::new(KAZETA_BIN)
-            .args([ "device", "list" ])
-            .output()
-            .unwrap();
-
         let mut new_media = Vec::new();
 
-        for (_, line) in String::from_utf8(device_list_raw.stdout).unwrap().lines().enumerate() {
-            let parts: Vec<&str> = line.split(":::").collect();
-
-            if parts.len() != 2 {
-                continue;
+        if let Ok(devices) = save::list_devices() {
+            for (id, free) in devices {
+                new_media.push(StorageMedia {
+                    id,
+                    free,
+                });
             }
-
-            new_media.push(StorageMedia {
-                id: parts[0].trim().to_string(),
-                free: parts[1].trim().parse::<u32>().unwrap(),
-            });
         }
 
         // Done if media list has not changed
@@ -660,6 +630,21 @@ fn create_save_exists_dialog() -> Dialog {
     }
 }
 
+fn create_error_dialog(message: String) -> Dialog {
+    Dialog {
+        id: "error".to_string(),
+        desc: Some(message),
+        options: vec![
+            DialogOption {
+                text: "OK".to_string(),
+                value: "OK".to_string(),
+                disabled: false,
+            }
+        ],
+        selection: 0,
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
@@ -870,10 +855,16 @@ async fn main() {
             },
             ("confirm_delete", "DELETE") => {
                 if let Ok(mut state) = storage_state.lock() {
-                    remove_memory(&memories[selected_memory], &state.media[state.selected]).await;
-                    state.needs_memory_refresh = true;
+                    let memory_index = get_memory_index(selected_memory, scroll_offset);
+                    if let Some(mem) = memories.get(memory_index) {
+                        if let Err(e) = save::delete_save(&mem.id, &state.media[state.selected].id) {
+                            dialogs.push(create_error_dialog(format!("ERROR: {}", e)));
+                        } else {
+                            state.needs_memory_refresh = true;
+                            dialogs.clear();
+                        }
+                    }
                 }
-                dialogs.clear();
             },
             ("confirm_delete", "CANCEL") => {
                 dialogs.clear();
@@ -902,6 +893,9 @@ async fn main() {
             },
             ("save_exists", "OK") => {
                 dialogs.pop();
+            },
+            ("error", "OK") => {
+                dialogs.clear();
             },
             _ => {}
         }
