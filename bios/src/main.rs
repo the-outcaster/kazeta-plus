@@ -640,6 +640,26 @@ fn create_main_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
     }
 }
 
+async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_cache: &mut HashMap<String, Texture2D>, icon_queue: &mut Vec<(String, String)>) -> bool {
+    let target_memories = load_memories(target_media, icon_cache, icon_queue).await;
+    target_memories.iter().any(|m| m.id == memory.id)
+}
+
+fn create_save_exists_dialog() -> Dialog {
+    Dialog {
+        id: "save_exists".to_string(),
+        desc: Some("SAVE DATA ALREADY EXISTS AT THIS LOCATION".to_string()),
+        options: vec![
+            DialogOption {
+                text: "OK".to_string(),
+                value: "OK".to_string(),
+                disabled: false,
+            }
+        ],
+        selection: 0,
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
@@ -859,19 +879,28 @@ async fn main() {
                 dialogs.clear();
             },
             ("copy_storage_select", target_id) if target_id != "CANCEL" => {
-                let thread_state = copy_op_state.clone();
                 let mem = memories[selected_memory].clone();
                 let target_id = target_id.to_string();
                 if let Ok(state) = storage_state.lock() {
-                    let from_media = state.media[state.selected].clone();
                     let to_media = StorageMedia { id: target_id, free: 0 };
-                    thread::spawn(move || {
-                        copy_memory(&mem, &from_media, &to_media, thread_state);
-                    });
+
+                    // Check if save already exists
+                    if check_save_exists(&mem, &to_media, &mut icon_cache, &mut icon_queue).await {
+                        dialogs.push(create_save_exists_dialog());
+                    } else {
+                        let thread_state = copy_op_state.clone();
+                        let from_media = state.media[state.selected].clone();
+                        thread::spawn(move || {
+                            copy_memory(&mem, &from_media, &to_media, thread_state);
+                        });
+                    }
                 }
             },
             ("copy_storage_select", "CANCEL") => {
                 dialogs.clear();
+            },
+            ("save_exists", "OK") => {
+                dialogs.pop();
             },
             _ => {}
         }
