@@ -94,6 +94,7 @@ struct InputState {
     ui_focus: UIFocus,
     shake_left: f32,  // Shake animation state for left arrow
     shake_right: f32, // Shake animation state for right arrow
+    shake_dialog: f32, // Shake animation state for dialog options
 }
 
 impl InputState {
@@ -115,6 +116,15 @@ impl InputState {
             ui_focus: UIFocus::Grid,
             shake_left: 0.0,
             shake_right: 0.0,
+            shake_dialog: 0.0,
+        }
+    }
+
+    fn calculate_shake_offset(&self, shake_time: f32) -> f32 {
+        if shake_time > 0.0 {
+            (shake_time / Self::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * Self::SHAKE_INTENSITY
+        } else {
+            0.0
         }
     }
 
@@ -193,6 +203,10 @@ impl InputState {
         if self.shake_right > 0.0 {
             self.shake_right = (self.shake_right - delta_time).max(0.0);
         }
+        // Update dialog shake
+        if self.shake_dialog > 0.0 {
+            self.shake_dialog = (self.shake_dialog - delta_time).max(0.0);
+        }
     }
 
     fn trigger_shake(&mut self, is_left: bool) {
@@ -201,6 +215,10 @@ impl InputState {
         } else {
             self.shake_right = Self::SHAKE_DURATION;
         }
+    }
+
+    fn trigger_dialog_shake(&mut self) {
+        self.shake_dialog = Self::SHAKE_DURATION;
     }
 }
 
@@ -432,11 +450,7 @@ fn render_main_view(
             // Draw left arrow background
             let left_box_x = PADDING;  // Align with leftmost grid column
             let left_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
-            let left_shake = if input_state.shake_left > 0.0 {
-                (input_state.shake_left / InputState::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * InputState::SHAKE_INTENSITY
-            } else {
-                0.0
-            };
+            let left_shake = input_state.calculate_shake_offset(input_state.shake_left);
 
             if let UIFocus::StorageLeft = input_state.ui_focus {
                 draw_rectangle(left_box_x-SELECTED_OFFSET + left_shake, left_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
@@ -467,11 +481,7 @@ fn render_main_view(
             // Draw right arrow background
             let right_box_x = PADDING + (GRID_WIDTH as f32 - 1.0) * (TILE_SIZE + PADDING);  // Align with rightmost grid column
             let right_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
-            let right_shake = if input_state.shake_right > 0.0 {
-                (input_state.shake_right / InputState::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * InputState::SHAKE_INTENSITY
-            } else {
-                0.0
-            };
+            let right_shake = input_state.calculate_shake_offset(input_state.shake_right);
 
             if let UIFocus::StorageRight = input_state.ui_focus {
                 draw_rectangle(right_box_x-SELECTED_OFFSET + right_shake, right_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
@@ -559,6 +569,7 @@ fn render_dialog(
     copy_op_state: &Arc<Mutex<CopyOperationState>>,
     placeholder: &Texture2D,
     scroll_offset: usize,
+    input_state: &InputState,
 ) {
     let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
@@ -642,8 +653,13 @@ fn render_dialog(
 
         for (i, option) in dialog.options.iter().enumerate() {
             let y_pos = (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32;
+            let shake_offset = if option.disabled {
+                input_state.calculate_shake_offset(input_state.shake_dialog)
+            } else {
+                0.0
+            };
             if option.disabled {
-                text_disabled(&ctx, &option.text, options_start_x, y_pos);
+                text_disabled(&ctx, &option.text, options_start_x + shake_offset, y_pos);
             } else {
                 text(&ctx, &option.text, options_start_x, y_pos);
             }
@@ -651,8 +667,14 @@ fn render_dialog(
 
         // Draw selection rectangle with padding
         let selection_y = (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
+        let selected_option = &dialog.options[dialog.selection];
+        let selection_shake = if selected_option.disabled {
+            input_state.calculate_shake_offset(input_state.shake_dialog)
+        } else {
+            0.0
+        };
         draw_rectangle_lines(
-            options_start_x - SELECTION_PADDING_X,
+            options_start_x - SELECTION_PADDING_X + selection_shake,
             selection_y - SELECTION_PADDING_Y,
             longest_width + (SELECTION_PADDING_X * 2.0),
             1.2*FONT_SIZE as f32 + (SELECTION_PADDING_Y * 2.0),
@@ -1037,7 +1059,7 @@ async fn main() {
                 }
             },
             Some(dialog) => {
-                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset);
+                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &input_state);
 
                 let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                 if input_state.up {
@@ -1058,6 +1080,8 @@ async fn main() {
                     if !selected_option.disabled {
                         action_dialog_id = dialog.id.clone();
                         action_option_value = selected_option.value.clone();
+                    } else {
+                        input_state.trigger_dialog_shake();
                     }
                 }
 
