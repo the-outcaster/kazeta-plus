@@ -421,7 +421,6 @@ fn render_main_view(
     const STORAGE_INFO_Y: f32 = 16.0;
     const STORAGE_INFO_HEIGHT: f32 = 36.0;
     const NAV_ARROW_SIZE: f32 = 10.0;
-    const NAV_ARROW_DISTANCE: f32 = 4.0;
     const NAV_ARROW_OUTLINE: f32 = 1.0;
 
     // Draw storage info background
