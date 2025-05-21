@@ -235,7 +235,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
     fs::create_dir_all(&to_cache).map_err(|e| e.to_string())?;
 
     // Copy save data
-    if from_drive == "internal" {
+    let result = if from_drive == "internal" {
         // Internal to external: create tar archive
         let file = fs::File::create(&to_path_kzs).map_err(|e| e.to_string())?;
         let mut builder = Builder::new(file);
@@ -275,7 +275,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         }
 
         eprintln!("Finished creating archive, final size: {} bytes", current_size);
-        builder.finish().map_err(|e| e.to_string())?;
+        builder.finish().map_err(|e| e.to_string())
     } else if to_drive == "internal" {
         // External to internal: extract tar archive
         fs::create_dir_all(&to_path).map_err(|e| e.to_string())?;
@@ -291,6 +291,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             current_size += entry.header().size().unwrap_or(0);
             progress.store((current_size * 100 / file_size) as u16, Ordering::SeqCst);
         }
+        Ok(())
     } else {
         // External to external: direct copy with progress
         let file_size = fs::metadata(&from_path_kzs).map_err(|e| e.to_string())?.len();
@@ -308,6 +309,19 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             current_size += bytes_read as u64;
             progress.store((current_size * 100 / file_size) as u16, Ordering::SeqCst);
         }
+        Ok(())
+    };
+
+    // If the main copy operation failed, clean up and return error
+    if let Err(e) = result {
+        // Clean up by removing the top-level directories
+        if to_drive == "internal" {
+            fs::remove_dir_all(&to_path).ok();
+        } else {
+            fs::remove_file(&to_path_kzs).ok();
+        }
+        fs::remove_dir_all(Path::new(&to_cache).join(cart_id)).ok();
+        return Err(e);
     }
 
     // Copy cache files

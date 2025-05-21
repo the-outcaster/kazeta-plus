@@ -67,6 +67,7 @@ struct CopyOperationState {
     progress: u16,
     running: bool,
     should_clear_dialogs: bool,
+    error_message: Option<String>,
 }
 
 struct DrawContext {
@@ -196,6 +197,7 @@ fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMed
         if let Ok(mut copy_state) = state.lock() {
             copy_state.running = false;
             copy_state.should_clear_dialogs = true;
+            copy_state.error_message = Some(format!("Failed to copy save: {}", e));
         }
         return;
     }
@@ -689,6 +691,7 @@ async fn main() {
         progress: 0,
         running: false,
         should_clear_dialogs: false,
+        error_message: None,
     }));
 
 
@@ -909,6 +912,13 @@ async fn main() {
 
             if let Ok(Ok(texture)) = texture_result {
                 icon_cache.insert(cart_id.clone(), texture);
+            }
+        }
+
+        // Display any copy operation errors
+        if let Ok(mut copy_state) = copy_op_state.lock() {
+            if let Some(error_msg) = copy_state.error_message.take() {
+                dialogs.push(create_error_dialog(error_msg));
             }
         }
 
