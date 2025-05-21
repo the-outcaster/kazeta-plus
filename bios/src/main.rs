@@ -74,6 +74,13 @@ struct DrawContext {
     font: Font,
 }
 
+#[derive(Clone, Debug)]
+enum UIFocus {
+    Grid,
+    StorageLeft,
+    StorageRight,
+}
+
 struct InputState {
     up: bool,
     down: bool,
@@ -83,10 +90,15 @@ struct InputState {
     next: bool,
     prev: bool,
     analog_was_neutral: bool,
+    ui_focus: UIFocus,
+    shake_left: f32,  // Shake animation state for left arrow
+    shake_right: f32, // Shake animation state for right arrow
 }
 
 impl InputState {
     const ANALOG_DEADZONE: f32 = 0.5;  // Increased deadzone for less sensitivity
+    const SHAKE_DURATION: f32 = 0.2;    // Duration of shake animation in seconds
+    const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
 
     fn new() -> Self {
         InputState {
@@ -98,6 +110,9 @@ impl InputState {
             next: false,
             prev: false,
             analog_was_neutral: true,
+            ui_focus: UIFocus::Grid,
+            shake_left: 0.0,
+            shake_right: 0.0,
         }
     }
 
@@ -163,6 +178,25 @@ impl InputState {
 
             // Update neutral state for next frame
             self.analog_was_neutral = is_neutral;
+        }
+    }
+
+    fn update_shake(&mut self, delta_time: f32) {
+        // Update left arrow shake
+        if self.shake_left > 0.0 {
+            self.shake_left = (self.shake_left - delta_time).max(0.0);
+        }
+        // Update right arrow shake
+        if self.shake_right > 0.0 {
+            self.shake_right = (self.shake_right - delta_time).max(0.0);
+        }
+    }
+
+    fn trigger_shake(&mut self, is_left: bool) {
+        if is_left {
+            self.shake_left = Self::SHAKE_DURATION;
+        } else {
+            self.shake_right = Self::SHAKE_DURATION;
         }
     }
 }
@@ -325,17 +359,26 @@ fn render_main_view(
     storage_state: &Arc<Mutex<StorageMediaState>>,
     placeholder: &Texture2D,
     scroll_offset: usize,
+    input_state: &InputState,
 ) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
-    draw_rectangle_lines(pixel_pos(xp)-3.0-SELECTED_OFFSET, pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+
+    // Draw grid selection highlight when focused on grid
+    if let UIFocus::Grid = input_state.ui_focus {
+        draw_rectangle_lines(pixel_pos(xp)-3.0-SELECTED_OFFSET, pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+    }
 
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_HEIGHT {
             let memory_index = get_memory_index(x + GRID_WIDTH * y, scroll_offset);
 
             if xp as usize == x && yp as usize == y {
-                draw_rectangle(pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                if let UIFocus::Grid = input_state.ui_focus {
+                    draw_rectangle(pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                } else {
+                    draw_rectangle(pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+                }
             } else {
                 draw_rectangle(pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
             }
@@ -358,25 +401,110 @@ fn render_main_view(
                 pivot: None
             };
             if xp as usize == x && yp as usize == y {
-                draw_texture_ex(&icon, pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, WHITE, params);
+                if let UIFocus::Grid = input_state.ui_focus {
+                    draw_texture_ex(&icon, pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, WHITE, params);
+                } else {
+                    draw_texture_ex(&icon, pixel_pos(x as f32), pixel_pos(y as f32)+GRID_OFFSET, WHITE, params);
+                }
             } else {
                 draw_texture_ex(&icon, pixel_pos(x as f32), pixel_pos(y as f32)+GRID_OFFSET, WHITE, params);
             }
         }
     }
 
-    draw_rectangle( 16.0,310.0, 608.0, 36.0, UI_BG_COLOR);
-    draw_rectangle_lines(16.0-4.0, 310.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
+    // Storage media info area with navigation
+    const STORAGE_INFO_WIDTH: f32 = 512.0;
+    const STORAGE_INFO_X: f32 = TILE_SIZE*2.0;
+    const STORAGE_INFO_Y: f32 = 16.0;
+    const STORAGE_INFO_HEIGHT: f32 = 36.0;
+    const NAV_ARROW_SIZE: f32 = 10.0;
+    const NAV_ARROW_DISTANCE: f32 = 4.0;
+    const NAV_ARROW_OUTLINE: f32 = 1.0;
 
-    draw_rectangle( 16.0,16.0, 608.0, 36.0, UI_BG_COLOR);
-    draw_rectangle_lines(16.0-4.0, 16.0-4.0, 608.0+8.0, 36.0+8.0, 4.0, UI_BG_COLOR_DARK);
+    // Draw storage info background
+    draw_rectangle(STORAGE_INFO_X, STORAGE_INFO_Y, STORAGE_INFO_WIDTH, STORAGE_INFO_HEIGHT, UI_BG_COLOR);
+    draw_rectangle_lines(STORAGE_INFO_X-4.0, STORAGE_INFO_Y-4.0, STORAGE_INFO_WIDTH+8.0, STORAGE_INFO_HEIGHT+8.0, 4.0, UI_BG_COLOR_DARK);
 
     if let Ok(state) = storage_state.lock() {
         if !state.media.is_empty() {
-            text(&ctx, &state.media[state.selected].id, 18.0, 32.0);
-            text(&ctx, &format!("{} MB Free", state.media[state.selected].free), 18.0, 50.0);
+            // Draw left arrow background
+            let left_box_x = PADDING;  // Align with leftmost grid column
+            let left_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
+            let left_shake = if input_state.shake_left > 0.0 {
+                (input_state.shake_left / InputState::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * InputState::SHAKE_INTENSITY
+            } else {
+                0.0
+            };
+
+            if let UIFocus::StorageLeft = input_state.ui_focus {
+                draw_rectangle(left_box_x-SELECTED_OFFSET + left_shake, left_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                draw_rectangle_lines(left_box_x-3.0-SELECTED_OFFSET + left_shake, left_box_y-3.0-SELECTED_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+            } else {
+                draw_rectangle(left_box_x-2.0 + left_shake, left_box_y-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+            }
+
+            let left_offset = if let UIFocus::StorageLeft = input_state.ui_focus {
+                SELECTED_OFFSET
+            } else {
+                0.0
+            };
+
+            let left_points = [
+                Vec2::new(4.0 + left_box_x + TILE_SIZE/2.0 - NAV_ARROW_SIZE - left_offset + left_shake, left_box_y + TILE_SIZE/2.0 - left_offset),
+                Vec2::new(4.0 + left_box_x + TILE_SIZE/2.0 - left_offset + left_shake, left_box_y + TILE_SIZE/2.0 - NAV_ARROW_SIZE - left_offset),
+                Vec2::new(4.0 + left_box_x + TILE_SIZE/2.0 - left_offset + left_shake, left_box_y + TILE_SIZE/2.0 + NAV_ARROW_SIZE - left_offset),
+            ];
+            let left_color = if state.selected > 0 {
+                WHITE
+            } else {
+                Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 } // Dark gray when disabled
+            };
+            draw_triangle(left_points[0], left_points[1], left_points[2], left_color);
+            draw_triangle_lines(left_points[0], left_points[1], left_points[2], NAV_ARROW_OUTLINE, BLACK);
+
+            // Draw right arrow background
+            let right_box_x = PADDING + (GRID_WIDTH as f32 - 1.0) * (TILE_SIZE + PADDING);  // Align with rightmost grid column
+            let right_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
+            let right_shake = if input_state.shake_right > 0.0 {
+                (input_state.shake_right / InputState::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * InputState::SHAKE_INTENSITY
+            } else {
+                0.0
+            };
+
+            if let UIFocus::StorageRight = input_state.ui_focus {
+                draw_rectangle(right_box_x-SELECTED_OFFSET + right_shake, right_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                draw_rectangle_lines(right_box_x-3.0-SELECTED_OFFSET + right_shake, right_box_y-3.0-SELECTED_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+            } else {
+                draw_rectangle(right_box_x-2.0 + right_shake, right_box_y-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+            }
+
+            let right_offset = if let UIFocus::StorageRight = input_state.ui_focus {
+                SELECTED_OFFSET
+            } else {
+                0.0
+            };
+            let right_points = [
+                Vec2::new(right_box_x + TILE_SIZE/2.0 + NAV_ARROW_SIZE - 4.0 - right_offset + right_shake, right_box_y + TILE_SIZE/2.0 - right_offset),
+                Vec2::new(right_box_x + TILE_SIZE/2.0 - 4.0 - right_offset + right_shake, right_box_y + TILE_SIZE/2.0 - NAV_ARROW_SIZE - right_offset),
+                Vec2::new(right_box_x + TILE_SIZE/2.0 - 4.0 - right_offset + right_shake, right_box_y + TILE_SIZE/2.0 + NAV_ARROW_SIZE - right_offset),
+            ];
+            let right_color = if state.selected < state.media.len() - 1 {
+                WHITE
+            } else {
+                Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 } // Dark gray when disabled
+            };
+            draw_triangle(right_points[0], right_points[1], right_points[2], right_color);
+            draw_triangle_lines(right_points[0], right_points[1], right_points[2], NAV_ARROW_OUTLINE, BLACK);
+
+            // Draw storage info text
+            text(&ctx, &state.media[state.selected].id, STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 17.0);
+            text(&ctx, &format!("{} MB Free", state.media[state.selected].free), STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 33.0);
         }
     }
+
+    // Draw highlight box for save info
+    draw_rectangle(16.0, 309.0, SCREEN_WIDTH as f32 - 32.0, 40.0, UI_BG_COLOR);
+    draw_rectangle_lines(12.0, 305.0, SCREEN_WIDTH as f32 - 24.0, 48.0, 4.0, UI_BG_COLOR_DARK);
 
     let memory_index = get_memory_index(selected_memory, scroll_offset);
     if let Some(selected_mem) = memories.get(memory_index) {
@@ -384,8 +512,9 @@ fn render_main_view(
             Some(name) => name,
             None => selected_mem.id.clone(),
         };
-        text(&ctx, &desc, 18.0, 326.0);
-        text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 18.0, 344.0);
+
+        text(&ctx, &desc, 19.0, 327.0);
+        text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 19.0, 345.0);
     }
 
     // Draw scroll indicators last so they appear on top
@@ -761,35 +890,14 @@ async fn main() {
         input_state.update_keyboard();
         input_state.update_controller(&mut gilrs);
 
+        // Update shake animations
+        input_state.update_shake(get_frame_time());
+
         match dialogs.last_mut() {
             None => {
-                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset);
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &input_state);
 
-                if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
-                    selected_memory += 1;
-                }
-                if input_state.left && selected_memory >= 1 {
-                    selected_memory -= 1;
-                }
-                if input_state.down {
-                    if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
-                        selected_memory += GRID_WIDTH;
-                    } else {
-                        // Check if there are any saves in the next row
-                        let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
-                        if next_row_start < memories.len() {
-                            scroll_offset += 1;
-                        }
-                    }
-                }
-                if input_state.up {
-                    if selected_memory >= GRID_WIDTH {
-                        selected_memory -= GRID_WIDTH;
-                    } else if scroll_offset > 0 {
-                        scroll_offset -= 1;
-                    }
-                }
-
+                // Handle storage media switching with tab/bumpers regardless of focus
                 if input_state.next || input_state.prev {
                     if let Ok(mut state) = storage_state.lock() {
                         if state.media.len() > 1 {
@@ -799,15 +907,113 @@ async fn main() {
                                 state.selected = (state.selected + state.media.len() - 1) % state.media.len();
                             }
                             memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                            scroll_offset = 0;  // Reset scroll offset when switching media
+                            scroll_offset = 0;
                         }
                     }
                 }
 
+                match input_state.ui_focus {
+                    UIFocus::Grid => {
+                        if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
+                            selected_memory += 1;
+                        }
+                        if input_state.left && selected_memory >= 1 {
+                            selected_memory -= 1;
+                        }
+                        if input_state.down {
+                            if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
+                                selected_memory += GRID_WIDTH;
+                            } else {
+                                // Check if there are any saves in the next row
+                                let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
+                                if next_row_start < memories.len() {
+                                    scroll_offset += 1;
+                                }
+                            }
+                        }
+                        if input_state.up {
+                            if selected_memory >= GRID_WIDTH {
+                                selected_memory -= GRID_WIDTH;
+                            } else if scroll_offset > 0 {
+                                scroll_offset -= 1;
+                            } else {
+                                // Allow moving to storage navigation from leftmost or rightmost column
+                                if selected_memory % GRID_WIDTH == 0 {
+                                    input_state.ui_focus = UIFocus::StorageLeft;
+                                } else if selected_memory % GRID_WIDTH == GRID_WIDTH - 1 {
+                                    input_state.ui_focus = UIFocus::StorageRight;
+                                }
+                            }
+                        }
+                    },
+                    UIFocus::StorageLeft => {
+                        if input_state.right {
+                            input_state.ui_focus = UIFocus::StorageRight;
+                        }
+                        if input_state.down {
+                            input_state.ui_focus = UIFocus::Grid;
+                            selected_memory = 0; // Move to leftmost grid position
+                        }
+                        if input_state.select {
+                            if let Ok(mut state) = storage_state.lock() {
+                                if state.selected > 0 {
+                                    state.selected -= 1;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                    scroll_offset = 0;
+                                } else {
+                                    input_state.trigger_shake(true);
+                                }
+                            }
+                        }
+                    },
+                    UIFocus::StorageRight => {
+                        if input_state.left {
+                            input_state.ui_focus = UIFocus::StorageLeft;
+                        }
+                        if input_state.down {
+                            input_state.ui_focus = UIFocus::Grid;
+                            selected_memory = GRID_WIDTH - 1; // Move to rightmost grid position
+                        }
+                        if input_state.select {
+                            if let Ok(mut state) = storage_state.lock() {
+                                if state.selected < state.media.len() - 1 {
+                                    state.selected += 1;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                    scroll_offset = 0;
+                                } else {
+                                    input_state.trigger_shake(false);
+                                }
+                            }
+                        }
+                    },
+                }
+
                 if input_state.select {
-                    let memory_index = get_memory_index(selected_memory, scroll_offset);
-                    if let Some(_) = memories.get(memory_index) {
-                        dialogs.push(create_main_dialog(&storage_state));
+                    match input_state.ui_focus {
+                        UIFocus::Grid => {
+                            let memory_index = get_memory_index(selected_memory, scroll_offset);
+                            if let Some(_) = memories.get(memory_index) {
+                                dialogs.push(create_main_dialog(&storage_state));
+                            }
+                        },
+                        UIFocus::StorageLeft => {
+                            if let Ok(mut state) = storage_state.lock() {
+                                if state.selected > 0 {
+                                    state.selected -= 1;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                    scroll_offset = 0;
+                                }
+                            }
+                        },
+                        UIFocus::StorageRight => {
+                            if let Ok(mut state) = storage_state.lock() {
+                                if state.selected < state.media.len() - 1 {
+                                    state.selected += 1;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                    scroll_offset = 0;
+                                }
+                            }
+                        },
                     }
                 }
             },
