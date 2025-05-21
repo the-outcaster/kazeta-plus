@@ -89,6 +89,7 @@ struct InputState {
     select: bool,
     next: bool,
     prev: bool,
+    cycle: bool,
     analog_was_neutral: bool,
     ui_focus: UIFocus,
     shake_left: f32,  // Shake animation state for left arrow
@@ -109,6 +110,7 @@ impl InputState {
             select: false,
             next: false,
             prev: false,
+            cycle: false,
             analog_was_neutral: true,
             ui_focus: UIFocus::Grid,
             shake_left: 0.0,
@@ -122,8 +124,9 @@ impl InputState {
         self.left = is_key_pressed(KeyCode::Left);
         self.right = is_key_pressed(KeyCode::Right);
         self.select = is_key_pressed(KeyCode::Enter);
-        self.next = is_key_pressed(KeyCode::Tab);
-        self.prev = false;  // No keyboard mapping for prev
+        self.next = is_key_pressed(KeyCode::RightBracket);
+        self.prev = is_key_pressed(KeyCode::LeftBracket);
+        self.cycle = is_key_pressed(KeyCode::Tab);
     }
 
     fn update_controller(&mut self, gilrs: &mut Gilrs) {
@@ -898,16 +901,33 @@ async fn main() {
                 render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &input_state);
 
                 // Handle storage media switching with tab/bumpers regardless of focus
-                if input_state.next || input_state.prev {
+                if input_state.cycle || input_state.next || input_state.prev {
                     if let Ok(mut state) = storage_state.lock() {
                         if state.media.len() > 1 {
-                            if input_state.next {
+                            if input_state.cycle {
+                                // Cycle wraps around
                                 state.selected = (state.selected + 1) % state.media.len();
-                            } else {
-                                state.selected = (state.selected + state.media.len() - 1) % state.media.len();
+                                memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                scroll_offset = 0;
+                            } else if input_state.next {
+                                // Next stops at end
+                                if state.selected < state.media.len() - 1 {
+                                    state.selected += 1;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                    scroll_offset = 0;
+                                } else {
+                                    input_state.trigger_shake(false); // Shake right arrow when can't go next
+                                }
+                            } else if input_state.prev {
+                                // Prev stops at beginning
+                                if state.selected > 0 {
+                                    state.selected -= 1;
+                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                    scroll_offset = 0;
+                                } else {
+                                    input_state.trigger_shake(true); // Shake left arrow when can't go prev
+                                }
                             }
-                            memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                            scroll_offset = 0;
                         }
                     }
                 }
