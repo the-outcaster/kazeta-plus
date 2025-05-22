@@ -1,4 +1,4 @@
-use macroquad::prelude::*;
+use macroquad::{audio, prelude::*};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
@@ -23,6 +23,51 @@ const UI_BG_COLOR_DARK: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.3 };
 const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
+struct SoundEffects {
+    cursor_move: audio::Sound,
+    select: audio::Sound,
+    reject: audio::Sound,
+    back: audio::Sound,
+}
+
+impl SoundEffects {
+    async fn new() -> Self {
+        SoundEffects {
+            cursor_move: audio::load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap(),
+            select: audio::load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap(),
+            reject: audio::load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap(),
+            back: audio::load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap(),
+        }
+    }
+
+    fn play_cursor_move(&self) {
+        audio::play_sound(&self.cursor_move, audio::PlaySoundParams {
+            looped: false,
+            volume: 0.25,
+        });
+    }
+
+    fn play_select(&self) {
+        audio::play_sound(&self.select, audio::PlaySoundParams {
+            looped: false,
+            volume: 0.75,
+        });
+    }
+
+    fn play_reject(&self) {
+        audio::play_sound(&self.reject, audio::PlaySoundParams {
+            looped: false,
+            volume: 0.75,
+        });
+    }
+
+    fn play_back(&self) {
+        audio::play_sound(&self.back, audio::PlaySoundParams {
+            looped: false,
+            volume: 0.75,
+        });
+    }
+}
 
 fn window_conf() -> Conf {
     Conf {
@@ -915,6 +960,9 @@ async fn main() {
         font: font,
     };
 
+    // Initialize sound effects
+    let sound_effects = SoundEffects::new().await;
+
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().unwrap();
     let mut input_state = InputState::new();
@@ -1033,12 +1081,14 @@ async fn main() {
                                 state.selected = (state.selected + 1) % state.media.len();
                                 memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                 scroll_offset = 0;
+                                sound_effects.play_cursor_move();
                             } else if input_state.next {
                                 // Next stops at end
                                 if state.selected < state.media.len() - 1 {
                                     state.selected += 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
+                                    sound_effects.play_cursor_move();
                                 } else {
                                     animation_state.trigger_shake(false); // Shake right arrow when can't go next
                                 }
@@ -1048,6 +1098,7 @@ async fn main() {
                                     state.selected -= 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
+                                    sound_effects.play_cursor_move();
                                 } else {
                                     animation_state.trigger_shake(true); // Shake left arrow when can't go prev
                                 }
@@ -1061,21 +1112,25 @@ async fn main() {
                         if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                             selected_memory += 1;
                             animation_state.trigger_transition();
+                            sound_effects.play_cursor_move();
                         }
                         if input_state.left && selected_memory >= 1 {
                             selected_memory -= 1;
                             animation_state.trigger_transition();
+                            sound_effects.play_cursor_move();
                         }
                         if input_state.down {
                             if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
                                 selected_memory += GRID_WIDTH;
                                 animation_state.trigger_transition();
+                                sound_effects.play_cursor_move();
                             } else {
                                 // Check if there are any saves in the next row
                                 let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
                                 if next_row_start < memories.len() {
                                     scroll_offset += 1;
                                     animation_state.trigger_transition();
+                                    sound_effects.play_cursor_move();
                                 }
                             }
                         }
@@ -1083,17 +1138,21 @@ async fn main() {
                             if selected_memory >= GRID_WIDTH {
                                 selected_memory -= GRID_WIDTH;
                                 animation_state.trigger_transition();
+                                sound_effects.play_cursor_move();
                             } else if scroll_offset > 0 {
                                 scroll_offset -= 1;
                                 animation_state.trigger_transition();
+                                sound_effects.play_cursor_move();
                             } else {
                                 // Allow moving to storage navigation from leftmost or rightmost column
                                 if selected_memory % GRID_WIDTH == 0 {
                                     input_state.ui_focus = UIFocus::StorageLeft;
                                     animation_state.trigger_transition();
+                                    sound_effects.play_cursor_move();
                                 } else if selected_memory % GRID_WIDTH == GRID_WIDTH - 1 {
                                     input_state.ui_focus = UIFocus::StorageRight;
                                     animation_state.trigger_transition();
+                                    sound_effects.play_cursor_move();
                                 }
                             }
                         }
@@ -1102,11 +1161,13 @@ async fn main() {
                         if input_state.right {
                             input_state.ui_focus = UIFocus::StorageRight;
                             animation_state.trigger_transition();
+                            sound_effects.play_cursor_move();
                         }
                         if input_state.down {
                             input_state.ui_focus = UIFocus::Grid;
                             selected_memory = 0; // Move to leftmost grid position
                             animation_state.trigger_transition();
+                            sound_effects.play_cursor_move();
                         }
                         if input_state.select {
                             if let Ok(mut state) = storage_state.lock() {
@@ -1114,8 +1175,10 @@ async fn main() {
                                     state.selected -= 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
+                                    sound_effects.play_select();
                                 } else {
                                     animation_state.trigger_shake(true);
+                                    sound_effects.play_reject();
                                 }
                             }
                         }
@@ -1124,11 +1187,13 @@ async fn main() {
                         if input_state.left {
                             input_state.ui_focus = UIFocus::StorageLeft;
                             animation_state.trigger_transition();
+                            sound_effects.play_cursor_move();
                         }
                         if input_state.down {
                             input_state.ui_focus = UIFocus::Grid;
                             selected_memory = GRID_WIDTH - 1; // Move to rightmost grid position
                             animation_state.trigger_transition();
+                            sound_effects.play_cursor_move();
                         }
                         if input_state.select {
                             if let Ok(mut state) = storage_state.lock() {
@@ -1136,8 +1201,10 @@ async fn main() {
                                     state.selected += 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
+                                    sound_effects.play_select();
                                 } else {
                                     animation_state.trigger_shake(false);
+                                    sound_effects.play_reject();
                                 }
                             }
                         }
@@ -1150,6 +1217,7 @@ async fn main() {
                             let memory_index = get_memory_index(selected_memory, scroll_offset);
                             if let Some(_) = memories.get(memory_index) {
                                 dialogs.push(create_main_dialog(&storage_state));
+                                sound_effects.play_select();
                             }
                         },
                         UIFocus::StorageLeft => {
@@ -1158,6 +1226,7 @@ async fn main() {
                                     state.selected -= 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
+                                    sound_effects.play_select();
                                 }
                             }
                         },
@@ -1167,6 +1236,7 @@ async fn main() {
                                     state.selected += 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
+                                    sound_effects.play_select();
                                 }
                             }
                         },
@@ -1180,11 +1250,13 @@ async fn main() {
                 if input_state.up {
                     selection -= 1;
                     animation_state.trigger_transition();
+                    sound_effects.play_cursor_move();
                 }
 
                 if input_state.down {
                     selection += 1;
                     animation_state.trigger_transition();
+                    sound_effects.play_cursor_move();
                 }
 
                 let next_selection = selection as usize % dialog.options.len();
@@ -1197,8 +1269,15 @@ async fn main() {
                     if !selected_option.disabled {
                         action_dialog_id = dialog.id.clone();
                         action_option_value = selected_option.value.clone();
+                        // Play back sound for cancel/back actions, select sound for others
+                        if selected_option.value == "CANCEL" || selected_option.value == "OK" {
+                            sound_effects.play_back();
+                        } else {
+                            sound_effects.play_select();
+                        }
                     } else {
                         animation_state.trigger_dialog_shake();
+                        sound_effects.play_reject();
                     }
                 }
 
