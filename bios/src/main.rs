@@ -81,6 +81,94 @@ enum UIFocus {
     StorageRight,
 }
 
+struct AnimationState {
+    shake_left: f32,  // Shake animation state for left arrow
+    shake_right: f32, // Shake animation state for right arrow
+    shake_dialog: f32, // Shake animation state for dialog options
+    cursor_animation_time: f32, // Time counter for cursor animations
+    cursor_transition_time: f32, // Time counter for cursor transition animation
+}
+
+impl AnimationState {
+    const SHAKE_DURATION: f32 = 0.2;    // Duration of shake animation in seconds
+    const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
+    const CURSOR_ANIMATION_SPEED: f32 = 10.0; // Speed of cursor color animation
+    const CURSOR_TRANSITION_DURATION: f32 = 0.15; // Duration of cursor transition animation
+
+    fn new() -> Self {
+        AnimationState {
+            shake_left: 0.0,
+            shake_right: 0.0,
+            shake_dialog: 0.0,
+            cursor_animation_time: 0.0,
+            cursor_transition_time: 0.0,
+        }
+    }
+
+    fn calculate_shake_offset(&self, shake_time: f32) -> f32 {
+        if shake_time > 0.0 {
+            (shake_time / Self::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * Self::SHAKE_INTENSITY
+        } else {
+            0.0
+        }
+    }
+
+    fn update_shake(&mut self, delta_time: f32) {
+        // Update left arrow shake
+        if self.shake_left > 0.0 {
+            self.shake_left = (self.shake_left - delta_time).max(0.0);
+        }
+        // Update right arrow shake
+        if self.shake_right > 0.0 {
+            self.shake_right = (self.shake_right - delta_time).max(0.0);
+        }
+        // Update dialog shake
+        if self.shake_dialog > 0.0 {
+            self.shake_dialog = (self.shake_dialog - delta_time).max(0.0);
+        }
+    }
+
+    fn update_cursor_animation(&mut self, delta_time: f32) {
+        // Update cursor animation
+        self.cursor_animation_time = (self.cursor_animation_time + delta_time * Self::CURSOR_ANIMATION_SPEED) % (2.0 * std::f32::consts::PI);
+        // Update cursor transition
+        if self.cursor_transition_time > 0.0 {
+            self.cursor_transition_time = (self.cursor_transition_time - delta_time).max(0.0);
+        }
+    }
+
+    fn trigger_shake(&mut self, is_left: bool) {
+        if is_left {
+            self.shake_left = Self::SHAKE_DURATION;
+        } else {
+            self.shake_right = Self::SHAKE_DURATION;
+        }
+    }
+
+    fn trigger_dialog_shake(&mut self) {
+        self.shake_dialog = Self::SHAKE_DURATION;
+    }
+
+    fn trigger_transition(&mut self) {
+        self.cursor_transition_time = Self::CURSOR_TRANSITION_DURATION;
+    }
+
+    fn get_cursor_color(&self) -> Color {
+        let c = (self.cursor_animation_time.sin() * 0.5 + 0.5).max(0.3);
+        Color { r: c, g: c, b: c, a: c }
+    }
+
+    fn get_cursor_scale(&self) -> f32 {
+        if self.cursor_transition_time > 0.0 {
+            let t = self.cursor_transition_time / Self::CURSOR_TRANSITION_DURATION;
+            // Start at 1.5x size and smoothly transition to 1.0x
+            1.0 + 0.5 * t
+        } else {
+            1.0
+        }
+    }
+}
+
 struct InputState {
     up: bool,
     down: bool,
@@ -92,15 +180,10 @@ struct InputState {
     cycle: bool,
     analog_was_neutral: bool,
     ui_focus: UIFocus,
-    shake_left: f32,  // Shake animation state for left arrow
-    shake_right: f32, // Shake animation state for right arrow
-    shake_dialog: f32, // Shake animation state for dialog options
 }
 
 impl InputState {
     const ANALOG_DEADZONE: f32 = 0.5;  // Increased deadzone for less sensitivity
-    const SHAKE_DURATION: f32 = 0.2;    // Duration of shake animation in seconds
-    const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
 
     fn new() -> Self {
         InputState {
@@ -114,17 +197,6 @@ impl InputState {
             cycle: false,
             analog_was_neutral: true,
             ui_focus: UIFocus::Grid,
-            shake_left: 0.0,
-            shake_right: 0.0,
-            shake_dialog: 0.0,
-        }
-    }
-
-    fn calculate_shake_offset(&self, shake_time: f32) -> f32 {
-        if shake_time > 0.0 {
-            (shake_time / Self::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * Self::SHAKE_INTENSITY
-        } else {
-            0.0
         }
     }
 
@@ -192,33 +264,6 @@ impl InputState {
             // Update neutral state for next frame
             self.analog_was_neutral = is_neutral;
         }
-    }
-
-    fn update_shake(&mut self, delta_time: f32) {
-        // Update left arrow shake
-        if self.shake_left > 0.0 {
-            self.shake_left = (self.shake_left - delta_time).max(0.0);
-        }
-        // Update right arrow shake
-        if self.shake_right > 0.0 {
-            self.shake_right = (self.shake_right - delta_time).max(0.0);
-        }
-        // Update dialog shake
-        if self.shake_dialog > 0.0 {
-            self.shake_dialog = (self.shake_dialog - delta_time).max(0.0);
-        }
-    }
-
-    fn trigger_shake(&mut self, is_left: bool) {
-        if is_left {
-            self.shake_left = Self::SHAKE_DURATION;
-        } else {
-            self.shake_right = Self::SHAKE_DURATION;
-        }
-    }
-
-    fn trigger_dialog_shake(&mut self) {
-        self.shake_dialog = Self::SHAKE_DURATION;
     }
 }
 
@@ -380,14 +425,30 @@ fn render_main_view(
     storage_state: &Arc<Mutex<StorageMediaState>>,
     placeholder: &Texture2D,
     scroll_offset: usize,
-    input_state: &InputState,
+    input_state: &mut InputState,
+    animation_state: &mut AnimationState,
 ) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
 
     // Draw grid selection highlight when focused on grid
     if let UIFocus::Grid = input_state.ui_focus {
-        draw_rectangle_lines(pixel_pos(xp)-3.0-SELECTED_OFFSET, pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+        let cursor_color = animation_state.get_cursor_color();
+        let cursor_thickness = 6.0;
+        let cursor_scale = animation_state.get_cursor_scale();
+
+        let base_size = TILE_SIZE + 6.0;
+        let scaled_size = base_size * cursor_scale;
+        let offset = (scaled_size - base_size) / 2.0;
+
+        draw_rectangle_lines(
+            pixel_pos(xp)-3.0-SELECTED_OFFSET - offset,
+            pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET - offset,
+            scaled_size,
+            scaled_size,
+            cursor_thickness,
+            cursor_color
+        );
     }
 
     for x in 0..GRID_WIDTH {
@@ -450,11 +511,26 @@ fn render_main_view(
             // Draw left arrow background
             let left_box_x = PADDING;  // Align with leftmost grid column
             let left_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
-            let left_shake = input_state.calculate_shake_offset(input_state.shake_left);
+            let left_shake = animation_state.calculate_shake_offset(animation_state.shake_left);
 
             if let UIFocus::StorageLeft = input_state.ui_focus {
+                let cursor_color = animation_state.get_cursor_color();
+                let cursor_thickness = 6.0;
+                let cursor_scale = animation_state.get_cursor_scale();
+
+                let base_size = TILE_SIZE + 6.0;
+                let scaled_size = base_size * cursor_scale;
+                let offset = (scaled_size - base_size) / 2.0;
+
                 draw_rectangle(left_box_x-SELECTED_OFFSET + left_shake, left_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
-                draw_rectangle_lines(left_box_x-3.0-SELECTED_OFFSET + left_shake, left_box_y-3.0-SELECTED_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+                draw_rectangle_lines(
+                    left_box_x-3.0-SELECTED_OFFSET + left_shake - offset,
+                    left_box_y-3.0-SELECTED_OFFSET - offset,
+                    scaled_size,
+                    scaled_size,
+                    cursor_thickness,
+                    cursor_color
+                );
             } else {
                 draw_rectangle(left_box_x-2.0 + left_shake, left_box_y-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
             }
@@ -481,11 +557,26 @@ fn render_main_view(
             // Draw right arrow background
             let right_box_x = PADDING + (GRID_WIDTH as f32 - 1.0) * (TILE_SIZE + PADDING);  // Align with rightmost grid column
             let right_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
-            let right_shake = input_state.calculate_shake_offset(input_state.shake_right);
+            let right_shake = animation_state.calculate_shake_offset(animation_state.shake_right);
 
             if let UIFocus::StorageRight = input_state.ui_focus {
+                let cursor_color = animation_state.get_cursor_color();
+                let cursor_thickness = 6.0;
+                let cursor_scale = animation_state.get_cursor_scale();
+
+                let base_size = TILE_SIZE + 6.0;
+                let scaled_size = base_size * cursor_scale;
+                let offset = (scaled_size - base_size) / 2.0;
+
                 draw_rectangle(right_box_x-SELECTED_OFFSET + right_shake, right_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
-                draw_rectangle_lines(right_box_x-3.0-SELECTED_OFFSET + right_shake, right_box_y-3.0-SELECTED_OFFSET, TILE_SIZE+6.0, TILE_SIZE+6.0, 6.0, Color { r: 1.0, g: 1.0, b: 1.0, a: 0.8});
+                draw_rectangle_lines(
+                    right_box_x-3.0-SELECTED_OFFSET + right_shake - offset,
+                    right_box_y-3.0-SELECTED_OFFSET - offset,
+                    scaled_size,
+                    scaled_size,
+                    cursor_thickness,
+                    cursor_color
+                );
             } else {
                 draw_rectangle(right_box_x-2.0 + right_shake, right_box_y-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
             }
@@ -569,7 +660,7 @@ fn render_dialog(
     copy_op_state: &Arc<Mutex<CopyOperationState>>,
     placeholder: &Texture2D,
     scroll_offset: usize,
-    input_state: &InputState,
+    animation_state: &AnimationState,
 ) {
     let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
@@ -654,7 +745,7 @@ fn render_dialog(
         for (i, option) in dialog.options.iter().enumerate() {
             let y_pos = (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32;
             let shake_offset = if option.disabled {
-                input_state.calculate_shake_offset(input_state.shake_dialog)
+                animation_state.calculate_shake_offset(animation_state.shake_dialog)
             } else {
                 0.0
             };
@@ -669,17 +760,27 @@ fn render_dialog(
         let selection_y = (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
         let selected_option = &dialog.options[dialog.selection];
         let selection_shake = if selected_option.disabled {
-            input_state.calculate_shake_offset(input_state.shake_dialog)
+            animation_state.calculate_shake_offset(animation_state.shake_dialog)
         } else {
             0.0
         };
+
+        let cursor_color = animation_state.get_cursor_color();
+        let cursor_scale = animation_state.get_cursor_scale();
+        let base_width = longest_width + (SELECTION_PADDING_X * 2.0);
+        let base_height = 1.2*FONT_SIZE as f32 + (SELECTION_PADDING_Y * 2.0);
+        let scaled_width = base_width * cursor_scale;
+        let scaled_height = base_height * cursor_scale;
+        let offset_x = (scaled_width - base_width) / 2.0;
+        let offset_y = (scaled_height - base_height) / 2.0;
+
         draw_rectangle_lines(
-            options_start_x - SELECTION_PADDING_X + selection_shake,
-            selection_y - SELECTION_PADDING_Y,
-            longest_width + (SELECTION_PADDING_X * 2.0),
-            1.2*FONT_SIZE as f32 + (SELECTION_PADDING_Y * 2.0),
+            options_start_x - SELECTION_PADDING_X + selection_shake - offset_x,
+            selection_y - SELECTION_PADDING_Y - offset_y,
+            scaled_width,
+            scaled_height,
             4.0,
-            Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+            cursor_color
         );
     }
 }
@@ -817,6 +918,7 @@ async fn main() {
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().unwrap();
     let mut input_state = InputState::new();
+    let mut animation_state = AnimationState::new();
 
     // Create thread-safe storage media state
     let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
@@ -914,12 +1016,13 @@ async fn main() {
         input_state.update_keyboard();
         input_state.update_controller(&mut gilrs);
 
-        // Update shake animations
-        input_state.update_shake(get_frame_time());
+        // Update animations
+        animation_state.update_shake(get_frame_time());
+        animation_state.update_cursor_animation(get_frame_time());
 
         match dialogs.last_mut() {
             None => {
-                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &input_state);
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
 
                 // Handle storage media switching with tab/bumpers regardless of focus
                 if input_state.cycle || input_state.next || input_state.prev {
@@ -937,7 +1040,7 @@ async fn main() {
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
                                 } else {
-                                    input_state.trigger_shake(false); // Shake right arrow when can't go next
+                                    animation_state.trigger_shake(false); // Shake right arrow when can't go next
                                 }
                             } else if input_state.prev {
                                 // Prev stops at beginning
@@ -946,7 +1049,7 @@ async fn main() {
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
                                 } else {
-                                    input_state.trigger_shake(true); // Shake left arrow when can't go prev
+                                    animation_state.trigger_shake(true); // Shake left arrow when can't go prev
                                 }
                             }
                         }
@@ -957,32 +1060,40 @@ async fn main() {
                     UIFocus::Grid => {
                         if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                             selected_memory += 1;
+                            animation_state.trigger_transition();
                         }
                         if input_state.left && selected_memory >= 1 {
                             selected_memory -= 1;
+                            animation_state.trigger_transition();
                         }
                         if input_state.down {
                             if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
                                 selected_memory += GRID_WIDTH;
+                                animation_state.trigger_transition();
                             } else {
                                 // Check if there are any saves in the next row
                                 let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
                                 if next_row_start < memories.len() {
                                     scroll_offset += 1;
+                                    animation_state.trigger_transition();
                                 }
                             }
                         }
                         if input_state.up {
                             if selected_memory >= GRID_WIDTH {
                                 selected_memory -= GRID_WIDTH;
+                                animation_state.trigger_transition();
                             } else if scroll_offset > 0 {
                                 scroll_offset -= 1;
+                                animation_state.trigger_transition();
                             } else {
                                 // Allow moving to storage navigation from leftmost or rightmost column
                                 if selected_memory % GRID_WIDTH == 0 {
                                     input_state.ui_focus = UIFocus::StorageLeft;
+                                    animation_state.trigger_transition();
                                 } else if selected_memory % GRID_WIDTH == GRID_WIDTH - 1 {
                                     input_state.ui_focus = UIFocus::StorageRight;
+                                    animation_state.trigger_transition();
                                 }
                             }
                         }
@@ -990,10 +1101,12 @@ async fn main() {
                     UIFocus::StorageLeft => {
                         if input_state.right {
                             input_state.ui_focus = UIFocus::StorageRight;
+                            animation_state.trigger_transition();
                         }
                         if input_state.down {
                             input_state.ui_focus = UIFocus::Grid;
                             selected_memory = 0; // Move to leftmost grid position
+                            animation_state.trigger_transition();
                         }
                         if input_state.select {
                             if let Ok(mut state) = storage_state.lock() {
@@ -1002,7 +1115,7 @@ async fn main() {
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
                                 } else {
-                                    input_state.trigger_shake(true);
+                                    animation_state.trigger_shake(true);
                                 }
                             }
                         }
@@ -1010,10 +1123,12 @@ async fn main() {
                     UIFocus::StorageRight => {
                         if input_state.left {
                             input_state.ui_focus = UIFocus::StorageLeft;
+                            animation_state.trigger_transition();
                         }
                         if input_state.down {
                             input_state.ui_focus = UIFocus::Grid;
                             selected_memory = GRID_WIDTH - 1; // Move to rightmost grid position
+                            animation_state.trigger_transition();
                         }
                         if input_state.select {
                             if let Ok(mut state) = storage_state.lock() {
@@ -1022,7 +1137,7 @@ async fn main() {
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
                                 } else {
-                                    input_state.trigger_shake(false);
+                                    animation_state.trigger_shake(false);
                                 }
                             }
                         }
@@ -1059,15 +1174,17 @@ async fn main() {
                 }
             },
             Some(dialog) => {
-                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &input_state);
+                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state);
 
                 let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                 if input_state.up {
                     selection -= 1;
+                    animation_state.trigger_transition();
                 }
 
                 if input_state.down {
                     selection += 1;
+                    animation_state.trigger_transition();
                 }
 
                 let next_selection = selection as usize % dialog.options.len();
@@ -1081,7 +1198,7 @@ async fn main() {
                         action_dialog_id = dialog.id.clone();
                         action_option_value = selected_option.value.clone();
                     } else {
-                        input_state.trigger_dialog_shake();
+                        animation_state.trigger_dialog_shake();
                     }
                 }
 
