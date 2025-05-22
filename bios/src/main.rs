@@ -132,6 +132,10 @@ struct AnimationState {
     shake_dialog: f32, // Shake animation state for dialog options
     cursor_animation_time: f32, // Time counter for cursor animations
     cursor_transition_time: f32, // Time counter for cursor transition animation
+    dialog_transition_time: f32, // Time counter for dialog transition animation
+    dialog_transition_progress: f32, // Progress of dialog transition (0.0 to 1.0)
+    dialog_transition_start_pos: Vec2, // Starting position for icon transition
+    dialog_transition_end_pos: Vec2, // Ending position for icon transition
 }
 
 impl AnimationState {
@@ -139,6 +143,7 @@ impl AnimationState {
     const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
     const CURSOR_ANIMATION_SPEED: f32 = 10.0; // Speed of cursor color animation
     const CURSOR_TRANSITION_DURATION: f32 = 0.15; // Duration of cursor transition animation
+    const DIALOG_TRANSITION_DURATION: f32 = 0.4; // Duration of dialog transition animation
 
     fn new() -> Self {
         AnimationState {
@@ -147,6 +152,10 @@ impl AnimationState {
             shake_dialog: 0.0,
             cursor_animation_time: 0.0,
             cursor_transition_time: 0.0,
+            dialog_transition_time: 0.0,
+            dialog_transition_progress: 0.0,
+            dialog_transition_start_pos: Vec2::ZERO,
+            dialog_transition_end_pos: Vec2::ZERO,
         }
     }
 
@@ -211,6 +220,27 @@ impl AnimationState {
         } else {
             1.0
         }
+    }
+
+    fn update_dialog_transition(&mut self, delta_time: f32) {
+        if self.dialog_transition_time > 0.0 {
+            self.dialog_transition_time = (self.dialog_transition_time - delta_time).max(0.0);
+            self.dialog_transition_progress = 1.0 - (self.dialog_transition_time / Self::DIALOG_TRANSITION_DURATION);
+        }
+    }
+
+    fn trigger_dialog_transition(&mut self, start_pos: Vec2, end_pos: Vec2) {
+        self.dialog_transition_time = Self::DIALOG_TRANSITION_DURATION;
+        self.dialog_transition_progress = 0.0;
+        self.dialog_transition_start_pos = start_pos;
+        self.dialog_transition_end_pos = end_pos;
+    }
+
+    fn get_dialog_transition_pos(&self) -> Vec2 {
+        let t = self.dialog_transition_progress;
+        // Use smooth easing function
+        let t = t * t * (3.0 - 2.0 * t);
+        self.dialog_transition_start_pos.lerp(self.dialog_transition_end_pos, t)
     }
 }
 
@@ -462,6 +492,17 @@ fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
     selected_memory + GRID_WIDTH * scroll_offset
 }
 
+fn calculate_icon_transition_positions(selected_memory: usize) -> (Vec2, Vec2) {
+    let xp = (selected_memory % GRID_WIDTH) as f32;
+    let yp = (selected_memory / GRID_WIDTH) as f32;
+    let grid_pos = Vec2::new(
+        pixel_pos(xp),
+        pixel_pos(yp) + GRID_OFFSET
+    );
+    let dialog_pos = Vec2::new(PADDING, PADDING);
+    (grid_pos, dialog_pos)
+}
+
 fn render_main_view(
     ctx: &DrawContext,
     selected_memory: usize,
@@ -513,6 +554,11 @@ fn render_main_view(
             let Some(mem) = memories.get(memory_index) else {
                 continue;
             };
+
+            // Skip rendering the icon at its grid position during transitions
+            if xp as usize == x && yp as usize == y && animation_state.dialog_transition_time > 0.0 {
+                continue;
+            }
 
             let icon = match icon_cache.get(&mem.id) {
                 Some(icon) => icon,
@@ -715,14 +761,17 @@ fn render_dialog(
         }
     };
 
-    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+    // Only show dialog background and content when animation is complete
+    if animation_state.dialog_transition_progress >= 1.0 {
+        draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+    }
 
     // draw game icon and name
     let memory_index = get_memory_index(selected_memory, scroll_offset);
     if let Some(mem) = memories.get(memory_index) {
         let icon = match icon_cache.get(&mem.id) {
             Some(icon) => icon,
-            None => placeholder,
+            None => &placeholder,
         };
 
         let params = DrawTextureParams {
@@ -734,14 +783,19 @@ fn render_dialog(
             pivot: None
         };
 
-        draw_texture_ex(&icon, PADDING as f32, PADDING as f32, WHITE, params);
+        // Use transition position for icon
+        let icon_pos = animation_state.get_dialog_transition_pos();
+        draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
 
-        let desc = match mem.name.clone() {
-            Some(name) => name,
-            None => mem.id.clone(),
-        };
-        text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
-        text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+        // Only show text when animation is complete
+        if animation_state.dialog_transition_progress >= 1.0 {
+            let desc = match mem.name.clone() {
+                Some(name) => name,
+                None => mem.id.clone(),
+            };
+            text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
+            text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+        }
     };
 
     if copy_running {
@@ -760,7 +814,7 @@ fn render_dialog(
             0.8*FONT_SIZE as f32,
             Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
         );
-    } else {
+    } else if animation_state.dialog_transition_progress >= 1.0 {
         if let Some(desc) = dialog.desc.clone() {
             text(&ctx, &desc, (FONT_SIZE*5) as f32, (FONT_SIZE*5) as f32);
         }
@@ -946,9 +1000,18 @@ fn create_error_dialog(message: String) -> Dialog {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum DialogState {
+    None,
+    Opening,
+    Open,
+    Closing,
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut dialogs: Vec<Dialog> = Vec::new();
+    let mut dialog_state = DialogState::None;
     let font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
     let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
     let placeholder = Texture2D::from_file_with_format(include_bytes!("../placeholder.png"), Some(ImageFormat::Png));
@@ -1067,9 +1130,24 @@ async fn main() {
         // Update animations
         animation_state.update_shake(get_frame_time());
         animation_state.update_cursor_animation(get_frame_time());
+        animation_state.update_dialog_transition(get_frame_time());
 
-        match dialogs.last_mut() {
-            None => {
+        // Update dialog state based on animation
+        if animation_state.dialog_transition_time <= 0.0 {
+            match dialog_state {
+                DialogState::Opening => {
+                    dialog_state = DialogState::Open;
+                },
+                DialogState::Closing => {
+                    dialog_state = DialogState::None;
+                    dialogs.clear();
+                },
+                _ => {}
+            }
+        }
+
+        match dialog_state {
+            DialogState::None => {
                 render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
 
                 // Handle storage media switching with tab/bumpers regardless of focus
@@ -1216,7 +1294,10 @@ async fn main() {
                         UIFocus::Grid => {
                             let memory_index = get_memory_index(selected_memory, scroll_offset);
                             if let Some(_) = memories.get(memory_index) {
+                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                                animation_state.trigger_dialog_transition(grid_pos, dialog_pos);
                                 dialogs.push(create_main_dialog(&storage_state));
+                                dialog_state = DialogState::Opening;
                                 sound_effects.play_select();
                             }
                         },
@@ -1243,51 +1324,101 @@ async fn main() {
                     }
                 }
             },
-            Some(dialog) => {
-                render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state);
+            DialogState::Opening => {
+                // During opening, only render the main view and the transitioning icon
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                // Only render the icon during transition
+                let memory_index = get_memory_index(selected_memory, scroll_offset);
+                if let Some(mem) = memories.get(memory_index) {
+                    let icon = match icon_cache.get(&mem.id) {
+                        Some(icon) => icon,
+                        None => &placeholder,
+                    };
 
-                let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
-                if input_state.up {
-                    selection -= 1;
-                    animation_state.trigger_transition();
-                    sound_effects.play_cursor_move();
+                    let params = DrawTextureParams {
+                        dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+                        source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
+                        rotation: 0.0,
+                        flip_x: false,
+                        flip_y: false,
+                        pivot: None
+                    };
+
+                    let icon_pos = animation_state.get_dialog_transition_pos();
+                    draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
                 }
+            },
+            DialogState::Open => {
+                // When dialog is fully open, only render the dialog
+                if let Some(dialog) = dialogs.last_mut() {
+                    render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state);
 
-                if input_state.down {
-                    selection += 1;
-                    animation_state.trigger_transition();
-                    sound_effects.play_cursor_move();
-                }
-
-                let next_selection = selection as usize % dialog.options.len();
-                if next_selection != dialog.selection {
-                    dialog.selection = next_selection;
-                }
-
-                if input_state.select {
-                    let selected_option = &dialog.options[dialog.selection];
-                    if !selected_option.disabled {
-                        action_dialog_id = dialog.id.clone();
-                        action_option_value = selected_option.value.clone();
-                        // Play back sound for cancel/back actions, select sound for others
-                        if selected_option.value == "CANCEL" || selected_option.value == "OK" {
-                            sound_effects.play_back();
-                        } else {
-                            sound_effects.play_select();
-                        }
-                    } else {
-                        animation_state.trigger_dialog_shake();
-                        sound_effects.play_reject();
+                    let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
+                    if input_state.up {
+                        selection -= 1;
+                        animation_state.trigger_transition();
+                        sound_effects.play_cursor_move();
                     }
-                }
 
-                if let Ok(mut state) = copy_op_state.lock() {
-                    if state.should_clear_dialogs {
-                        dialogs.clear();
-                        state.should_clear_dialogs = false;
+                    if input_state.down {
+                        selection += 1;
+                        animation_state.trigger_transition();
+                        sound_effects.play_cursor_move();
+                    }
+
+                    let next_selection = selection as usize % dialog.options.len();
+                    if next_selection != dialog.selection {
+                        // Store the new selection to apply after we're done with the immutable borrow
+                        let new_selection = next_selection;
+                        dialog.selection = new_selection;
+                    } else {
+                        // We need to handle the select input
+                        if input_state.select {
+                            let selected_option = &dialog.options[dialog.selection];
+                            if !selected_option.disabled {
+                                action_dialog_id = dialog.id.clone();
+                                action_option_value = selected_option.value.clone();
+                                // Play back sound for cancel/back actions, select sound for others
+                                if selected_option.value == "CANCEL" || selected_option.value == "OK" {
+                                    let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                                    animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                                    dialog_state = DialogState::Closing;
+                                    sound_effects.play_back();
+                                } else {
+                                    sound_effects.play_select();
+                                }
+                            } else {
+                                animation_state.trigger_dialog_shake();
+                                sound_effects.play_reject();
+                            }
+                        }
                     }
                 }
             },
+            DialogState::Closing => {
+                // During closing, render both views to show the icon returning
+                render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                // Only render the icon during transition
+                let memory_index = get_memory_index(selected_memory, scroll_offset);
+                if let Some(mem) = memories.get(memory_index) {
+                    let icon = match icon_cache.get(&mem.id) {
+                        Some(icon) => icon,
+                        None => &placeholder,
+                    };
+
+                    let params = DrawTextureParams {
+                        dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+                        source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
+                        rotation: 0.0,
+                        flip_x: false,
+                        flip_y: false,
+                        pivot: None
+                    };
+
+                    let icon_pos = animation_state.get_dialog_transition_pos();
+                    draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
+                }
+            }
         }
 
         // Handle dialog actions
@@ -1299,7 +1430,10 @@ async fn main() {
                 dialogs.push(create_confirm_delete_dialog());
             },
             ("main", "CANCEL") => {
-                dialogs.clear();
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                dialog_state = DialogState::Closing;
+                sound_effects.play_back();
             },
             ("confirm_delete", "DELETE") => {
                 if let Ok(mut state) = storage_state.lock() {
@@ -1309,13 +1443,19 @@ async fn main() {
                             dialogs.push(create_error_dialog(format!("ERROR: {}", e)));
                         } else {
                             state.needs_memory_refresh = true;
-                            dialogs.clear();
+                            let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                            animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                            dialog_state = DialogState::Closing;
+                            sound_effects.play_back();
                         }
                     }
                 }
             },
             ("confirm_delete", "CANCEL") => {
-                dialogs.clear();
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                dialog_state = DialogState::Closing;
+                sound_effects.play_back();
             },
             ("copy_storage_select", target_id) if target_id != "CANCEL" => {
                 let memory_index = get_memory_index(selected_memory, scroll_offset);
@@ -1337,13 +1477,22 @@ async fn main() {
                 }
             },
             ("copy_storage_select", "CANCEL") => {
-                dialogs.clear();
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                dialog_state = DialogState::Closing;
+                sound_effects.play_back();
             },
             ("save_exists", "OK") => {
-                dialogs.pop();
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                dialog_state = DialogState::Closing;
+                sound_effects.play_back();
             },
             ("error", "OK") => {
-                dialogs.clear();
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                dialog_state = DialogState::Closing;
+                sound_effects.play_back();
             },
             _ => {}
         }
@@ -1364,6 +1513,11 @@ async fn main() {
         if let Ok(mut copy_state) = copy_op_state.lock() {
             if let Some(error_msg) = copy_state.error_message.take() {
                 dialogs.push(create_error_dialog(error_msg));
+                dialog_state = DialogState::Opening;
+            }
+            if copy_state.should_clear_dialogs {
+                dialog_state = DialogState::Closing;
+                copy_state.should_clear_dialogs = false;
             }
         }
 
