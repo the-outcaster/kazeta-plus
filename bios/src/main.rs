@@ -1166,9 +1166,10 @@ async fn main() {
                                     state.selected += 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_select();
                                 } else {
                                     animation_state.trigger_shake(false); // Shake right arrow when can't go next
+                                    sound_effects.play_reject();
                                 }
                             } else if input_state.prev {
                                 // Prev stops at beginning
@@ -1176,9 +1177,10 @@ async fn main() {
                                     state.selected -= 1;
                                     memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                     scroll_offset = 0;
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_select();
                                 } else {
                                     animation_state.trigger_shake(true); // Shake left arrow when can't go prev
+                                    sound_effects.play_reject();
                                 }
                             }
                         }
@@ -1187,6 +1189,16 @@ async fn main() {
 
                 match input_state.ui_focus {
                     UIFocus::Grid => {
+                        if input_state.select {
+                            let memory_index = get_memory_index(selected_memory, scroll_offset);
+                            if let Some(_) = memories.get(memory_index) {
+                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                                animation_state.trigger_dialog_transition(grid_pos, dialog_pos);
+                                dialogs.push(create_main_dialog(&storage_state));
+                                dialog_state = DialogState::Opening;
+                                sound_effects.play_select();
+                            }
+                        }
                         if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                             selected_memory += 1;
                             animation_state.trigger_transition();
@@ -1287,41 +1299,6 @@ async fn main() {
                             }
                         }
                     },
-                }
-
-                if input_state.select {
-                    match input_state.ui_focus {
-                        UIFocus::Grid => {
-                            let memory_index = get_memory_index(selected_memory, scroll_offset);
-                            if let Some(_) = memories.get(memory_index) {
-                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
-                                animation_state.trigger_dialog_transition(grid_pos, dialog_pos);
-                                dialogs.push(create_main_dialog(&storage_state));
-                                dialog_state = DialogState::Opening;
-                                sound_effects.play_select();
-                            }
-                        },
-                        UIFocus::StorageLeft => {
-                            if let Ok(mut state) = storage_state.lock() {
-                                if state.selected > 0 {
-                                    state.selected -= 1;
-                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                    scroll_offset = 0;
-                                    sound_effects.play_select();
-                                }
-                            }
-                        },
-                        UIFocus::StorageRight => {
-                            if let Ok(mut state) = storage_state.lock() {
-                                if state.selected < state.media.len() - 1 {
-                                    state.selected += 1;
-                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                    scroll_offset = 0;
-                                    sound_effects.play_select();
-                                }
-                            }
-                        },
-                    }
                 }
             },
             DialogState::Opening => {

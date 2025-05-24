@@ -182,7 +182,6 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
                 let entry_size = entry.metadata()
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to get file metadata: {}", e)))?
                     .len();
-                eprintln!("{}: Found file {} with size {} bytes", cart_id, entry.path().display(), entry_size);
                 total_size += entry_size;
             }
             eprintln!("{}: Total directory size is {} bytes", cart_id, total_size);
