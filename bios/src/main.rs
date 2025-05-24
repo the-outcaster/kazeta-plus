@@ -119,7 +119,7 @@ struct DrawContext {
     font: Font,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum UIFocus {
     Grid,
     StorageLeft,
@@ -701,14 +701,16 @@ fn render_main_view(
     draw_rectangle_lines(12.0, 305.0, SCREEN_WIDTH as f32 - 24.0, 48.0, 4.0, UI_BG_COLOR_DARK);
 
     let memory_index = get_memory_index(selected_memory, scroll_offset);
-    if let Some(selected_mem) = memories.get(memory_index) {
-        let desc = match selected_mem.name.clone() {
-            Some(name) => name,
-            None => selected_mem.id.clone(),
-        };
+    if input_state.ui_focus == UIFocus::Grid {
+        if let Some(selected_mem) = memories.get(memory_index) {
+            let desc = match selected_mem.name.clone() {
+                Some(name) => name,
+                None => selected_mem.id.clone(),
+            };
 
-        text(&ctx, &desc, 19.0, 327.0);
-        text(&ctx, &format!("{:.1} MB", selected_mem.size), 19.0, 345.0);
+            text(&ctx, &desc, 19.0, 327.0);
+            text(&ctx, &format!("{:.1} MB", selected_mem.size), 19.0, 345.0);
+        }
     }
 
     // Draw scroll indicators last so they appear on top
