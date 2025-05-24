@@ -1153,35 +1153,35 @@ async fn main() {
                 // Handle storage media switching with tab/bumpers regardless of focus
                 if input_state.cycle || input_state.next || input_state.prev {
                     if let Ok(mut state) = storage_state.lock() {
-                        if state.media.len() > 1 {
-                            if input_state.cycle {
+                        if input_state.cycle {
+                            if state.media.len() > 1 {
                                 // Cycle wraps around
                                 state.selected = (state.selected + 1) % state.media.len();
                                 memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                 scroll_offset = 0;
                                 sound_effects.play_select();
-                            } else if input_state.next {
-                                // Next stops at end
-                                if state.selected < state.media.len() - 1 {
-                                    state.selected += 1;
-                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                    scroll_offset = 0;
-                                    sound_effects.play_select();
-                                } else {
-                                    animation_state.trigger_shake(false); // Shake right arrow when can't go next
-                                    sound_effects.play_reject();
-                                }
-                            } else if input_state.prev {
-                                // Prev stops at beginning
-                                if state.selected > 0 {
-                                    state.selected -= 1;
-                                    memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                    scroll_offset = 0;
-                                    sound_effects.play_select();
-                                } else {
-                                    animation_state.trigger_shake(true); // Shake left arrow when can't go prev
-                                    sound_effects.play_reject();
-                                }
+                            }
+                        } else if input_state.next {
+                            // Next stops at end
+                            if state.selected < state.media.len() - 1 {
+                                state.selected += 1;
+                                memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                scroll_offset = 0;
+                                sound_effects.play_select();
+                            } else {
+                                animation_state.trigger_shake(false); // Shake right arrow when can't go next
+                                sound_effects.play_reject();
+                            }
+                        } else if input_state.prev {
+                            // Prev stops at beginning
+                            if state.selected > 0 {
+                                state.selected -= 1;
+                                memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
+                                scroll_offset = 0;
+                                sound_effects.play_select();
+                            } else {
+                                animation_state.trigger_shake(true); // Shake left arrow when can't go prev
+                                sound_effects.play_reject();
                             }
                         }
                     }
