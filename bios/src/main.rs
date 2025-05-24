@@ -1420,9 +1420,7 @@ async fn main() {
                             dialogs.push(create_error_dialog(format!("ERROR: {}", e)));
                         } else {
                             state.needs_memory_refresh = true;
-                            let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
-                            animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                            dialog_state = DialogState::Closing;
+                            dialog_state = DialogState::None;
                             sound_effects.play_back();
                         }
                     }
