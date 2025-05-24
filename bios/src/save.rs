@@ -126,7 +126,7 @@ pub fn list_devices() -> io::Result<Vec<(String, u32)>> {
     Ok(devices)
 }
 
-pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, String, u16)>> {
+pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, String, f32)>> {
     let save_dir = get_save_dir_from_drive_name(drive_name);
     let cache_dir = get_cache_dir_from_drive_name(drive_name);
     eprintln!("Getting save details from directory: {}", save_dir);
@@ -156,23 +156,47 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
         let size = if path.extension().and_then(|e| e.to_str()) == Some("kzs") {
             // For .kzs files, get the file size
             let metadata = fs::metadata(&path)?;
-            (metadata.len() / 1024 / 1024) as u16 // Convert to MB
+            let size_bytes = metadata.len();
+            eprintln!("{}: File size is {} bytes", cart_id, size_bytes);
+            // Convert to MB with one decimal place
+            let size_mb = size_bytes as f64 / 1024.0 / 1024.0;
+            if size_mb > 0.0 {
+                // Round up to nearest 0.1 MB if size is non-zero
+                (size_mb * 10.0).ceil() / 10.0
+            } else {
+                0.0
+            }
         } else {
             // For directories, get the directory size excluding .cache
             let mut total_size = 0;
-            for entry in fs::read_dir(&path)? {
-                let entry = entry?;
-                let entry_path = entry.path();
-                if entry_path.file_name().and_then(|n| n.to_str()) != Some(".cache") {
-                    if entry_path.is_file() {
-                        total_size += fs::metadata(&entry_path)?.len();
-                    }
-                }
+            for entry in walkdir::WalkDir::new(&path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let path = e.path();
+                    // Skip .cache directory and its contents
+                    !path.to_str().unwrap_or("").contains("/.cache/") && 
+                    path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
+                    path.is_file()
+                }) {
+                let entry_size = entry.metadata()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to get file metadata: {}", e)))?
+                    .len();
+                eprintln!("{}: Found file {} with size {} bytes", cart_id, entry.path().display(), entry_size);
+                total_size += entry_size;
             }
-            (total_size / 1024 / 1024) as u16 // Convert to MB
+            eprintln!("{}: Total directory size is {} bytes", cart_id, total_size);
+            // Convert to MB with one decimal place
+            let size_mb = total_size as f64 / 1024.0 / 1024.0;
+            if size_mb > 0.0 {
+                // Round up to nearest 0.1 MB if size is non-zero
+                (size_mb * 10.0).ceil() / 10.0
+            } else {
+                0.0
+            }
         };
 
-        details.push((cart_id.to_string(), name, icon, size));
+        details.push((cart_id.to_string(), name, icon, size as f32));
     }
 
     eprintln!("Found {} save details", details.len());
@@ -237,7 +261,8 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
     // Copy save data
     let result = if from_drive == "internal" {
         // Internal to external: create tar archive
-        let file = fs::File::create(&to_path_kzs).map_err(|e| e.to_string())?;
+        eprintln!("Starting internal to external copy for {}", cart_id);
+        let file = fs::File::create(&to_path_kzs).map_err(|e| format!("Failed to create destination file: {}", e))?;
         let mut builder = Builder::new(file);
 
         // Calculate total size for progress reporting
@@ -247,12 +272,18 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                path.is_file() && path.file_name().and_then(|n| n.to_str()) != Some(".cache")
+                // Skip .cache directory and its contents
+                !path.to_str().unwrap_or("").contains("/.cache/") && 
+                path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
+                path.is_file()
             }) {
-            total_size += entry.metadata().map_err(|e| e.to_string())?.len();
+            total_size += entry.metadata().map_err(|e| format!("Failed to get metadata: {}", e))?.len();
         }
 
         eprintln!("Total size to archive: {} bytes", total_size);
+        if total_size == 0 {
+            return Err("No files found to archive".to_string());
+        }
 
         // Add the entire directory to the archive, excluding .cache
         let mut current_size = 0;
@@ -261,36 +292,99 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                path.is_file() && path.file_name().and_then(|n| n.to_str()) != Some(".cache")
+                // Skip .cache directory and its contents
+                !path.to_str().unwrap_or("").contains("/.cache/") && 
+                path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
+                path.is_file()
             }) {
             let path = entry.path();
-            let name = path.strip_prefix(&from_path).unwrap().to_str().unwrap();
-            eprintln!("Adding file to archive: {} ({} bytes)", name, entry.metadata().unwrap().len());
+            // Get the relative path from the source directory
+            let name = path.strip_prefix(&from_path)
+                .map_err(|e| format!("Failed to get relative path: {}", e))?
+                .to_str()
+                .ok_or_else(|| "Invalid path encoding".to_string())?;
 
-            let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
-            builder.append_file(name, &mut file).map_err(|e| e.to_string())?;
+            let file_size = entry.metadata().map_err(|e| format!("Failed to get file metadata: {}", e))?.len();
+            eprintln!("Adding file to archive: {} ({} bytes)", name, file_size);
 
-            current_size += entry.metadata().map_err(|e| e.to_string())?.len();
+            let mut file = fs::File::open(path).map_err(|e| format!("Failed to open source file: {}", e))?;
+
+            // Create a new header with the correct path
+            let mut header = tar::Header::new_gnu();
+            header.set_path(name).map_err(|e| format!("Failed to set path in header: {}", e))?;
+            header.set_size(file_size);
+            header.set_cksum();
+
+            // Write the header and file contents
+            builder.append(&header, &mut file).map_err(|e| format!("Failed to append file to archive: {}", e))?;
+
+            current_size += file_size;
             progress.store((current_size * 100 / total_size) as u16, Ordering::SeqCst);
         }
 
         eprintln!("Finished creating archive, final size: {} bytes", current_size);
-        builder.finish().map_err(|e| e.to_string())
+        if current_size == 0 {
+            return Err("No files were added to the archive".to_string());
+        }
+
+        builder.finish().map_err(|e| format!("Failed to finish archive: {}", e))?;
+
+        // Verify the archive was created and has content
+        let archive_size = fs::metadata(&to_path_kzs).map_err(|e| format!("Failed to get archive metadata: {}", e))?.len();
+        eprintln!("Archive file size: {} bytes", archive_size);
+        if archive_size == 0 {
+            return Err("Created archive is empty".to_string());
+        }
+
+        Ok(())
     } else if to_drive == "internal" {
         // External to internal: extract tar archive
-        fs::create_dir_all(&to_path).map_err(|e| e.to_string())?;
+        eprintln!("Starting external to internal copy for {}", cart_id);
+        fs::create_dir_all(&to_path).map_err(|e| format!("Failed to create destination directory: {}", e))?;
 
-        let file = fs::File::open(&from_path_kzs).map_err(|e| e.to_string())?;
-        let file_size = file.metadata().map_err(|e| e.to_string())?.len();
+        let file = fs::File::open(&from_path_kzs).map_err(|e| format!("Failed to open source archive: {}", e))?;
+        let file_size = file.metadata().map_err(|e| format!("Failed to get archive metadata: {}", e))?.len();
+        eprintln!("Archive size: {} bytes", file_size);
+
         let mut archive = Archive::new(file);
-
         let mut current_size = 0;
-        for entry in archive.entries().map_err(|e| e.to_string())? {
-            let mut entry = entry.map_err(|e| e.to_string())?;
-            entry.unpack_in(&to_path).map_err(|e| e.to_string())?;
-            current_size += entry.header().size().unwrap_or(0);
+
+        for entry in archive.entries().map_err(|e| format!("Failed to read archive entries: {}", e))? {
+            let mut entry = entry.map_err(|e| format!("Failed to read archive entry: {}", e))?;
+            let path = entry.path().map_err(|e| format!("Failed to get entry path: {}", e))?;
+            let entry_size = entry.header().size().unwrap_or(0);
+            eprintln!("Extracting: {} ({} bytes)", path.display(), entry_size);
+
+            // Ensure the parent directory exists
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(to_path.join(parent))
+                    .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+            }
+
+            // Extract the file
+            entry.unpack_in(&to_path)
+                .map_err(|e| format!("Failed to extract file: {}", e))?;
+
+            current_size += entry_size;
             progress.store((current_size * 100 / file_size) as u16, Ordering::SeqCst);
         }
+
+        // Verify extraction
+        let mut extracted_size = 0;
+        for entry in walkdir::WalkDir::new(&to_path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_file()) {
+            extracted_size += entry.metadata()
+                .map_err(|e| format!("Failed to get extracted file metadata: {}", e))?
+                .len();
+        }
+        eprintln!("Total extracted size: {} bytes", extracted_size);
+
+        if extracted_size == 0 {
+            return Err("No files were extracted from the archive".to_string());
+        }
+
         Ok(())
     } else {
         // External to external: direct copy with progress

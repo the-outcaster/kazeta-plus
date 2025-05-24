@@ -86,7 +86,7 @@ fn window_conf() -> Conf {
 struct Memory {
     id: String,
     name: Option<String>,
-    size: u16,
+    size: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -401,7 +401,7 @@ async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture
             let m = Memory {
                 id: cart_id,
                 name: Some(name),
-                size: size,
+                size: size as f32,
             };
             memories.push(m);
         }
@@ -692,7 +692,7 @@ fn render_main_view(
 
             // Draw storage info text
             text(&ctx, &state.media[state.selected].id, STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 17.0);
-            text(&ctx, &format!("{} MB Free", state.media[state.selected].free), STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 33.0);
+            text(&ctx, &format!("{:.1} MB Free", state.media[state.selected].free as f32 / 10.0), STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 33.0);
         }
     }
 
@@ -708,7 +708,7 @@ fn render_main_view(
         };
 
         text(&ctx, &desc, 19.0, 327.0);
-        text(&ctx, &format!("{} MB", selected_mem.size.to_string()), 19.0, 345.0);
+        text(&ctx, &format!("{:.1} MB", selected_mem.size), 19.0, 345.0);
     }
 
     // Draw scroll indicators last so they appear on top
@@ -794,7 +794,7 @@ fn render_dialog(
                 None => mem.id.clone(),
             };
             text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
-            text(&ctx, &format!("{} MB", mem.size.to_string()), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+            text(&ctx, &format!("{:.1} MB", mem.size), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
         }
     };
 
