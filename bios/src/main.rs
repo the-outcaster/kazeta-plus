@@ -1159,7 +1159,7 @@ async fn main() {
                                 state.selected = (state.selected + 1) % state.media.len();
                                 memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                 scroll_offset = 0;
-                                sound_effects.play_cursor_move();
+                                sound_effects.play_select();
                             } else if input_state.next {
                                 // Next stops at end
                                 if state.selected < state.media.len() - 1 {
