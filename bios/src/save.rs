@@ -139,8 +139,8 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
             .and_then(|n| n.to_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid filename"))?;
 
-        // Remove .kzs extension if present
-        let cart_id = if file_name.ends_with(".kzs") {
+        // Remove .tar extension if present
+        let cart_id = if file_name.ends_with(".tar") {
             &file_name[..file_name.len() - 4]
         } else {
             file_name
@@ -153,8 +153,8 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
         });
         let icon = format!("{}/{}/icon.png", cache_dir, cart_id);
 
-        let size = if path.extension().and_then(|e| e.to_str()) == Some("kzs") {
-            // For .kzs files, get the file size
+        let size = if path.extension().and_then(|e| e.to_str()) == Some("tar") {
+            // For .tar files, get the file size
             let metadata = fs::metadata(&path)?;
             let size_bytes = metadata.len();
             eprintln!("{}: File size is {} bytes", cart_id, size_bytes);
@@ -208,8 +208,8 @@ pub fn delete_save(cart_id: &str, from_drive: &str) -> Result<(), String> {
 
     // Check if save exists
     let save_path = Path::new(&from_dir).join(cart_id);
-    let save_path_kzs = Path::new(&from_dir).join(format!("{}.kzs", cart_id));
-    if !save_path.exists() && !save_path_kzs.exists() {
+    let save_path_tar = Path::new(&from_dir).join(format!("{}.tar", cart_id));
+    if !save_path.exists() && !save_path_tar.exists() {
         return Err(format!("Save file for {} does not exist on '{}' drive", cart_id, from_drive));
     }
 
@@ -217,7 +217,7 @@ pub fn delete_save(cart_id: &str, from_drive: &str) -> Result<(), String> {
     if from_drive == "internal" {
         fs::remove_dir_all(save_path).map_err(|e| e.to_string())?;
     } else {
-        fs::remove_file(save_path_kzs).map_err(|e| e.to_string())?;
+        fs::remove_file(save_path_tar).map_err(|e| e.to_string())?;
     }
 
     // Delete cache
@@ -241,15 +241,15 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
 
     // Check if source save exists
     let from_path = Path::new(&from_dir).join(cart_id);
-    let from_path_kzs = Path::new(&from_dir).join(format!("{}.kzs", cart_id));
-    if !from_path.exists() && !from_path_kzs.exists() {
+    let from_path_tar = Path::new(&from_dir).join(format!("{}.tar", cart_id));
+    if !from_path.exists() && !from_path_tar.exists() {
         return Err(format!("Save file for {} does not exist on '{}' drive", cart_id, from_drive));
     }
 
     // Check if destination save already exists
     let to_path = Path::new(&to_dir).join(cart_id);
-    let to_path_kzs = Path::new(&to_dir).join(format!("{}.kzs", cart_id));
-    if to_path.exists() || to_path_kzs.exists() {
+    let to_path_tar = Path::new(&to_dir).join(format!("{}.tar", cart_id));
+    if to_path.exists() || to_path_tar.exists() {
         return Err(format!("Save file for {} already exists on '{}'", cart_id, to_drive));
     }
 
@@ -261,7 +261,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
     let result = if from_drive == "internal" {
         // Internal to external: create tar archive
         eprintln!("Starting internal to external copy for {}", cart_id);
-        let file = fs::File::create(&to_path_kzs).map_err(|e| format!("Failed to create destination file: {}", e))?;
+        let file = fs::File::create(&to_path_tar).map_err(|e| format!("Failed to create destination file: {}", e))?;
         let mut builder = Builder::new(file);
 
         // Calculate total size for progress reporting
@@ -329,7 +329,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         builder.finish().map_err(|e| format!("Failed to finish archive: {}", e))?;
 
         // Verify the archive was created and has content
-        let archive_size = fs::metadata(&to_path_kzs).map_err(|e| format!("Failed to get archive metadata: {}", e))?.len();
+        let archive_size = fs::metadata(&to_path_tar).map_err(|e| format!("Failed to get archive metadata: {}", e))?.len();
         eprintln!("Archive file size: {} bytes", archive_size);
         if archive_size == 0 {
             return Err("Created archive is empty".to_string());
@@ -341,7 +341,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         eprintln!("Starting external to internal copy for {}", cart_id);
         fs::create_dir_all(&to_path).map_err(|e| format!("Failed to create destination directory: {}", e))?;
 
-        let file = fs::File::open(&from_path_kzs).map_err(|e| format!("Failed to open source archive: {}", e))?;
+        let file = fs::File::open(&from_path_tar).map_err(|e| format!("Failed to open source archive: {}", e))?;
         let file_size = file.metadata().map_err(|e| format!("Failed to get archive metadata: {}", e))?.len();
         eprintln!("Archive size: {} bytes", file_size);
 
@@ -387,9 +387,9 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         Ok(())
     } else {
         // External to external: direct copy with progress
-        let file_size = fs::metadata(&from_path_kzs).map_err(|e| e.to_string())?.len();
-        let mut source = fs::File::open(&from_path_kzs).map_err(|e| e.to_string())?;
-        let mut dest = fs::File::create(&to_path_kzs).map_err(|e| e.to_string())?;
+        let file_size = fs::metadata(&from_path_tar).map_err(|e| e.to_string())?.len();
+        let mut source = fs::File::open(&from_path_tar).map_err(|e| e.to_string())?;
+        let mut dest = fs::File::create(&to_path_tar).map_err(|e| e.to_string())?;
 
         let mut buffer = [0; 8192];
         let mut current_size = 0;
@@ -411,7 +411,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         if to_drive == "internal" {
             fs::remove_dir_all(&to_path).ok();
         } else {
-            fs::remove_file(&to_path_kzs).ok();
+            fs::remove_file(&to_path_tar).ok();
         }
         fs::remove_dir_all(Path::new(&to_cache).join(cart_id)).ok();
         return Err(e);
