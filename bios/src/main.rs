@@ -692,7 +692,7 @@ fn render_main_view(
 
             // Draw storage info text
             text(&ctx, &state.media[state.selected].id, STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 17.0);
-            text(&ctx, &format!("{:.1} MB Free", state.media[state.selected].free as f32 / 10.0), STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 33.0);
+            text(&ctx, &format!("{} MB Free", state.media[state.selected].free as f32), STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 33.0);
         }
     }
 
