@@ -347,45 +347,80 @@ fn pixel_pos(v: f32) -> f32 {
 }
 
 fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMedia, state: Arc<Mutex<CopyOperationState>>) {
+    // Initialize the copy operation state
     if let Ok(mut copy_state) = state.lock() {
         copy_state.progress = 0;
         copy_state.running = true;
+        copy_state.error_message = None;
     }
 
-    thread::sleep(time::Duration::from_millis(1000));
+    // Small delay to show the operation has started
+    thread::sleep(time::Duration::from_millis(500));
 
+    // Create progress tracking
     let progress = Arc::new(AtomicU16::new(0));
     let progress_clone = progress.clone();
-
-    // Spawn a thread to update the progress
     let state_clone = state.clone();
-    thread::spawn(move || {
-        while progress_clone.load(Ordering::SeqCst) < 100 {
+
+    // Spawn a thread to monitor progress from the copy operation
+    let monitor_handle = thread::spawn(move || {
+        loop {
+            let current_progress = progress_clone.load(Ordering::SeqCst);
+
+            // Update the UI state with the current progress
             if let Ok(mut copy_state) = state_clone.lock() {
-                copy_state.progress = progress_clone.load(Ordering::SeqCst);
+                // Only update if the operation is still running
+                if copy_state.running {
+                    copy_state.progress = current_progress;
+                } else {
+                    // Operation completed, exit the monitoring loop
+                    break;
+                }
             }
-            thread::sleep(time::Duration::from_millis(100));
+
+            // If we've reached 100%, the copy operation should be finishing soon
+            if current_progress >= 100 {
+                break;
+            }
+
+            thread::sleep(time::Duration::from_millis(50));
         }
     });
 
-    if let Err(e) = save::copy_save(&memory.id, &from_media.id, &to_media.id, progress) {
-        if let Ok(mut copy_state) = state.lock() {
-            copy_state.running = false;
-            copy_state.should_clear_dialogs = true;
-            copy_state.error_message = Some(format!("Failed to copy save: {}", e));
+    // Perform the actual copy operation
+    let copy_result = save::copy_save(&memory.id, &from_media.id, &to_media.id, progress);
+
+    // Handle the result
+    match copy_result {
+        Ok(_) => {
+            // Ensure progress shows 100% on success
+            if let Ok(mut copy_state) = state.lock() {
+                copy_state.progress = 100;
+            }
+
+            // Pause for 1.5 seconds to show completion clearly while keeping the operation running
+            thread::sleep(time::Duration::from_millis(1500));
+
+            // Mark operation as complete (this will allow the monitoring thread to exit)
+            if let Ok(mut copy_state) = state.lock() {
+                copy_state.running = false;
+                copy_state.should_clear_dialogs = true;
+            }
+
+            // Wait for the monitoring thread to finish
+            monitor_handle.join().ok();
+        },
+        Err(e) => {
+            // Handle error case (this will also stop the monitoring thread)
+            if let Ok(mut copy_state) = state.lock() {
+                copy_state.running = false;
+                copy_state.should_clear_dialogs = true;
+                copy_state.error_message = Some(format!("Failed to copy save: {}", e));
+            }
+
+            // Wait for the monitoring thread to finish
+            monitor_handle.join().ok();
         }
-        return;
-    }
-
-    if let Ok(mut copy_state) = state.lock() {
-        copy_state.progress = 100;
-    }
-
-    thread::sleep(time::Duration::from_millis(1000));
-
-    if let Ok(mut copy_state) = state.lock() {
-        copy_state.running = false;
-        copy_state.should_clear_dialogs = true;
     }
 }
 
