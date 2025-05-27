@@ -198,6 +198,13 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
         details.push((cart_id.to_string(), name, icon, size as f32));
     }
 
+    // Sort details alphabetically by name, fallback to cart_id if name is empty
+    details.sort_by(|a, b| {
+        let name_a = if a.1.is_empty() { &a.0 } else { &a.1 };
+        let name_b = if b.1.is_empty() { &b.0 } else { &b.1 };
+        name_a.to_lowercase().cmp(&name_b.to_lowercase())
+    });
+
     eprintln!("Found {} save details", details.len());
     Ok(details)
 }
