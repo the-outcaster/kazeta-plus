@@ -118,6 +118,10 @@ pub fn list_devices() -> io::Result<Vec<(String, u32)>> {
         let mount_point = disk.mount_point().to_str().unwrap();
         if mount_point.starts_with(&base_ext) {
             let name = mount_point.split('/').last().unwrap().to_string();
+            if name == "frzr_efi" {
+                // ignore internal frzr partition
+                continue;
+            }
             let free_space = (disk.available_space() / 1024 / 1024) as u32; // Convert to MB
             devices.push((name, free_space));
         }
