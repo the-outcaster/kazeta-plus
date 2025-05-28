@@ -81,4 +81,7 @@ postinstallhook() {
 
 	# Automount storage to /run/media
 	sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
+
+	# Drop filesystem type from mount directory name
+	sed -i -e 's,}.$TYPE",}",' /usr/bin/media-automount
 }
