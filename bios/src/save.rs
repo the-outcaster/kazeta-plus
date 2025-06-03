@@ -180,7 +180,7 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
                 .filter(|e| {
                     let path = e.path();
                     // Skip .cache directory and its contents
-                    !path.to_str().unwrap_or("").contains("/.cache/") && 
+                    !path.to_str().unwrap_or("").contains("/.cache/") &&
                     path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
                     path.is_file()
                 }) {
@@ -284,7 +284,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             .filter(|e| {
                 let path = e.path();
                 // Skip .cache directory and its contents
-                !path.to_str().unwrap_or("").contains("/.cache/") && 
+                !path.to_str().unwrap_or("").contains("/.cache/") &&
                 path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
                 path.is_file()
             }) {
@@ -304,7 +304,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             .filter(|e| {
                 let path = e.path();
                 // Skip .cache directory and its contents
-                !path.to_str().unwrap_or("").contains("/.cache/") && 
+                !path.to_str().unwrap_or("").contains("/.cache/") &&
                 path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
                 path.is_file()
             }) {
