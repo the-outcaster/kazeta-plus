@@ -924,7 +924,7 @@ fn render_dialog(
 fn create_confirm_delete_dialog() -> Dialog {
     Dialog {
         id: "confirm_delete".to_string(),
-        desc: Some("CONFIRM DELETE?".to_string()),
+        desc: Some("PERMANENTLY DELETE THIS SAVE DATA?".to_string()),
         options: vec![
             DialogOption {
                 text: "DELETE".to_string(),
@@ -1010,7 +1010,7 @@ async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_ca
 fn create_save_exists_dialog() -> Dialog {
     Dialog {
         id: "save_exists".to_string(),
-        desc: Some("SAVE DATA ALREADY EXISTS AT THIS LOCATION".to_string()),
+        desc: Some("THIS SAVE DATA ALREADY EXISTS AT THE SELECTED DESTINATION".to_string()),
         options: vec![
             DialogOption {
                 text: "OK".to_string(),
