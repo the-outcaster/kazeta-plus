@@ -64,7 +64,7 @@ impl SoundEffects {
     fn play_back(&self) {
         audio::play_sound(&self.back, audio::PlaySoundParams {
             looped: false,
-            volume: 0.75,
+            volume: 0.5,
         });
     }
 }
