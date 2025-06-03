@@ -6,6 +6,7 @@ use tar::{Builder, Archive};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use walkdir;
+use std::process::Command;
 
 pub fn get_save_dir_from_drive_name(drive_name: &str) -> String {
     let base_dir = dirs::home_dir().unwrap().join(".local/share/kazeta");
@@ -327,6 +328,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
 
             // Write the header and file contents
             builder.append(&header, &mut file).map_err(|e| format!("Failed to append file to archive: {}", e))?;
+            sync_to_disk();
 
             current_size += file_size;
             progress.store((current_size * 100 / total_size) as u16, Ordering::SeqCst);
@@ -338,6 +340,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         }
 
         builder.finish().map_err(|e| format!("Failed to finish archive: {}", e))?;
+        sync_to_disk();
 
         // Verify the archive was created and has content
         let archive_size = fs::metadata(&to_path_tar).map_err(|e| format!("Failed to get archive metadata: {}", e))?.len();
@@ -410,6 +413,8 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
                 break;
             }
             dest.write_all(&buffer[..bytes_read]).map_err(|e| e.to_string())?;
+            sync_to_disk();
+
             current_size += bytes_read as u64;
             progress.store((current_size * 100 / file_size) as u16, Ordering::SeqCst);
         }
@@ -447,5 +452,17 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
         fs::copy(&from_icon, &to_icon).map_err(|e| e.to_string())?;
     }
 
+    sync_to_disk();
     Ok(())
+}
+
+fn sync_to_disk() {
+    if let Ok(output) = Command::new("sync")
+        .output()
+        .map_err(|e| format!("Failed to execute sync command: {}", e)) {
+
+        if !output.status.success() {
+            println!("Sync command failed with status: {}", output.status);
+        }
+    }
 }
