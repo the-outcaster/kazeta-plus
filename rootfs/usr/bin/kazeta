@@ -65,4 +65,5 @@ pushd "${HOME}"
 
 cart_exec="$(get_attribute ${cart_info} 'Exec')"
 cart_gsopts="$(get_attribute ${cart_info} 'GamescopeOptions')"
-gamescope ${cart_gsopts} -- ${cart_exec} > ${HOME}/kazeta.log 2>&1
+echo "$cart_exec" > /tmp/kazeta-launch-cmd
+gamescope ${cart_gsopts} -- bash /tmp/kazeta-launch-cmd > ${HOME}/kazeta.log 2>&1
