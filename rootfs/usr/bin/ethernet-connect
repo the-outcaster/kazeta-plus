@@ -5,13 +5,13 @@ if [ $EUID -ne 0 ]; then
 	exit 1
 fi
 
-interface=$(ifconfig | grep "^en" | head -1 | cut -d':' -f1)
+interface=$(ip addr | grep ": en" | head -1 | cut -d':' -f2 | tr -d ' ')
 
 echo "\
-  [Match]
-  Name=${interface}
-  [Network]
-  DHCP=yes\
+[Match]
+Name=${interface}
+[Network]
+DHCP=yes\
 " > /etc/systemd/network/wired.network
 
 systemctl start systemd-networkd
