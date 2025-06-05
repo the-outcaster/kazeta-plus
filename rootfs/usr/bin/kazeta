@@ -15,8 +15,9 @@ if [[ "$result" == "0" ]]; then
 fi
 
 function get_attribute {
-	info_file="$1"
-	attribute=$2
+	attribute=$1
+	shift
+	info_file="$@"
 	cat "${info_file}" | grep "^${attribute}=" | head -1 | cut -d= -f2-
 }
 
@@ -24,17 +25,20 @@ function get_attribute {
 cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
 cart_path=$(dirname "${cart_info}")
 
+echo $cart_info
+echo $cart_path
+
 if [[ ! -f "${cart_info}" ]]; then
 	# no cart found, start bios/memory management app
 	gamescope --filter pixel -- kazeta-bios
 	exit 0
 fi
 
-cart_id="$(get_attribute ${cart_info} 'Id')"
-cart_icon="${cart_path}/$(get_attribute ${cart_info} 'Icon')"
+cart_id="$(get_attribute 'Id' ${cart_info})"
+cart_icon="${cart_path}/$(get_attribute 'Icon' ${cart_info})"
 
 mkdir -p "${BASE_DIR}/cache/${cart_id}"
-cp ${cart_info} "${BASE_DIR}/cache/${cart_id}/metadata.kzi"
+cp "${cart_info}" "${BASE_DIR}/cache/${cart_id}/metadata.kzi"
 if [[ -f "${cart_icon}" ]]; then
 	cp "${cart_icon}" "${BASE_DIR}/cache/${cart_id}/icon.png"
 fi
@@ -63,7 +67,7 @@ unset XDG_DATA_HOME
 unset XDG_STATE_HOME
 pushd "${HOME}"
 
-cart_exec="$(get_attribute ${cart_info} 'Exec')"
-cart_gsopts="$(get_attribute ${cart_info} 'GamescopeOptions')"
+cart_exec="$(get_attribute 'Exec' ${cart_info})"
+cart_gsopts="$(get_attribute 'GamescopeOptions' ${cart_info})"
 echo "$cart_exec" > /tmp/kazeta-launch-cmd
-gamescope ${cart_gsopts} -- bash /tmp/kazeta-launch-cmd > ${HOME}/kazeta.log 2>&1
+gamescope ${cart_gsopts} -- bash /tmp/kazeta-launch-cmd > "${HOME}/kazeta.log" 2>&1
