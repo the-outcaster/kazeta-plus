@@ -58,7 +58,7 @@ mkdir -p "${work}"
 mkdir -p "${target}"
 
 fuse-overlayfs -o lowerdir="${lower}",upperdir="${upper}",workdir="${work}" "${target}"
-trap "popd; fusermount3 -u ${target}" EXIT
+trap "popd; sleep 1; fusermount3 -u ${target}" EXIT
 
 export HOME="${BASE_DIR}/run/cart"
 unset XDG_CONFIG_HOME
