@@ -1,0 +1,13 @@
+#! /bin/bash
+
+if [ $EUID -ne 0 ]; then
+        echo "$(basename $0) must be run as root"
+        exit 1
+fi
+
+if [ "$1" == "--unmount" ]; then
+	umount "$2"
+else
+	# metacopy=on reduces the pressure vessel writes
+	mount -t overlay overlay -o metacopy=on,lowerdir="$1",upperdir="$2",workdir="$3" "$4"
+fi
