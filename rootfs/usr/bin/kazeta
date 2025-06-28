@@ -81,4 +81,4 @@ pushd "${HOME}"
 cart_exec="$(get_attribute 'Exec' ${cart_info})"
 cart_gsopts="$(get_attribute 'GamescopeOptions' ${cart_info})"
 echo "$cart_exec" > /tmp/kazeta-launch-cmd
-gamescope ${cart_gsopts} -- bash /tmp/kazeta-launch-cmd > "${HOME}/kazeta.log" 2>&1
+gamescope ${cart_gsopts} -- bash /tmp/kazeta-launch-cmd | grep -v "pressure-vessel-wrap" > "${HOME}/kazeta.log" 2>&1
