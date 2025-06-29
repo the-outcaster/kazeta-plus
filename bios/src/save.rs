@@ -8,6 +8,14 @@ use std::sync::Arc;
 use walkdir;
 use std::process::Command;
 
+// Directories to exclude from size calculation and copying
+const EXCLUDED_DIRS: &[&str] = &[".cache", ".local/share/umu", ".config/pulse/cookie"];
+
+fn should_exclude_path(path: &Path) -> bool {
+    let path_str = path.to_str().unwrap_or("");
+    EXCLUDED_DIRS.iter().any(|&excluded| path_str.contains(excluded))
+}
+
 pub fn get_save_dir_from_drive_name(drive_name: &str) -> String {
     let base_dir = dirs::home_dir().unwrap().join(".local/share/kazeta");
     if drive_name == "internal" || drive_name.is_empty() {
@@ -172,16 +180,15 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
                 0.0
             }
         } else {
-            // For directories, get the directory size excluding .cache
+            // For directories, get the directory size excluding ignored directories
             let mut total_size = 0;
             for entry in walkdir::WalkDir::new(&path)
                 .into_iter()
                 .filter_map(|e| e.ok())
                 .filter(|e| {
                     let path = e.path();
-                    // Skip .cache directory and its contents
-                    !path.to_str().unwrap_or("").contains("/.cache/") &&
-                    path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
+                    // Skip excluded directories and their contents
+                    !should_exclude_path(path) &&
                     path.is_file()
                 }) {
                 let entry_size = entry.metadata()
@@ -283,9 +290,8 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                // Skip .cache directory and its contents
-                !path.to_str().unwrap_or("").contains("/.cache/") &&
-                path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
+                // Skip excluded directories and their contents
+                !should_exclude_path(path) &&
                 path.is_file()
             }) {
             total_size += entry.metadata().map_err(|e| format!("Failed to get metadata: {}", e))?.len();
@@ -296,16 +302,15 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
             return Err("No files found to archive".to_string());
         }
 
-        // Add the entire directory to the archive, excluding .cache
+        // Add the entire directory to the archive, excluding ignored directories
         let mut current_size = 0;
         for entry in walkdir::WalkDir::new(&from_path)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                // Skip .cache directory and its contents
-                !path.to_str().unwrap_or("").contains("/.cache/") &&
-                path.file_name().and_then(|n| n.to_str()) != Some(".cache") &&
+                // Skip excluded directories and their contents
+                !should_exclude_path(path) &&
                 path.is_file()
             }) {
             let path = entry.path();

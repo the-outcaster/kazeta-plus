@@ -62,10 +62,6 @@ trap "popd; pkexec kazeta-mount --unmount ${target}" EXIT
 
 export HOME="${BASE_DIR}/run/cart"
 
-# this reduces writes due to steam runtime setup down to a minimum (~ 7MB)
-# putting those writes under .cache will remove it when the user copies the save data
-export PRESSURE_VESSEL_VARIABLE_DIR=${HOME}/.cache/kazeta/steamrt
-
 # prevents the runtime from being updated
 export UMU_RUNTIME_UPDATE=0
 
