@@ -58,7 +58,11 @@ mkdir -p "${work}"
 mkdir -p "${target}"
 
 pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}"
-trap "popd; pkexec kazeta-mount --unmount ${target}" EXIT
+trap "\
+	rm -rf .local/share/umu/steamrt3/var; \
+	popd; \
+	pkexec kazeta-mount --unmount ${target} \
+" EXIT
 
 export HOME="${BASE_DIR}/run/cart"
 
