@@ -53,10 +53,6 @@ if [[ ! -d "${upper}" ]]; then
 	mkdir -p "${upper}"
 fi
 
-rm -rf "${BASE_DIR}/run"
-mkdir -p "${work}"
-mkdir -p "${target}"
-
 pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}"
 trap "\
 	rm -rf .local/share/umu/steamrt3/var; \
