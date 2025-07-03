@@ -3,6 +3,9 @@
 # tell inputplumber to manage all controllers
 inputplumber devices manage-all --enable
 
+# hack to fix bios app audio
+wpctl status > /dev/null
+
 # start session
 mv /var/kazeta/session.log /var/kazeta/session.log.old
 /usr/bin/kazeta > /var/kazeta/session.log 2>&1 &
