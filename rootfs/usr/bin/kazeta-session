@@ -1,6 +1,29 @@
 #! /bin/bash
 
+# tell inputplumber to manage all controllers
 inputplumber devices manage-all --enable
+
+# start session
 mv /var/kazeta/session.log /var/kazeta/session.log.old
-/usr/bin/kazeta > /var/kazeta/session.log 2>&1
+/usr/bin/kazeta > /var/kazeta/session.log 2>&1 &
+
+# on first boot, ensure we are using HDMI audio output and set a reasonable default volume
+if [ ! -e /var/kazeta/state/.first-boot-done ]; then
+	touch /var/kazeta/state/.first-boot-done
+
+	for i in $(seq 1 60); do
+		sink_id=$(wpctl status | grep HDMI | head -1 | grep -oE " [0-9]+\. " | tr -d ' .')
+		wpctl set-default $sink_id
+
+		if [ "$?" == "0" ]; then
+			wpctl set-volume $sink_id 0.8
+			break
+		fi
+
+		sleep 1
+	done
+fi
+
+
+wait
 poweroff
