@@ -53,20 +53,22 @@ if [[ ! -d "${upper}" ]]; then
 	mkdir -p "${upper}"
 fi
 
-pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}"
+runtime_name="$(get_attribute 'Runtime' ${cart_info})"
+if [ -n "$runtime_name" ]; then
+	runtime="${cart_path}/${runtime_name}.kzr"
+else
+	runtime="/usr/share/kazeta/runtimes/none.kzr"
+fi
+
+runtimedir="${BASE_DIR}/run/runtime"
+pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
 trap "\
 	rm -rf .local/share/umu/steamrt3/var; \
 	popd; \
-	pkexec kazeta-mount --unmount ${target} \
+	pkexec kazeta-mount --unmount "${target}" "${runtimedir}" \
 " EXIT
 
 export HOME="${BASE_DIR}/run/cart"
-
-# prevents the runtime from being updated
-export UMU_RUNTIME_UPDATE=0
-
-# prevents proton from unnecessarily updating builtin prefix libraries
-export PROTON_VERB=runinprefix
 
 unset XDG_CONFIG_HOME
 unset XDG_CACHE_HOME
@@ -76,5 +78,5 @@ pushd "${HOME}"
 
 cart_exec="$(get_attribute 'Exec' ${cart_info})"
 cart_gsopts="$(get_attribute 'GamescopeOptions' ${cart_info})"
-echo "$cart_exec" > /tmp/kazeta-launch-cmd
-gamescope ${cart_gsopts} -- bash /tmp/kazeta-launch-cmd | grep -v "pressure-vessel-wrap" > "${HOME}/kazeta.log" 2>&1
+echo "$cart_exec" > /tmp/kazeta-cart-exec
+gamescope ${cart_gsopts} -- ./kazeta-runtime-exec /tmp/kazeta-cart-exec | grep -v "pressure-vessel-wrap" > "${HOME}/kazeta.log" 2>&1

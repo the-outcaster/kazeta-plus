@@ -7,17 +7,24 @@ fi
 
 if [ "$1" == "--unmount" ]; then
 	umount "$2"
+	umount "$3"
 else
 	lowerdir="$1"
 	upperdir="$2"
 	workdir="$3"
 	targetdir="$4"
+	runtime="$5"
+	runtimedir="$6"
 
 	rm -rf "$workdir"
 	rm -rf "$targetdir"
+	rm -rf "$runtimedir"
 	mkdir -p "$workdir"
 	mkdir -p "$targetdir"
+	mkdir -p "$runtimedir"
+
+	mount "$runtime" "$runtimedir"
 
 	# metacopy=on reduces the pressure vessel writes
-	mount -t overlay overlay -o metacopy=on,lowerdir="$lowerdir",upperdir="$upperdir",workdir="$workdir" "$targetdir"
+	mount -t overlay overlay -o metacopy=on,lowerdir="$lowerdir:$runtimedir",upperdir="$upperdir",workdir="$workdir" "$targetdir"
 fi
