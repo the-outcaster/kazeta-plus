@@ -1069,9 +1069,6 @@ fn render_main_menu(
     const MENU_OPTION_HEIGHT: f32 = 40.0;
     const MENU_PADDING: f32 = 16.0;
 
-    // Draw title
-    // text(&ctx, "KAZETA BIOS", (SCREEN_WIDTH as f32 - measure_text("KAZETA BIOS", Some(&ctx.font), FONT_SIZE * 2, 1.0).width) / 2.0, 60.0);
-
     // Draw background
     draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
 
@@ -1124,6 +1121,7 @@ async fn main() {
     let mut dialog_state = DialogState::None;
     let font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
     let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
+    let logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
     let placeholder = Texture2D::from_file_with_format(include_bytes!("../placeholder.png"), Some(ImageFormat::Png));
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut icon_queue: Vec<(String, String)> = Vec::new();
@@ -1251,6 +1249,7 @@ async fn main() {
         match current_screen {
             Screen::MainMenu => {
                 render_main_menu(&ctx, main_menu_selection, &animation_state);
+                draw_texture(&logo, (SCREEN_WIDTH as f32 - 166.0)/2.0, 30.0, WHITE);
 
                 // Handle main menu navigation
                 if input_state.up && main_menu_selection > 0 {
