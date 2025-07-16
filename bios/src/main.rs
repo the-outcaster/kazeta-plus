@@ -1070,7 +1070,7 @@ fn render_main_menu(
     const MENU_PADDING: f32 = 16.0;
 
     // Draw background
-    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR);
 
     // Draw menu options
     for (i, option) in MENU_OPTIONS.iter().enumerate() {
