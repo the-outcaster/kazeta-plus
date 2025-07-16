@@ -1250,6 +1250,7 @@ async fn main() {
             Screen::MainMenu => {
                 render_main_menu(&ctx, main_menu_selection, &animation_state);
                 draw_texture(&logo, (SCREEN_WIDTH as f32 - 166.0)/2.0, 30.0, WHITE);
+                text(&ctx, "V2025.01", SCREEN_WIDTH as f32 - 90.0, SCREEN_HEIGHT as f32 - 20.0);
 
                 // Handle main menu navigation
                 if input_state.up && main_menu_selection > 0 {
