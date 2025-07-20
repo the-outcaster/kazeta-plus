@@ -1499,6 +1499,11 @@ async fn main() {
                                 sound_effects.play_cursor_move();
                             }
 
+                            let mut cancel = false;
+                            if input_state.back {
+                                cancel = true;
+                            }
+
                             let next_selection = selection as usize % dialog.options.len();
                             if next_selection != dialog.selection {
                                 // Store the new selection to apply after we're done with the immutable borrow
@@ -1511,12 +1516,9 @@ async fn main() {
                                     if !selected_option.disabled {
                                         action_dialog_id = dialog.id.clone();
                                         action_option_value = selected_option.value.clone();
-                                        // Play back sound for cancel/back actions, select sound for others
+
                                         if selected_option.value == "CANCEL" || selected_option.value == "OK" {
-                                            let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
-                                            animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                                            dialog_state = DialogState::Closing;
-                                            sound_effects.play_back();
+                                            cancel = true;
                                         } else {
                                             sound_effects.play_select();
                                         }
@@ -1525,6 +1527,13 @@ async fn main() {
                                         sound_effects.play_reject();
                                     }
                                 }
+                            }
+
+                            if cancel {
+                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
+                                dialog_state = DialogState::Closing;
+                                sound_effects.play_back();
                             }
                         }
                     },
