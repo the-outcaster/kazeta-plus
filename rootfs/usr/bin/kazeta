@@ -23,12 +23,16 @@ function get_attribute {
 	cat "${info_file}" | grep "^${attribute}=" | head -1 | cut -d= -f2-
 }
 
+# wait up to 2 seconds for a cart
+for i in $(seq 1 20); do
+	cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
+	if [[ -f "${cart_info}" ]]; then
+		break
+	else
+		sleep 0.1
+	fi
+done
 
-cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
-cart_path=$(dirname "${cart_info}")
-
-echo $cart_info
-echo $cart_path
 
 if [[ ! -f "${cart_info}" ]]; then
 	# no cart found, start bios/memory management app
@@ -36,6 +40,7 @@ if [[ ! -f "${cart_info}" ]]; then
 	exit 0
 fi
 
+cart_path=$(dirname "${cart_info}")
 cart_id="$(get_attribute 'Id' ${cart_info})"
 cart_icon="${cart_path}/$(get_attribute 'Icon' ${cart_info})"
 
