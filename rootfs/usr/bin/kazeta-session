@@ -1,7 +1,15 @@
 #! /bin/bash
 
-# tell inputplumber to manage all controllers
-inputplumber devices manage-all --enable
+# ensure inputplumber manages all controllers
+for i in $(seq 1 100); do
+        inputplumber devices manage-all --enable
+
+        if [ "$?" == "0" ]; then
+                break
+        fi
+
+        sleep 0.1
+done
 
 # hack to fix bios app audio
 wpctl status > /dev/null
