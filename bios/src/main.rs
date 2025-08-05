@@ -1140,7 +1140,7 @@ async fn main() {
     let mut animation_state = AnimationState::new();
 
     // Screen state
-    let mut current_screen = Screen::MainMenu;
+    let mut current_screen = Screen::SaveData;
     let mut main_menu_selection = 0;
 
     // Create thread-safe storage media state
@@ -1301,10 +1301,11 @@ async fn main() {
                         render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
 
                         // Handle back navigation
-                        if input_state.back {
-                            current_screen = Screen::MainMenu;
-                            sound_effects.play_back();
-                        }
+                        // Temporarily disabled
+                        //if input_state.back {
+                        //    current_screen = Screen::MainMenu;
+                        //    sound_effects.play_back();
+                        //}
 
                         // Handle storage media switching with tab/bumpers regardless of focus
                         if input_state.cycle || input_state.next || input_state.prev {
