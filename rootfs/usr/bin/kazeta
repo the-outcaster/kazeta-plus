@@ -79,7 +79,6 @@ fi
 runtimedir="${BASE_DIR}/run/runtime"
 pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
 trap "\
-	rm -rf .local/share/umu/steamrt3/var; \
 	popd; \
 	pkexec kazeta-mount --unmount "${target}" "${runtimedir}" \
 " EXIT
