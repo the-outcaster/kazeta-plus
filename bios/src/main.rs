@@ -867,7 +867,7 @@ fn render_dialog(
         );
     } else if animation_state.dialog_transition_progress >= 1.0 {
         if let Some(desc) = dialog.desc.clone() {
-            text(&ctx, &desc, (FONT_SIZE*5) as f32, (FONT_SIZE*5) as f32);
+            text(&ctx, &desc, (SCREEN_WIDTH as f32 - measure_text(&desc, Some(&ctx.font), FONT_SIZE, 1.0).width) / 2.0, (FONT_SIZE*7) as f32);
         }
 
         // Find the longest option text for centering
@@ -893,7 +893,7 @@ fn render_dialog(
         const SELECTION_PADDING_Y: f32 = 4.0;   // Padding on top and bottom
 
         for (i, option) in dialog.options.iter().enumerate() {
-            let y_pos = (FONT_SIZE*7 + FONT_SIZE*2*(i as u16)) as f32;
+            let y_pos = (FONT_SIZE*10 + FONT_SIZE*2*(i as u16)) as f32;
             let shake_offset = if option.disabled {
                 animation_state.calculate_shake_offset(animation_state.shake_dialog)
             } else {
@@ -907,7 +907,7 @@ fn render_dialog(
         }
 
         // Draw selection rectangle with padding
-        let selection_y = (FONT_SIZE*6 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
+        let selection_y = (FONT_SIZE*9 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
         let selected_option = &dialog.options[dialog.selection];
         let selection_shake = if selected_option.disabled {
             animation_state.calculate_shake_offset(animation_state.shake_dialog)
@@ -977,7 +977,7 @@ fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> 
 
     Dialog {
         id: "copy_storage_select".to_string(),
-        desc: Some("SELECT DESTINATION".to_string()),
+        desc: Some("WHERE TO COPY THIS SAVE DATA?".to_string()),
         options,
         selection: 0,
     }
