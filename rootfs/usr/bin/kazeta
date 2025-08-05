@@ -62,7 +62,16 @@ fi
 
 runtime_name="$(get_attribute 'Runtime' ${cart_info})"
 if [ -n "$runtime_name" ]; then
-	runtime="${cart_path}/${runtime_name}.kzr"
+	runtime="${cart_path}/${runtime_name}"
+	if [ ! -f "$runtime" ]; then
+		runtime="${cart_path}/${runtime_name}.kzr"
+		if [ ! -f "$runtime" ]; then
+			runtime="$(ls ${cart_path}/${runtime_name}-*.kzr)"
+			if [ ! -f "$runtime" ]; then
+				runtime="/usr/share/kazeta/runtimes/none.kzr"
+			fi
+		fi
+	fi
 else
 	runtime="/usr/share/kazeta/runtimes/none.kzr"
 fi
