@@ -490,14 +490,23 @@ fn text_disabled(ctx : &DrawContext, text : &str, x : f32, y: f32) {
 
 #[derive(Clone, Debug)]
 struct StorageMediaState {
+
+    // all storage media, including disabled media
+    all_media: Vec<StorageMedia>,
+
+    // media that can actually be used
     media: Vec<StorageMedia>,
+
+    // the index of selection in 'media'
     selected: usize,
+
     needs_memory_refresh: bool,
 }
 
 impl StorageMediaState {
     fn new() -> Self {
         StorageMediaState {
+            all_media: Vec::new(),
             media: Vec::new(),
             selected: 0,
             needs_memory_refresh: false,
@@ -505,11 +514,11 @@ impl StorageMediaState {
     }
 
     fn update_media(&mut self) {
-        let mut new_media = Vec::new();
+        let mut all_new_media = Vec::new();
 
         if let Ok(devices) = save::list_devices() {
             for (id, free) in devices {
-                new_media.push(StorageMedia {
+                all_new_media.push(StorageMedia {
                     id,
                     free,
                 });
@@ -517,11 +526,25 @@ impl StorageMediaState {
         }
 
         // Done if media list has not changed
-        if self.media.len() == new_media.len() &&
-           !self.media.iter().zip(new_media.iter()).any(|(a, b)| a.id != b.id) {
-            self.media = new_media; // update free space
+        if self.all_media.len() == all_new_media.len() &&
+           !self.all_media.iter().zip(all_new_media.iter()).any(|(a, b)| a.id != b.id) {
+
+            //  update free space
+            self.all_media = all_new_media;
+            for media in &mut self.media {
+                if let Some(pos) = self.all_media.iter().position(|m| m.id == media.id) {
+                    media.free = self.all_media.get(pos).unwrap().free
+                }
+            }
+
             return;
         }
+
+        let new_media: Vec<StorageMedia> = all_new_media
+            .clone()
+            .into_iter()
+            .filter(|m| save::has_save_dir(&m.id) && !save::is_cart(&m.id))
+            .collect();
 
         // Try to keep the same device selected if it still exists
         let mut new_pos = 0;
@@ -531,8 +554,9 @@ impl StorageMediaState {
             }
         }
 
-        self.selected = new_pos;
+        self.all_media = all_new_media;
         self.media = new_media;
+        self.selected = new_pos;
         self.needs_memory_refresh = true;
     }
 }

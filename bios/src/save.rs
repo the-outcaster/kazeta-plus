@@ -1,5 +1,7 @@
 use std::path::Path;
+use std::path::PathBuf;
 use std::fs;
+use std::collections::VecDeque;
 use std::io::{self, BufRead, Write, Read};
 use sysinfo::Disks;
 use tar::{Builder, Archive};
@@ -14,6 +16,104 @@ const EXCLUDED_DIRS: &[&str] = &[".cache", ".local/share/umu", ".config/pulse/co
 fn should_exclude_path(path: &Path) -> bool {
     let path_str = path.to_str().unwrap_or("");
     EXCLUDED_DIRS.iter().any(|&excluded| path_str.contains(excluded))
+}
+
+/// Searches for files with a given extension within a directory up to a specified depth
+///
+/// # Arguments
+/// * `dir` - The directory to search in
+/// * `extension` - The file extension to search for (without the dot, e.g., "txt", "rs")
+/// * `max_depth` - Maximum depth to search (0 = only current directory)
+/// * `find_first` - If true, stops after finding the first match
+///
+/// # Returns
+/// * `Result<Vec<PathBuf>, io::Error>` - Vector of found file paths or an error
+///
+/// # Note
+/// This function ignores permission errors and other I/O errors for individual files/directories
+/// and continues searching. It only returns an error if the initial directory is inaccessible.
+/// Searches breadth-first (higher level directories first).
+pub fn find_files_by_extension<P: AsRef<Path>>(
+    dir: P,
+    extension: &str,
+    max_depth: usize,
+    find_first: bool,
+) -> Result<Vec<PathBuf>, io::Error> {
+    let dir_path = dir.as_ref();
+
+    // Check if initial directory exists and is accessible
+    if !dir_path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Directory does not exist: {}", dir_path.display())
+        ));
+    }
+
+    // Try to read the initial directory to ensure it's accessible
+    fs::read_dir(dir_path)?;
+
+    let mut results = Vec::new();
+    search_breadth_first(dir_path, extension, max_depth, find_first, &mut results);
+    Ok(results)
+}
+
+fn search_breadth_first(
+    start_dir: &Path,
+    extension: &str,
+    max_depth: usize,
+    find_first: bool,
+    results: &mut Vec<PathBuf>,
+) {
+    let mut queue = VecDeque::new();
+    queue.push_back((start_dir.to_path_buf(), 0));
+
+    while let Some((current_dir, depth)) = queue.pop_front() {
+        if depth > max_depth {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&current_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue, // Skip directories we can't read
+        };
+
+        let mut subdirs = Vec::new();
+
+        // First, process all files in the current directory
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue, // Skip entries we can't read
+            };
+
+            let path = entry.path();
+
+            let metadata = match path.metadata() {
+                Ok(metadata) => metadata,
+                Err(_) => continue, // Skip files/dirs we can't get metadata for
+            };
+
+            if metadata.is_file() {
+                // Check if file has the desired extension
+                if let Some(file_ext) = path.extension() {
+                    if file_ext.to_string_lossy().eq_ignore_ascii_case(extension) {
+                        results.push(path);
+                        if find_first {
+                            return; // Exit immediately if we only want the first match
+                        }
+                    }
+                }
+            } else if metadata.is_dir() && depth < max_depth {
+                // Collect subdirectories to process later
+                subdirs.push(path);
+            }
+        }
+
+        // Then add subdirectories to the queue for next level processing
+        for subdir in subdirs {
+            queue.push_back((subdir, depth + 1));
+        }
+    }
 }
 
 pub fn get_save_dir_from_drive_name(drive_name: &str) -> String {
@@ -137,6 +237,32 @@ pub fn list_devices() -> io::Result<Vec<(String, u32)>> {
     }
 
     Ok(devices)
+}
+
+pub fn has_save_dir(drive_name: &str) -> bool {
+    if drive_name == "internal" {
+        return true;
+    }
+
+    let save_dir = get_save_dir_from_drive_name(drive_name);
+    Path::new(&save_dir).exists()
+}
+
+pub fn is_cart(drive_name: &str) -> bool {
+    if drive_name == "internal" {
+        return false;
+    }
+
+    let save_dir = get_save_dir_from_drive_name(drive_name);
+    let mount_point: String = Path::new(&save_dir).parent().unwrap().parent().unwrap().display().to_string();
+
+    if let Ok(files) = find_files_by_extension(mount_point, "kzi", 1, true) {
+        if files.len() > 0 {
+            return true;
+        }
+    }
+
+    false
 }
 
 pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, String, f32)>> {
