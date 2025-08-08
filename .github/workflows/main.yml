@@ -61,7 +61,7 @@ jobs:
     needs:
      - build-docker-image
      - aur-pkgbuild
-    name: Build ChimeraOS UNSTABLE image
+    name: Build OS UNSTABLE image
     uses: ./.github/workflows/build-system-image.yml
     with:
       postfix: "[UNSTABLE]"
