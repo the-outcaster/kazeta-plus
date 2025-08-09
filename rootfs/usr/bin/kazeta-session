@@ -18,12 +18,12 @@ wpctl status > /dev/null
 mv /var/kazeta/session.log /var/kazeta/session.log.old
 /usr/bin/kazeta > /var/kazeta/session.log 2>&1 &
 
-# on first boot, ensure we are using HDMI audio output and set a reasonable default volume
-if [ ! -e /var/kazeta/state/.first-boot-done ]; then
-	touch /var/kazeta/state/.first-boot-done
+# default to using HDMI audio output and set a reasonable volume
+if [ ! -e /var/kazeta/state/wireplumber ]; then
+	mkdir -p /var/kazeta/state/wireplumber
 
 	for i in $(seq 1 60); do
-		sink_id=$(wpctl status | grep HDMI | head -1 | grep -oE " [0-9]+\. " | tr -d ' .')
+		sink_id=$(wpctl status --name | grep output | grep hdmi | head -1 | grep -oE " [0-9]+\. " | tr -d ' .')
 		wpctl set-default $sink_id
 
 		if [ "$?" == "0" ]; then

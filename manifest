@@ -79,7 +79,6 @@ postinstallhook() {
 
 	# Persist wireplumber settings
 	mkdir -p /home/${USERNAME}/.local/state
-	mkdir -p /var/kazeta/state/wireplumber
 	ln -s /var/kazeta/state/wireplumber /home/${USERNAME}/.local/state/wireplumber
 
 	# Set permissions
