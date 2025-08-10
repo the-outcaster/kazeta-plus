@@ -21,6 +21,7 @@ export PACKAGES="\
 	htop \
 	inputplumber \
 	less \
+	lib32-libxfixes \
 	lib32-nvidia-utils \
 	lib32-pipewire \
 	lib32-vulkan-intel \
