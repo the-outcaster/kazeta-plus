@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use gilrs::{Gilrs, Button, Axis};
 use std::panic;
 use futures;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering, AtomicBool};
+use std::fs;
+use std::path::Path;
+use std::process;
 
 mod save;
 
@@ -123,8 +126,7 @@ struct DrawContext {
 enum Screen {
     MainMenu,
     SaveData,
-    Controllers,
-    Audio,
+    FadingOut,
 }
 
 // UI Focus for Save Data Screen
@@ -135,10 +137,18 @@ enum UIFocus {
     StorageRight,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum ShakeTarget {
+    None,
+    LeftArrow,
+    RightArrow,
+    Dialog,
+    PlayOption,
+}
+
 struct AnimationState {
-    shake_left: f32,  // Shake animation state for left arrow
-    shake_right: f32, // Shake animation state for right arrow
-    shake_dialog: f32, // Shake animation state for dialog options
+    shake_time: f32,  // Current shake animation time
+    shake_target: ShakeTarget, // Which element is currently shaking
     cursor_animation_time: f32, // Time counter for cursor animations
     cursor_transition_time: f32, // Time counter for cursor transition animation
     dialog_transition_time: f32, // Time counter for dialog transition animation
@@ -156,9 +166,8 @@ impl AnimationState {
 
     fn new() -> Self {
         AnimationState {
-            shake_left: 0.0,
-            shake_right: 0.0,
-            shake_dialog: 0.0,
+            shake_time: 0.0,
+            shake_target: ShakeTarget::None,
             cursor_animation_time: 0.0,
             cursor_transition_time: 0.0,
             dialog_transition_time: 0.0,
@@ -168,26 +177,21 @@ impl AnimationState {
         }
     }
 
-    fn calculate_shake_offset(&self, shake_time: f32) -> f32 {
-        if shake_time > 0.0 {
-            (shake_time / Self::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * Self::SHAKE_INTENSITY
+    fn calculate_shake_offset(&self, target: ShakeTarget) -> f32 {
+        if self.shake_target == target && self.shake_time > 0.0 {
+            (self.shake_time / Self::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * Self::SHAKE_INTENSITY
         } else {
             0.0
         }
     }
 
     fn update_shake(&mut self, delta_time: f32) {
-        // Update left arrow shake
-        if self.shake_left > 0.0 {
-            self.shake_left = (self.shake_left - delta_time).max(0.0);
-        }
-        // Update right arrow shake
-        if self.shake_right > 0.0 {
-            self.shake_right = (self.shake_right - delta_time).max(0.0);
-        }
-        // Update dialog shake
-        if self.shake_dialog > 0.0 {
-            self.shake_dialog = (self.shake_dialog - delta_time).max(0.0);
+        // Update shake animation
+        if self.shake_time > 0.0 {
+            self.shake_time = (self.shake_time - delta_time).max(0.0);
+            if self.shake_time <= 0.0 {
+                self.shake_target = ShakeTarget::None;
+            }
         }
     }
 
@@ -202,14 +206,22 @@ impl AnimationState {
 
     fn trigger_shake(&mut self, is_left: bool) {
         if is_left {
-            self.shake_left = Self::SHAKE_DURATION;
+            self.shake_target = ShakeTarget::LeftArrow;
+            self.shake_time = Self::SHAKE_DURATION;
         } else {
-            self.shake_right = Self::SHAKE_DURATION;
+            self.shake_target = ShakeTarget::RightArrow;
+            self.shake_time = Self::SHAKE_DURATION;
         }
     }
 
     fn trigger_dialog_shake(&mut self) {
-        self.shake_dialog = Self::SHAKE_DURATION;
+        self.shake_target = ShakeTarget::Dialog;
+        self.shake_time = Self::SHAKE_DURATION;
+    }
+
+    fn trigger_play_option_shake(&mut self) {
+        self.shake_target = ShakeTarget::PlayOption;
+        self.shake_time = Self::SHAKE_DURATION;
     }
 
     fn trigger_transition(&mut self) {
@@ -477,13 +489,13 @@ fn text_disabled(ctx : &DrawContext, text : &str, x : f32, y: f32) {
     draw_text_ex(&text.to_uppercase(), x+1.0, y+1.0, TextParams {
         font: Some(&ctx.font),
         font_size: FONT_SIZE,
-        color: Color {r:0.0, g:0.0, b:0.0, a:0.4},
+        color: Color {r:0.0, g:0.0, b:0.0, a:1.0},
         ..Default::default()
     });
     draw_text_ex(&text.to_uppercase(), x, y, TextParams {
         font: Some(&ctx.font),
         font_size: FONT_SIZE,
-        color: Color {r:0.5, g:0.5, b:0.5, a:0.5},
+        color: Color {r:0.4, g:0.4, b:0.4, a:1.0},
         ..Default::default()
     });
 }
@@ -576,7 +588,7 @@ fn calculate_icon_transition_positions(selected_memory: usize) -> (Vec2, Vec2) {
     (grid_pos, dialog_pos)
 }
 
-fn render_main_view(
+fn render_data_view(
     ctx: &DrawContext,
     selected_memory: usize,
     memories: &Vec<Memory>,
@@ -675,7 +687,7 @@ fn render_main_view(
             // Draw left arrow background
             let left_box_x = PADDING;  // Align with leftmost grid column
             let left_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
-            let left_shake = animation_state.calculate_shake_offset(animation_state.shake_left);
+            let left_shake = animation_state.calculate_shake_offset(ShakeTarget::LeftArrow);
 
             if let UIFocus::StorageLeft = input_state.ui_focus {
                 let cursor_color = animation_state.get_cursor_color();
@@ -721,7 +733,7 @@ fn render_main_view(
             // Draw right arrow background
             let right_box_x = PADDING + (GRID_WIDTH as f32 - 1.0) * (TILE_SIZE + PADDING);  // Align with rightmost grid column
             let right_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
-            let right_shake = animation_state.calculate_shake_offset(animation_state.shake_right);
+            let right_shake = animation_state.calculate_shake_offset(ShakeTarget::RightArrow);
 
             if let UIFocus::StorageRight = input_state.ui_focus {
                 let cursor_color = animation_state.get_cursor_color();
@@ -919,7 +931,7 @@ fn render_dialog(
         for (i, option) in dialog.options.iter().enumerate() {
             let y_pos = (FONT_SIZE*10 + FONT_SIZE*2*(i as u16)) as f32;
             let shake_offset = if option.disabled {
-                animation_state.calculate_shake_offset(animation_state.shake_dialog)
+                animation_state.calculate_shake_offset(ShakeTarget::Dialog)
             } else {
                 0.0
             };
@@ -934,7 +946,7 @@ fn render_dialog(
         let selection_y = (FONT_SIZE*9 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
         let selected_option = &dialog.options[dialog.selection];
         let selection_shake = if selected_option.disabled {
-            animation_state.calculate_shake_offset(animation_state.shake_dialog)
+            animation_state.calculate_shake_offset(ShakeTarget::Dialog)
         } else {
             0.0
         };
@@ -1085,10 +1097,12 @@ enum DialogState {
 
 fn render_main_menu(
     ctx: &DrawContext,
+    menu_options: &[&str],
     selected_option: usize,
+    play_option_enabled: bool,
     animation_state: &AnimationState,
+    logo: &Texture2D,
 ) {
-    const MENU_OPTIONS: [&str; 3] = ["SAVE DATA", "CONTROLLERS", "AUDIO"];
     const MENU_START_Y: f32 = 120.0;
     const MENU_OPTION_HEIGHT: f32 = 40.0;
     const MENU_PADDING: f32 = 16.0;
@@ -1097,7 +1111,7 @@ fn render_main_menu(
     draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR);
 
     // Draw menu options
-    for (i, option) in MENU_OPTIONS.iter().enumerate() {
+    for (i, option) in menu_options.iter().enumerate() {
         let y_pos = MENU_START_Y + (i as f32 * MENU_OPTION_HEIGHT);
 
         // Draw selected option highlight
@@ -1110,33 +1124,38 @@ fn render_main_menu(
             let scaled_height = base_height * cursor_scale;
             let offset_x = (scaled_width - base_width) / 2.0;
             let offset_y = (scaled_height - base_height) / 2.0;
-            let x_pos = (SCREEN_WIDTH as f32 - base_width) / 2.0;
+            let mut x_pos = (SCREEN_WIDTH as f32 - base_width) / 2.0;
+
+            // Apply shake effect to selection highlight for disabled play option
+            if i == 1 && !play_option_enabled {
+                let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
+                x_pos += shake_offset;
+            }
+
             draw_rectangle_lines(x_pos - offset_x, y_pos - 7.0 - offset_y, scaled_width, scaled_height/1.5, 4.0, cursor_color);
         }
 
         // Draw text
         let text_width = measure_text(option, Some(&ctx.font), FONT_SIZE, 1.0).width;
-        let x_pos = (SCREEN_WIDTH as f32 - text_width) / 2.0;
-        text(&ctx, option, x_pos, y_pos + MENU_PADDING);
+        let mut x_pos = (SCREEN_WIDTH as f32 - text_width) / 2.0;
+        let y_pos_text = y_pos + MENU_PADDING;
+
+        // Apply shake effect to disabled play option when selected
+        if i == 1 && !play_option_enabled {
+            let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
+            x_pos += shake_offset;
+        }
+
+        if i == 1 && !play_option_enabled {
+            text_disabled(&ctx, option, x_pos, y_pos_text);
+        } else {
+            text(&ctx, option, x_pos, y_pos_text);
+        }
     }
-}
 
-fn render_controllers_screen(ctx: &DrawContext) {
-    // Draw title
-    text(&ctx, "CONTROLLERS", (SCREEN_WIDTH as f32 - measure_text("CONTROLLERS", Some(&ctx.font), FONT_SIZE * 2, 1.0).width) / 2.0, 60.0);
-
-    // Draw placeholder text
-    text(&ctx, "CONTROLLER SETTINGS", (SCREEN_WIDTH as f32 - measure_text("CONTROLLER SETTINGS", Some(&ctx.font), FONT_SIZE, 1.0).width) / 2.0, 150.0);
-    text(&ctx, "COMING SOON", (SCREEN_WIDTH as f32 - measure_text("COMING SOON", Some(&ctx.font), FONT_SIZE, 1.0).width) / 2.0, 180.0);
-}
-
-fn render_audio_screen(ctx: &DrawContext) {
-    // Draw title
-    text(&ctx, "AUDIO", (SCREEN_WIDTH as f32 - measure_text("AUDIO", Some(&ctx.font), FONT_SIZE * 2, 1.0).width) / 2.0, 60.0);
-
-    // Draw placeholder text
-    text(&ctx, "AUDIO SETTINGS", (SCREEN_WIDTH as f32 - measure_text("AUDIO SETTINGS", Some(&ctx.font), FONT_SIZE, 1.0).width) / 2.0, 150.0);
-    text(&ctx, "COMING SOON", (SCREEN_WIDTH as f32 - measure_text("COMING SOON", Some(&ctx.font), FONT_SIZE, 1.0).width) / 2.0, 180.0);
+    // Draw logo and version number
+    draw_texture(logo, (SCREEN_WIDTH as f32 - 166.0)/2.0, 30.0, WHITE);
+    text(&ctx, "V2025.0", SCREEN_WIDTH as f32 - 90.0, SCREEN_HEIGHT as f32 - 20.0);
 }
 
 #[macroquad::main(window_conf)]
@@ -1164,8 +1183,30 @@ async fn main() {
     let mut animation_state = AnimationState::new();
 
     // Screen state
-    let mut current_screen = Screen::SaveData;
-    let mut main_menu_selection = 0;
+    const MAIN_MENU_OPTIONS: [&str; 2] = ["DATA", "PLAY"];
+    let mut current_screen = Screen::MainMenu;
+    let mut main_menu_selection: usize = 0;
+    let mut play_option_enabled: bool = false;
+
+    // Fade state
+    let mut fade_start_time: Option<f64> = None;
+    const FADE_DURATION: f64 = 1.0; // 1 second fade
+    const FADE_LINGER_DURATION: f64 = 0.5; // 0.5 seconds to linger on black screen
+
+    // Create thread-safe cart connection status
+    let cart_connected = Arc::new(AtomicBool::new(false));
+    let cart_check_thread_running = Arc::new(AtomicBool::new(false));
+
+    // Spawn background thread for cart connection detection (only active during main menu)
+    let cart_connected_clone = cart_connected.clone();
+    let cart_check_thread_running_clone = cart_check_thread_running.clone();
+    thread::spawn(move || {
+        while cart_check_thread_running_clone.load(Ordering::Relaxed) {
+            let is_connected = save::is_cart_connected();
+            cart_connected_clone.store(is_connected, Ordering::Relaxed);
+            thread::sleep(time::Duration::from_secs(1));
+        }
+    });
 
     // Create thread-safe storage media state
     let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
@@ -1255,6 +1296,27 @@ async fn main() {
         animation_state.update_cursor_animation(get_frame_time());
         animation_state.update_dialog_transition(get_frame_time());
 
+        // Manage cart check thread based on current screen
+        let should_thread_run = current_screen == Screen::MainMenu;
+        let thread_is_running = cart_check_thread_running.load(Ordering::Relaxed);
+
+        if should_thread_run && !thread_is_running {
+            // Entered main menu, start cart check thread
+            cart_check_thread_running.store(true, Ordering::Relaxed);
+            let cart_connected_clone = cart_connected.clone();
+            let cart_check_thread_running_clone = cart_check_thread_running.clone();
+            thread::spawn(move || {
+                while cart_check_thread_running_clone.load(Ordering::Relaxed) {
+                    let is_connected = save::is_cart_connected();
+                    cart_connected_clone.store(is_connected, Ordering::Relaxed);
+                    thread::sleep(time::Duration::from_secs(1));
+                }
+            });
+        } else if !should_thread_run && thread_is_running {
+            // Left main menu, stop cart check thread
+            cart_check_thread_running.store(false, Ordering::Relaxed);
+        }
+
         // Update dialog state based on animation
         if animation_state.dialog_transition_time <= 0.0 {
             match dialog_state {
@@ -1271,19 +1333,48 @@ async fn main() {
 
         // Handle screen-specific rendering and input
         match current_screen {
+            Screen::FadingOut => {
+                // During fade, only render, don't process input
+                // Render the current background and UI elements first
+                render_main_menu(&ctx, &MAIN_MENU_OPTIONS, main_menu_selection, play_option_enabled, &animation_state, &logo);
+
+                // Calculate fade progress
+                if let Some(start_time) = fade_start_time {
+                    let elapsed = get_time() - start_time;
+                    let fade_progress = (elapsed / FADE_DURATION).min(1.0);
+
+                    // Draw fade overlay
+                    let alpha = fade_progress as f32;
+                    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32,
+                        Color { r: 0.0, g: 0.0, b: 0.0, a: alpha });
+
+                    // If fade is complete, wait for linger duration then exit
+                    if fade_progress >= 1.0 {
+                        let total_elapsed = elapsed - FADE_DURATION;
+                        if total_elapsed >= FADE_LINGER_DURATION {
+                            process::exit(0);
+                        }
+                    }
+                }
+            },
             Screen::MainMenu => {
-                render_main_menu(&ctx, main_menu_selection, &animation_state);
-                draw_texture(&logo, (SCREEN_WIDTH as f32 - 166.0)/2.0, 30.0, WHITE);
-                text(&ctx, "V2025.01", SCREEN_WIDTH as f32 - 90.0, SCREEN_HEIGHT as f32 - 20.0);
+                // Update play option enabled status based on cart connection
+                play_option_enabled = cart_connected.load(Ordering::Relaxed);
+
+                render_main_menu(&ctx, &MAIN_MENU_OPTIONS, main_menu_selection, play_option_enabled, &animation_state, &logo);
 
                 // Handle main menu navigation
-                if input_state.up && main_menu_selection > 0 {
-                    main_menu_selection -= 1;
+                if input_state.up {
+                    if main_menu_selection == 0 {
+                        main_menu_selection = MAIN_MENU_OPTIONS.len() - 1;
+                    } else {
+                        main_menu_selection = (main_menu_selection - 1) % MAIN_MENU_OPTIONS.len();
+                    }
                     animation_state.trigger_transition();
                     sound_effects.play_cursor_move();
                 }
-                if input_state.down && main_menu_selection < 2 {
-                    main_menu_selection += 1;
+                if input_state.down {
+                    main_menu_selection = (main_menu_selection + 1) % MAIN_MENU_OPTIONS.len();
                     animation_state.trigger_transition();
                     sound_effects.play_cursor_move();
                 }
@@ -1295,12 +1386,24 @@ async fn main() {
                             sound_effects.play_select();
                         },
                         1 => {
-                            current_screen = Screen::Controllers;
-                            sound_effects.play_select();
-                        },
-                        2 => {
-                            current_screen = Screen::Audio;
-                            sound_effects.play_select();
+                            if play_option_enabled {
+                                sound_effects.play_select();
+                                // Create restart session sentinel file and start fade
+                                let state_dir = Path::new(".local/share/kazeta/state");
+                                if state_dir.exists() {
+                                    let sentinel_path = state_dir.join(".RESTART_SESSION_SENTINEL");
+                                    if let Err(_) = fs::File::create(&sentinel_path) {
+                                        // If we can't create the file, just continue
+                                        // Don't show error to user
+                                    }
+                                }
+                                // Start fade to black
+                                fade_start_time = Some(get_time());
+                                current_screen = Screen::FadingOut;
+                            } else {
+                                sound_effects.play_reject();
+                                animation_state.trigger_play_option_shake();
+                            }
                         },
                         _ => {}
                     }
@@ -1322,14 +1425,13 @@ async fn main() {
 
                 match dialog_state {
                     DialogState::None => {
-                        render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
 
                         // Handle back navigation
-                        // Temporarily disabled
-                        //if input_state.back {
-                        //    current_screen = Screen::MainMenu;
-                        //    sound_effects.play_back();
-                        //}
+                        if input_state.back {
+                           current_screen = Screen::MainMenu;
+                           sound_effects.play_back();
+                        }
 
                         // Handle storage media switching with tab/bumpers regardless of focus
                         if input_state.cycle || input_state.next || input_state.prev {
@@ -1484,7 +1586,7 @@ async fn main() {
                     },
                     DialogState::Opening => {
                         // During opening, only render the main view and the transitioning icon
-                        render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1564,7 +1666,7 @@ async fn main() {
                     },
                     DialogState::Closing => {
                         // During closing, render both views to show the icon returning
-                        render_main_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1588,24 +1690,6 @@ async fn main() {
                     }
                 }
             },
-            Screen::Controllers => {
-                render_controllers_screen(&ctx);
-
-                // Handle back navigation
-                if input_state.back {
-                    current_screen = Screen::MainMenu;
-                    sound_effects.play_back();
-                }
-            },
-            Screen::Audio => {
-                render_audio_screen(&ctx);
-
-                // Handle back navigation
-                if input_state.back {
-                    current_screen = Screen::MainMenu;
-                    sound_effects.play_back();
-                }
-            }
         }
 
         // Handle dialog actions

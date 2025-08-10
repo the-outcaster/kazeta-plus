@@ -1,7 +1,7 @@
 #! /bin/bash
 
-export VERSION="1"
-export SYSTEM_DESC="kazeta"
+export VERSION="2025.0"
+export SYSTEM_DESC="Kazeta"
 export SYSTEM_NAME="kazeta"
 export USERNAME="gamer"
 export SIZE="5000MB"

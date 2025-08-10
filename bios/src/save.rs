@@ -265,6 +265,16 @@ pub fn is_cart(drive_name: &str) -> bool {
     false
 }
 
+pub fn is_cart_connected() -> bool {
+    if let Ok(files) = find_files_by_extension("/run/media", "kzi", 2, true) {
+        if files.len() > 0 {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, String, f32)>> {
     let save_dir = get_save_dir_from_drive_name(drive_name);
     let cache_dir = get_cache_dir_from_drive_name(drive_name);
