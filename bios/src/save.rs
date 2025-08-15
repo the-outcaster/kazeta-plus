@@ -283,7 +283,7 @@ pub fn is_cart_connected() -> bool {
     false
 }
 
-pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, String, f32)>> {
+pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, String)>> {
     let save_dir = get_save_dir_from_drive_name(drive_name);
     let cache_dir = get_cache_dir_from_drive_name(drive_name);
     eprintln!("Getting save details from directory: {}", save_dir);
@@ -310,48 +310,7 @@ pub fn get_save_details(drive_name: &str) -> io::Result<Vec<(String, String, Str
         });
         let icon = format!("{}/{}/icon.png", cache_dir, cart_id);
 
-        let size = if path.extension().and_then(|e| e.to_str()) == Some("tar") {
-            // For .tar files, get the file size
-            let metadata = fs::metadata(&path)?;
-            let size_bytes = metadata.len();
-            eprintln!("{}: File size is {} bytes", cart_id, size_bytes);
-            // Convert to MB with one decimal place
-            let size_mb = size_bytes as f64 / 1024.0 / 1024.0;
-            if size_mb > 0.0 {
-                // Round up to nearest 0.1 MB if size is non-zero
-                (size_mb * 10.0).ceil() / 10.0
-            } else {
-                0.0
-            }
-        } else {
-            // For directories, get the directory size excluding ignored directories
-            let mut total_size = 0;
-            for entry in walkdir::WalkDir::new(&path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let path = e.path();
-                    // Skip excluded directories and their contents
-                    !should_exclude_path(path) &&
-                    path.is_file()
-                }) {
-                let entry_size = entry.metadata()
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to get file metadata: {}", e)))?
-                    .len();
-                total_size += entry_size;
-            }
-            eprintln!("{}: Total directory size is {} bytes", cart_id, total_size);
-            // Convert to MB with one decimal place
-            let size_mb = total_size as f64 / 1024.0 / 1024.0;
-            if size_mb > 0.0 {
-                // Round up to nearest 0.1 MB if size is non-zero
-                (size_mb * 10.0).ceil() / 10.0
-            } else {
-                0.0
-            }
-        };
-
-        details.push((cart_id.to_string(), name, icon, size as f32));
+        details.push((cart_id.to_string(), name, icon));
     }
 
     // Sort details alphabetically by name, fallback to cart_id if name is empty
@@ -739,6 +698,68 @@ fn parse_playtime_content(content: &str) -> f32 {
 
     // Round to one decimal place
     (total_hours * 10.0).round() / 10.0
+}
+
+/// Calculate save data size for a game (lazy calculation)
+/// Returns size in MB with one decimal place
+pub fn calculate_save_size(cart_id: &str, drive_name: &str) -> f32 {
+    println!("Calculating save size for {} on {}", cart_id, drive_name);
+    let save_dir = get_save_dir_from_drive_name(drive_name);
+
+    // Check if this is a tar file (external drive) or directory (internal drive)
+    let tar_path = Path::new(&save_dir).join(format!("{}.tar", cart_id));
+    let dir_path = Path::new(&save_dir).join(cart_id);
+
+    let size_bytes = if tar_path.exists() {
+        // External drive: get tar file size
+        calculate_size_from_tar(&tar_path)
+    } else if dir_path.exists() {
+        // Internal drive: calculate directory size
+        calculate_size_from_dir(&dir_path)
+    } else {
+        // Neither exists
+        return 0.0;
+    };
+
+    // Convert to MB with one decimal place, rounding up to nearest 0.1 MB if non-zero
+    let size_mb = size_bytes as f64 / 1024.0 / 1024.0;
+    if size_mb > 0.0 {
+        ((size_mb * 10.0).ceil() / 10.0) as f32
+    } else {
+        0.0
+    }
+}
+
+/// Calculate size from a tar archive (external drives)
+fn calculate_size_from_tar(tar_path: &Path) -> u64 {
+    let metadata = match fs::metadata(tar_path) {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            eprintln!("Failed to get tar file metadata: {}", e);
+            return 0;
+        }
+    };
+    metadata.len()
+}
+
+/// Calculate size from a directory (internal drives)
+fn calculate_size_from_dir(dir_path: &Path) -> u64 {
+    let mut total_size = 0u64;
+
+    for entry in walkdir::WalkDir::new(dir_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            // Skip excluded directories and their contents
+            !should_exclude_path(path) &&
+            path.is_file()
+        }) {
+        if let Ok(metadata) = entry.metadata() {
+            total_size += metadata.len();
+        }
+    }
+    total_size
 }
 
 fn sync_to_disk() {

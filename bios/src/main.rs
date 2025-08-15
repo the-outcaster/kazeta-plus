@@ -89,7 +89,6 @@ fn window_conf() -> Conf {
 struct Memory {
     id: String,
     name: Option<String>,
-    size: f32,
     drive_name: String, // Store which drive this save is on
 }
 
@@ -455,7 +454,7 @@ async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture
     let mut memories = Vec::new();
 
     if let Ok(details) = save::get_save_details(&media.id) {
-        for (cart_id, name, icon_path, size) in details {
+        for (cart_id, name, icon_path) in details {
             if !cache.contains_key(&cart_id) {
                 queue.push((cart_id.clone(), icon_path.clone()));
             }
@@ -463,7 +462,6 @@ async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture
             let m = Memory {
                 id: cart_id,
                 name: Some(name),
-                size: size as f32,
                 drive_name: media.id.clone(),
             };
             memories.push(m);
@@ -588,9 +586,26 @@ fn get_game_playtime(memory: &Memory, playtime_cache: &mut PlaytimeCache) -> f32
     }
 }
 
+/// Get size for a specific game, using cache when available
+fn get_game_size(memory: &Memory, size_cache: &mut SizeCache) -> f32 {
+    let cache_key = (memory.id.clone(), memory.drive_name.clone());
+
+    if let Some(&cached_size) = size_cache.get(&cache_key) {
+        cached_size
+    } else {
+        let calculated_size = save::calculate_save_size(&memory.id, &memory.drive_name);
+        size_cache.insert(cache_key, calculated_size);
+        calculated_size
+    }
+}
+
 // Playtime cache to avoid recalculating playtime for the same game on the same drive
 type PlaytimeCacheKey = (String, String); // (cart_id, drive_name)
 type PlaytimeCache = HashMap<PlaytimeCacheKey, f32>;
+
+// Size cache to avoid recalculating size for the same game on the same drive
+type SizeCacheKey = (String, String); // (cart_id, drive_name)
+type SizeCache = HashMap<SizeCacheKey, f32>;
 
 fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
     selected_memory + GRID_WIDTH * scroll_offset
@@ -618,6 +633,7 @@ fn render_data_view(
     input_state: &mut InputState,
     animation_state: &mut AnimationState,
     playtime_cache: &mut PlaytimeCache,
+    size_cache: &mut SizeCache,
 ) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
@@ -814,8 +830,9 @@ fn render_data_view(
             };
 
             let playtime = get_game_playtime(selected_mem, playtime_cache);
+            let size = get_game_size(selected_mem, size_cache);
             text(&ctx, &desc, 19.0, 327.0);
-            text(&ctx, &format!("{:.1} MB | {:.1} H", selected_mem.size, playtime), 19.0, 345.0);
+            text(&ctx, &format!("{:.1} MB | {:.1} H", size, playtime), 19.0, 345.0);
         }
     }
 
@@ -861,6 +878,7 @@ fn render_dialog(
     scroll_offset: usize,
     animation_state: &AnimationState,
     playtime_cache: &mut PlaytimeCache,
+    size_cache: &mut SizeCache,
 ) {
     let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
@@ -904,8 +922,9 @@ fn render_dialog(
             };
 
             let playtime = get_game_playtime(mem, playtime_cache);
+            let size = get_game_size(mem, size_cache);
             text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
-            text(&ctx, &format!("{:.1} MB | {:.1} H", mem.size, playtime), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+            text(&ctx, &format!("{:.1} MB | {:.1} H", size, playtime), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
         }
     };
 
@@ -1193,6 +1212,7 @@ async fn main() {
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut icon_queue: Vec<(String, String)> = Vec::new();
     let mut playtime_cache: PlaytimeCache = HashMap::new();
+    let mut size_cache: SizeCache = HashMap::new();
     let mut scroll_offset = 0;
 
     let ctx : DrawContext = DrawContext {
@@ -1450,7 +1470,7 @@ async fn main() {
 
                 match dialog_state {
                     DialogState::None => {
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache);
 
                         // Handle back navigation
                         if input_state.back {
@@ -1611,7 +1631,7 @@ async fn main() {
                     },
                     DialogState::Opening => {
                         // During opening, only render the main view and the transitioning icon
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1636,7 +1656,7 @@ async fn main() {
                     DialogState::Open => {
                         // When dialog is fully open, only render the dialog
                         if let Some(dialog) = dialogs.last_mut() {
-                            render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state, &mut playtime_cache);
+                            render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state, &mut playtime_cache, &mut size_cache);
 
                             let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                             if input_state.up {
@@ -1691,7 +1711,7 @@ async fn main() {
                     },
                     DialogState::Closing => {
                         // During closing, render both views to show the icon returning
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
