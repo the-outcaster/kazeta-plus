@@ -79,6 +79,7 @@ fi
 runtimedir="${BASE_DIR}/run/runtime"
 pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
 trap "\
+	date --iso-8601=seconds >> .kazeta_playtime.log; \
 	popd; \
 	pkexec kazeta-mount --unmount "${target}" "${runtimedir}" \
 " EXIT
@@ -94,4 +95,5 @@ pushd "${HOME}"
 cart_exec="$(get_attribute 'Exec' ${cart_info})"
 cart_gsopts="$(get_attribute 'GamescopeOptions' ${cart_info})"
 echo "$cart_exec" > /tmp/kazeta-cart-exec
+echo -n "$(date --iso-8601=seconds) " >> .kazeta_playtime.log
 gamescope ${cart_gsopts} -- ./kazeta-runtime-exec /tmp/kazeta-cart-exec | grep -v "pressure-vessel-wrap" > "${HOME}/kazeta.log" 2>&1

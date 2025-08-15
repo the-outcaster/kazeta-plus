@@ -90,6 +90,7 @@ struct Memory {
     id: String,
     name: Option<String>,
     size: f32,
+    drive_name: String, // Store which drive this save is on
 }
 
 #[derive(Clone, Debug)]
@@ -463,6 +464,7 @@ async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture
                 id: cart_id,
                 name: Some(name),
                 size: size as f32,
+                drive_name: media.id.clone(),
             };
             memories.push(m);
         }
@@ -573,6 +575,23 @@ impl StorageMediaState {
     }
 }
 
+/// Get playtime for a specific game, using cache when available
+fn get_game_playtime(memory: &Memory, playtime_cache: &mut PlaytimeCache) -> f32 {
+    let cache_key = (memory.id.clone(), memory.drive_name.clone());
+
+    if let Some(&cached_playtime) = playtime_cache.get(&cache_key) {
+        cached_playtime
+    } else {
+        let calculated_playtime = save::calculate_playtime(&memory.id, &memory.drive_name);
+        playtime_cache.insert(cache_key, calculated_playtime);
+        calculated_playtime
+    }
+}
+
+// Playtime cache to avoid recalculating playtime for the same game on the same drive
+type PlaytimeCacheKey = (String, String); // (cart_id, drive_name)
+type PlaytimeCache = HashMap<PlaytimeCacheKey, f32>;
+
 fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
     selected_memory + GRID_WIDTH * scroll_offset
 }
@@ -598,6 +617,7 @@ fn render_data_view(
     scroll_offset: usize,
     input_state: &mut InputState,
     animation_state: &mut AnimationState,
+    playtime_cache: &mut PlaytimeCache,
 ) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
@@ -793,8 +813,9 @@ fn render_data_view(
                 None => selected_mem.id.clone(),
             };
 
+            let playtime = get_game_playtime(selected_mem, playtime_cache);
             text(&ctx, &desc, 19.0, 327.0);
-            text(&ctx, &format!("{:.1} MB", selected_mem.size), 19.0, 345.0);
+            text(&ctx, &format!("{:.1} MB | {:.1} H", selected_mem.size, playtime), 19.0, 345.0);
         }
     }
 
@@ -839,6 +860,7 @@ fn render_dialog(
     placeholder: &Texture2D,
     scroll_offset: usize,
     animation_state: &AnimationState,
+    playtime_cache: &mut PlaytimeCache,
 ) {
     let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
@@ -880,8 +902,10 @@ fn render_dialog(
                 Some(name) => name,
                 None => mem.id.clone(),
             };
+
+            let playtime = get_game_playtime(mem, playtime_cache);
             text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
-            text(&ctx, &format!("{:.1} MB", mem.size), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+            text(&ctx, &format!("{:.1} MB | {:.1} H", mem.size, playtime), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
         }
     };
 
@@ -1168,6 +1192,7 @@ async fn main() {
     let placeholder = Texture2D::from_file_with_format(include_bytes!("../placeholder.png"), Some(ImageFormat::Png));
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut icon_queue: Vec<(String, String)> = Vec::new();
+    let mut playtime_cache: PlaytimeCache = HashMap::new();
     let mut scroll_offset = 0;
 
     let ctx : DrawContext = DrawContext {
@@ -1425,7 +1450,7 @@ async fn main() {
 
                 match dialog_state {
                     DialogState::None => {
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache);
 
                         // Handle back navigation
                         if input_state.back {
@@ -1586,7 +1611,7 @@ async fn main() {
                     },
                     DialogState::Opening => {
                         // During opening, only render the main view and the transitioning icon
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1611,7 +1636,7 @@ async fn main() {
                     DialogState::Open => {
                         // When dialog is fully open, only render the dialog
                         if let Some(dialog) = dialogs.last_mut() {
-                            render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state);
+                            render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state, &mut playtime_cache);
 
                             let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                             if input_state.up {
@@ -1666,7 +1691,7 @@ async fn main() {
                     },
                     DialogState::Closing => {
                         // During closing, render both views to show the icon returning
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state);
+                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {

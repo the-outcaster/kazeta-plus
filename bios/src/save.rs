@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use walkdir;
 use std::process::Command;
+use chrono::DateTime;
 
 // Directories to exclude from size calculation and copying
 const EXCLUDED_DIRS: &[&str] = &[".cache", ".local/share/umu", ".config/pulse/cookie"];
@@ -595,6 +596,142 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
 
     sync_to_disk();
     Ok(())
+}
+
+/// Calculate total playtime for a game from its .kazeta_playtime.log file
+/// Returns playtime in hours with one decimal place
+pub fn calculate_playtime(cart_id: &str, drive_name: &str) -> f32 {
+    println!("Calculating playtime for {} on {}", cart_id, drive_name);
+    let save_dir = get_save_dir_from_drive_name(drive_name);
+
+    // Check if this is a tar file (external drive) or directory (internal drive)
+    let tar_path = Path::new(&save_dir).join(format!("{}.tar", cart_id));
+    let dir_path = Path::new(&save_dir).join(cart_id);
+
+    if tar_path.exists() {
+        // External drive: read from tar archive
+        calculate_playtime_from_tar(&tar_path, cart_id)
+    } else if dir_path.exists() {
+        // Internal drive: read from directory
+        calculate_playtime_from_dir(&dir_path, cart_id)
+    } else {
+        // Neither exists
+        0.0
+    }
+}
+
+/// Calculate playtime from a tar archive (external drives)
+fn calculate_playtime_from_tar(tar_path: &Path, _cart_id: &str) -> f32 {
+    let file = match fs::File::open(tar_path) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("Failed to open tar file {}: {}", tar_path.display(), e);
+            return 0.0;
+        }
+    };
+
+    let mut archive = tar::Archive::new(file);
+    let entries = match archive.entries() {
+        Ok(entries) => entries,
+        Err(e) => {
+            eprintln!("Failed to read archive entries: {}", e);
+            return 0.0;
+        }
+    };
+
+    for entry_result in entries {
+        let mut entry = match entry_result {
+            Ok(entry) => entry,
+            Err(e) => {
+                eprintln!("Failed to read tar entry: {}", e);
+                continue;
+            }
+        };
+
+        let path = match entry.path() {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("Failed to get tar entry path: {}", e);
+                continue;
+            }
+        };
+
+        // Look for .kazeta_playtime.log file
+        if path.file_name().and_then(|n| n.to_str()) == Some(".kazeta_playtime.log") {
+            // Read the file content
+            let mut content = String::new();
+            if let Err(e) = entry.read_to_string(&mut content) {
+                eprintln!("Failed to read playtime log from tar: {}", e);
+                continue;
+            }
+
+            // Parse the content using the common function
+            return parse_playtime_content(&content);
+        }
+    }
+
+    0.0
+}
+
+/// Calculate playtime from a directory (internal drives)
+fn calculate_playtime_from_dir(dir_path: &Path, _cart_id: &str) -> f32 {
+    let playtime_log_path = dir_path.join(".kazeta_playtime.log");
+
+    if !playtime_log_path.exists() {
+        return 0.0;
+    }
+
+    let file = match fs::File::open(&playtime_log_path) {
+        Ok(file) => file,
+        Err(_) => return 0.0,
+    };
+
+    let mut reader = io::BufReader::new(file);
+    let mut content = String::new();
+
+    // Read the entire file content
+    if let Err(e) = reader.read_to_string(&mut content) {
+        eprintln!("Failed to read playtime log file: {}", e);
+        return 0.0;
+    }
+
+    // Parse the content using the common function
+    parse_playtime_content(&content)
+}
+
+/// Parse playtime content from a string (common logic for both tar and directory)
+fn parse_playtime_content(content: &str) -> f32 {
+    let mut total_hours = 0.0;
+
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() != 2 {
+            continue;
+        }
+
+        let start_time = match DateTime::parse_from_rfc3339(parts[0]) {
+            Ok(dt) => dt,
+            Err(e) => {
+                eprintln!("Failed to parse start time '{}': {}", parts[0], e);
+                continue;
+            }
+        };
+
+        let end_time = match DateTime::parse_from_rfc3339(parts[1]) {
+            Ok(dt) => dt,
+            Err(e) => {
+                eprintln!("Failed to parse end time '{}': {}", parts[1], e);
+                continue;
+            }
+        };
+
+        let duration = end_time.signed_duration_since(start_time);
+        let hours = duration.num_seconds() as f32 / 3600.0;
+        total_hours += hours;
+    }
+
+    // Round to one decimal place
+    (total_hours * 10.0).round() / 10.0
 }
 
 fn sync_to_disk() {
