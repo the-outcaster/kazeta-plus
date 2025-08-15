@@ -12,7 +12,14 @@ use std::process::Command;
 use chrono::DateTime;
 
 // Directories to exclude from size calculation and copying
-const EXCLUDED_DIRS: &[&str] = &[".cache", ".local/share/umu", ".config/pulse/cookie"];
+const EXCLUDED_DIRS: &[&str] = &[
+    ".cache",
+    ".local/share/umu",
+    ".config/pulse/cookie",
+    "kazeta_win_env/dosdevices",
+    "kazeta_win_env/drive_c/windows",
+    "kazeta_win_env/pfx"
+];
 
 fn should_exclude_path(path: &Path) -> bool {
     let path_str = path.to_str().unwrap_or("");
