@@ -14,11 +14,11 @@ use chrono::DateTime;
 // Directories to exclude from size calculation and copying
 const EXCLUDED_DIRS: &[&str] = &[
     ".cache",
-    ".local/share/umu",
     ".config/pulse/cookie",
-    "kazeta_win_env/dosdevices",
-    "kazeta_win_env/drive_c/windows",
-    "kazeta_win_env/pfx"
+    ".kazeta/share",
+    ".kazeta/var/prefix/dosdevices",
+    ".kazeta/var/prefix/drive_c/windows",
+    ".kazeta/var/prefix/pfx"
 ];
 
 fn should_exclude_path(path: &Path) -> bool {
@@ -564,7 +564,7 @@ pub fn copy_save(cart_id: &str, from_drive: &str, to_drive: &str, progress: Arc<
     Ok(())
 }
 
-/// Calculate total playtime for a game from its .kazeta_playtime.log file
+/// Calculate total playtime for a game from its .kazeta/var/playtime.log file
 /// Returns playtime in hours with one decimal place
 pub fn calculate_playtime(cart_id: &str, drive_name: &str) -> f32 {
     println!("Calculating playtime for {} on {}", cart_id, drive_name);
@@ -622,8 +622,8 @@ fn calculate_playtime_from_tar(tar_path: &Path, _cart_id: &str) -> f32 {
             }
         };
 
-        // Look for .kazeta_playtime.log file
-        if path.file_name().and_then(|n| n.to_str()) == Some(".kazeta_playtime.log") {
+        // Look for .kazeta/var/playtime.log file
+        if path.file_name().and_then(|n| n.to_str()) == Some(".kazeta/var/playtime.log") {
             // Read the file content
             let mut content = String::new();
             if let Err(e) = entry.read_to_string(&mut content) {
@@ -641,7 +641,7 @@ fn calculate_playtime_from_tar(tar_path: &Path, _cart_id: &str) -> f32 {
 
 /// Calculate playtime from a directory (internal drives)
 fn calculate_playtime_from_dir(dir_path: &Path, _cart_id: &str) -> f32 {
-    let playtime_log_path = dir_path.join(".kazeta_playtime.log");
+    let playtime_log_path = dir_path.join(".kazeta/var/playtime.log");
 
     if !playtime_log_path.exists() {
         return 0.0;
