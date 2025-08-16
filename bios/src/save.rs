@@ -605,6 +605,10 @@ fn calculate_playtime_from_tar(tar_path: &Path, _cart_id: &str) -> f32 {
         }
     };
 
+    let mut content = String::new();
+    let mut start_content = String::new();
+    let mut end_content = String::new();
+
     for entry_result in entries {
         let mut entry = match entry_result {
             Ok(entry) => entry,
@@ -622,47 +626,40 @@ fn calculate_playtime_from_tar(tar_path: &Path, _cart_id: &str) -> f32 {
             }
         };
 
-        // Look for .kazeta/var/playtime.log file
-        if path.file_name().and_then(|n| n.to_str()) == Some(".kazeta/var/playtime.log") {
-            // Read the file content
-            let mut content = String::new();
-            if let Err(e) = entry.read_to_string(&mut content) {
-                eprintln!("Failed to read playtime log from tar: {}", e);
-                continue;
-            }
-
-            // Parse the content using the common function
-            return parse_playtime_content(&content);
+        if path.display().to_string() == ".kazeta/var/playtime.log" {
+            let _ = entry.read_to_string(&mut content);
+        } else if path.display().to_string() == ".kazeta/var/playtime_start" {
+            let _ = entry.read_to_string(&mut start_content);
+        } else if path.display().to_string() == ".kazeta/var/playtime_end" {
+            let _ = entry.read_to_string(&mut end_content);
         }
     }
 
-    0.0
+    parse_playtime_content(&format!("{}\n{} {}", content.trim(), start_content.trim(), end_content.trim()))
 }
 
 /// Calculate playtime from a directory (internal drives)
 fn calculate_playtime_from_dir(dir_path: &Path, _cart_id: &str) -> f32 {
     let playtime_log_path = dir_path.join(".kazeta/var/playtime.log");
+    let playtime_start_path = dir_path.join(".kazeta/var/playtime_start");
+    let playtime_end_path = dir_path.join(".kazeta/var/playtime_end");
 
-    if !playtime_log_path.exists() {
-        return 0.0;
-    }
-
-    let file = match fs::File::open(&playtime_log_path) {
-        Ok(file) => file,
-        Err(_) => return 0.0,
+    let content = match fs::read_to_string(&playtime_log_path) {
+        Ok(content) => content.trim().to_string(),
+        Err(_) => "".to_string(),
     };
 
-    let mut reader = io::BufReader::new(file);
-    let mut content = String::new();
+    let start_content = match fs::read_to_string(&playtime_start_path) {
+        Ok(content) => content.trim().to_string(),
+        Err(_) => "".to_string(),
+    };
 
-    // Read the entire file content
-    if let Err(e) = reader.read_to_string(&mut content) {
-        eprintln!("Failed to read playtime log file: {}", e);
-        return 0.0;
-    }
+    let end_content = match fs::read_to_string(&playtime_end_path) {
+        Ok(content) => content.trim().to_string(),
+        Err(_) => "".to_string(),
+    };
 
-    // Parse the content using the common function
-    parse_playtime_content(&content)
+    return parse_playtime_content(&format!("{}\n{} {}", content.trim(), start_content.trim(), end_content.trim()));
 }
 
 /// Parse playtime content from a string (common logic for both tar and directory)
