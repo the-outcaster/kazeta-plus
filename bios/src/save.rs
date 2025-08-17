@@ -664,7 +664,7 @@ fn calculate_playtime_from_dir(dir_path: &Path, _cart_id: &str) -> f32 {
 
 /// Parse playtime content from a string (common logic for both tar and directory)
 fn parse_playtime_content(content: &str) -> f32 {
-    let mut total_hours = 0.0;
+    let mut total_seconds: i64 = 0;
 
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -689,12 +689,11 @@ fn parse_playtime_content(content: &str) -> f32 {
         };
 
         let duration = end_time.signed_duration_since(start_time);
-        let hours = duration.num_seconds() as f32 / 3600.0;
-        total_hours += hours;
+        total_seconds += duration.num_seconds();
     }
 
-    // Round to one decimal place
-    (total_hours * 10.0).round() / 10.0
+    // Convert to hours rounded to one decimal place
+    ((total_seconds as f64 / 360.0).round() / 10.0) as f32
 }
 
 /// Calculate save data size for a game (lazy calculation)
