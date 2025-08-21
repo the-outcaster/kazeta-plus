@@ -76,7 +76,6 @@ postinstallhook() {
 
 	# Persist kazeta save data
 	mkdir -p /home/${USERNAME}/.local/share
-	mkdir -p /var/kazeta
 	ln -s /var/kazeta /home/${USERNAME}/.local/share/kazeta
 
 	# Persist wireplumber settings
