@@ -13,7 +13,9 @@ Fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that a
 ## Installation
 I recommend installing Kazeta+ on a fresh hard drive/flash drive/SD card, as this will involve unlocking the immutable file system. I also don't want to risk having anyone's system being accidentally broken, or having their save data messed up, on their existing Kazeta install, due to how many new features have been added to Kazeta+.
 
-Grab the vanilla ISO from the [official website](https://kazeta.org/), flash it to a USB drive, and install it. From there, head over to the [Releases](https://github.com/the-outcaster/kazeta-plus/releases), download and extract the upgrade kit tarball, and place your custom assets in the `custom_assets_template` folder:
+1. Grab the vanilla ISO from the [official website](https://kazeta.org/), flash it to a USB drive, and install it. 
+
+2. Head over to the [Releases](https://github.com/the-outcaster/kazeta-plus/releases) page, download and extract the upgrade kit tarball, and place your custom assets in the `custom_assets_template` folder:
 - both the backgrounds and logos need to be in `.png` format
 - background music needs to be either `.ogg` or `.wav`
 - fonts need to be `.ttf`
@@ -29,21 +31,25 @@ Tips for keeping BIOS loading times to a minimum:
 - have no more than one or two background tracks, as these take up the bulk of the loading time
   - `.wav` files take up more space than `.ogg`, but this will further reduce loading times
   
-Once you're done adding your custom assets, copy the upgrade kit folder to a removable media, such as a USB flash drive or SD card. Connect said media to your Kazeta console, along with a keyboard and Ethernet cable.
+3. Once you're done adding your custom assets, copy the upgrade kit folder to a removable media, such as a USB flash drive or SD card. Connect said media to your Kazeta console, along with a keyboard and Ethernet cable.
 
-Once you've booted into the BIOS, press `CTRL+ALT+F3` to bring up the terminal, and login with a username and password of `gamer`. Unlock the filesystem with:
+4. Once you've booted into the BIOS, press `CTRL+ALT+F3` to bring up the terminal, and login with a username and password of `gamer`. Unlock the filesystem with:
 `sudo frzr-unlock`
 
 Then connect to the Internet, as we will need to install a few Arch packages:
 `sudo ethernet-connect`
 
-Change into the directory of your removable media, and copy the upgrade kit folder to somewhere on your Kazeta install. A suitable place would be in `/home/gamer/`:
-`cd /run/media/<name-of-removable-media-label>`
-`cp -r kazeta-plus-upgrade-kit-1.0 ~`
+5. Change into the directory of your removable media, and copy the upgrade kit folder to somewhere on your Kazeta install. A suitable place would be in `/home/gamer/`:
+```
+cd /run/media/<name-of-removable-media-label>
+cp -r kazeta-plus-upgrade-kit-1.0 ~
+```
 
-Navigate to where you copied the upgrade kit folder, change into the directory, and run the upgrade script as `sudo`:
-`cd ~/kazeta-plus-upgrade-kit-1.0`
-`sudo ./upgrade-to-plus.sh`
+6. Navigate to where you copied the upgrade kit folder, change into the directory, and run the upgrade script as `sudo`:
+```
+cd ~/kazeta-plus-upgrade-kit-1.0
+sudo ./upgrade-to-plus.sh
+```
 
 Reboot when finished, and if all is well, you should see the Kazeta+ logo appear in a splash screen sequence. From here, you can change your custom assets in the Settings menu.
 
@@ -58,3 +64,5 @@ boomerang_fu.kzi  dudelings.kzi  ex-zodiac.kzi  fraymakers.kzi  linux-1.0.kzr  l
 ```
 
 Both your `.kzr` runtime files and `.kzi` files will need to be on the root of the removable media. If you insert a multi-game cart in your console prior to turning it on, it will immediately boot into the *first* `.kzi` file that it finds. For example, in the case above, *Dudelings* would be the game that will run (don't ask me how it works).
+
+I'd like to emphasize **this is a heavy work-in-progress.** I know for a fact there will be some bugs that I've missed. Please file an issue in the [issue tracker](https://github.com/the-outcaster/kazeta-plus/issues) so I can iron them out.
