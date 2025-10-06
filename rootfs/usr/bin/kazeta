@@ -1,6 +1,17 @@
 #! /bin/bash
 
+# Save the PID of this script, which represents the game session
+#echo $$ > /tmp/kazeta_game.pid
+
 set -x
+
+# Check for the --bios flag
+if [ "$1" == "--bios" ]; then
+    # If the flag is present, launch the BIOS immediately and exit,
+    # ignoring any inserted SD cards.
+    gamescope --filter pixel -- kazeta-bios
+    exit 0
+fi
 
 BASE_DIR="$HOME/.local/share/kazeta"
 if [[ ! -d "${BASE_DIR}" ]]; then
@@ -30,6 +41,7 @@ function start_playtime_capture {
 	done
 }
 
+<<COMMENT
 # wait up to 2 seconds for a cart
 for i in $(seq 1 20); do
 	cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
@@ -39,7 +51,22 @@ for i in $(seq 1 20); do
 		sleep 0.1
 	fi
 done
+COMMENT
 
+# Check if a specific .kzi file was passed as an argument
+if [ -n "$1" ] && [ -f "$1" ]; then
+    cart_info="$1"
+else
+    # If not, wait up to 2 seconds for any cart (original behavior)
+    for i in $(seq 1 20); do
+        cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
+        if [[ -f "${cart_info}" ]]; then
+            break
+        else
+            sleep 0.1
+        fi
+    done
+fi
 
 if [[ ! -f "${cart_info}" ]]; then
 	# no cart found, start bios/memory management app
@@ -83,11 +110,16 @@ else
 	runtime="/usr/share/kazeta/runtimes/none.kzr"
 fi
 
+# saving this in case I need it for later:
+# 	rm -f /tmp/kazeta_game.pid; \
+#	rm -rf "${upper}/.kazeta/share"; \
+#	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
 runtimedir="${BASE_DIR}/run/runtime"
-pkexec kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
+sudo kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
 trap "\
 	popd; \
-	pkexec kazeta-mount --unmount "${target}" "${runtimedir}"; \
+	sudo kazeta-mount --unmount "${target}" "${runtimedir}"; \
+	rm -rf "${work}"; \
 	rm -rf "${upper}/.kazeta/share"; \
 	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
 " EXIT

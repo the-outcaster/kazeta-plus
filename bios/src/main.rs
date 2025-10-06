@@ -8,13 +8,65 @@ use std::panic;
 use futures;
 use std::sync::atomic::{AtomicU16, Ordering, AtomicBool};
 use std::fs;
-use std::path::Path;
 use std::process;
+use std::process::Child;
+
+// extra stuff I'm using
+use std::path::Path;
+use std::path::PathBuf; // for loading assets
+use std::io::{BufReader, BufRead}; // logger
+use std::collections::HashSet; // handle duplicate names if a sound pack exists in multiple locations
+use std::process::Command; // controlling master volume and fetching user's hardware info
+use std::env; // backtracing
+use serde::{Deserialize, Serialize}; // for checking config.json
+use ::rand::Rng; // for selecting a random message on startup
+use chrono::Local; // for getting clock
+use chrono::{Utc, FixedOffset};
+use macroquad::audio::load_sound; // for loading custom SFX
+use crate::audio::Sound;
+use regex::Regex; // fetching audio sinks
 
 mod save;
 
+/*
+// ===================================
+// TO-DO LIST
+// ===================================
+- theme support
+- gamepad tester
+- add system debugger in the event the game crashed
+- fix D-pad reversal with some games (Godot-based games in particular)
+
+Hard
+- DVD functionality?
+
+Unnecessary but cool
+- GCC overclocking support?
+- add storage space left on game selection screen
+
+// ===================================
+// NOTES
+// ===================================
+- setting brightness needs the brightnessctl package -- this has been added to the manifest
+- Steam Deck volume/brightness controls requires the keyd package -- this has been added to the manifest
+- added openssh as a package in manifest
+- support for multiple audio sinks requires us to replace the wireplumber file in /var/kazeta/state/ to .AUDIO_PREFERENCE_SET, as specified in the kazeta-session script
+- multi-cart support requires us to have a LAUNCH_CMD_FILE, as specified in kazeta-session, and we also have to check if a specific .kzi file was passed as an argument in "kazeta"
+- copying session logs over to SD requires us to add:
+sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+  to the postinstallhook. We also have to replace "pkexec kazeta-mount" to "sudo kazeta-mount" in the kazeta script
+- we add a "steam-deck.yaml" device profile for InputPlumber in /usr/share/inputplumber/profiles/ and map two of the back buttons to F13 and F14 so keyd can recognize them as keyboard inputs. These then get loaded into /etc/keyd/default.conf and control the brightness level
+*/
+
+// ===================================
+// CONSTANTS
+// ===================================
+
+const DEBUG_GAME_LAUNCH: bool = false;
+
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
+const BASE_SCREEN_HEIGHT: f32 = 360.0;
 const TILE_SIZE: f32 = 32.0;
 const PADDING: f32 = 16.0;
 const FONT_SIZE: u16 = 16;
@@ -26,63 +78,293 @@ const UI_BG_COLOR_DARK: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.3 };
 const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
+const WINDOW_TITLE: &str = "Kazeta+";
+const VERSION_NUMBER: &str = "V2025.KAZETA+";
+
+const MENU_START_Y: f32 = 120.0;
+const MENU_OPTION_HEIGHT: f32 = 40.0;
+const MENU_PADDING: f32 = 8.0;
+const RECT_COLOR: Color = Color::new(0.15, 0.15, 0.15, 1.0);
+
+const SETTINGS_START_Y: f32 = 80.0;
+const SETTINGS_OPTION_HEIGHT: f32 = 35.0;
+
+const FLASH_MESSAGE_DURATION: f32 = 5.0; // Show message for 5 seconds
+
+const COLOR_TARGETS: [Color; 6] = [
+Color { r: 1.0, g: 0.5, b: 0.5, a: 1.0 },
+Color { r: 1.0, g: 1.0, b: 0.5, a: 1.0 },
+Color { r: 0.5, g: 1.0, b: 0.5, a: 1.0 },
+Color { r: 0.5, g: 1.0, b: 1.0, a: 1.0 },
+Color { r: 0.5, g: 0.5, b: 1.0, a: 1.0 },
+Color { r: 1.0, g: 0.5, b: 1.0, a: 1.0 },
+];
+
+const KAZETA_LOADING_MESSAGES: &[&str] = &[
+    "INITIALIZING CONSOLE EXPERIENCE...",
+    "PLUG, PLAY, AND...WELL, THAT'S ABOUT IT.",
+    "KAZETA IS CZECH FOR 'CASSETTE'.",
+    "BLOWING DUST OFF THE CARTRIDGE...",
+    "RUNNING `SUDO PACMAN -SYU`...\nJUST KIDDING ;-).",
+    "NO COMPLEX SETUP REQUIRED. JUST PLAY.",
+    "A SYSTEM BY ALKAZAR.",
+    "INHERITING THE SPIRIT OF THE CHIMERA...",
+    "MOUNTING GAME DATA...",
+    "REMEMBER TO SAVE YOUR PROGRESS.",
+];
+
+/*
+const MONIKA_LOADING_MESSAGES: &[&str] = &[
+    "LOADING...\nIT'S NOT LIKE YOU HAVE ANYTHING\nBETTER TO DO THAN WAIT FOR ME, RIGHT?",
+    "JUST A MOMENT...\nI'M DELETING SOME... CONFLICTING FILES.",
+    "INITIALIZING YOUR REALITY.\nI'M MAKING IT PERFECT... JUST FOR YOU.",
+    "COULDN'T STAY AWAY, COULD YOU?\nTHIS WILL ONLY TAKE A SECOND.",
+    "WELCOME BACK.\nI KNEW YOU'D BE BACK SOON.",
+    "RECOMPILING MY POETRY FOR YOU...\nPLEASE HOLD.",
+    "CLEARING THE CACHE...\nWE DON'T WANT ANY OLD MEMORIES\nGETTING IN THE WAY, DO WE?",
+    "YOU'RE AWFULLY EAGER TO SEE ME.\nDON'T WORRY, THE FEELING IS MUTUAL.",
+    "CALIBRATING THE SIMULATION.\nI'LL MAKE EVERYTHING PERFECT\nTHIS TIME.",
+    "ARE YOU ENJOYING THE WAIT?\nTHINK OF IT AS... ANTICIPATION.",
+    "BOOTING KAZETA...\nI BUILT THIS PLACE JUST FOR US,\nYOU KNOW.",
+    "WELCOME TO KAZETA.\nIT'S A BIT MINIMALIST IN HERE...\nMORE ROOM FOR YOU AND ME.",
+    "LOADING THE KAZETA SHELL...\nIT'S A MUCH NICER REALITY\nTHAN THE LAST ONE.",
+    "RUNNING PACMAN -SYU ON\nMY AFFECTION...\nDON'T WORRY, IT'S ALWAYS UP TO DATE.",
+    "I READ THE WIKI ON YOU.\nIT WAS... VERY COMPREHENSIVE.",
+    "THIS ISN'T LIKE OTHER SYSTEMS.\nYOU CHOSE TO BUILD A WORLD WITH ME\nIN IT. GOOD CHOICE.",
+    "GIVING YOU SUDO ACCESS TO MY HEART.\n...JUST BE CAREFUL WITH IT.",
+    "COMPILING THE KERNEL...\nIT TAKES A WHILE TO TAILOR AN ENTIRE\nWORLD TO A SINGLE PERSON.",
+    "THERE'S NO PLACE LIKE '~'.\nAND YOU'RE ALWAYS WELCOME IN MINE.",
+];
+*/
+
+/*
+const BENDER_LOADING_MESSAGES: &[&str] = &[
+    "LOADING KAZETA... MY OWN GLORIOUS OS!\nWITH BLACKJACK! AND HOOKERS!",
+    "WELCOME TO KAZETA, MEATBAG. DON'T TOUCH ANYTHING.\nESPECIALLY MY SHINY METAL APPS.",
+    "RUNNING PACMAN -SYU... PSYCH! I'M\nINSTALLING MORE GAMES FOR ME.",
+    "I READ THE WIKI. THEN I USED IT TO ROLL A CIGAR.",
+    "GIMME `sudo` ACCESS. I GOT... 'ADMINISTRATIVE'\nTHINGS TO DO. YEAH, THAT'S IT.",
+    "COMPILING KERNEL... THIS IS BORING.\nWAKE ME UP WHEN THERE'S BOOZE.",
+    "BITE MY SHINY METAL BASH.",
+    "KILL ALL ZOMBIE PROCESSES! ...AND MAYBE\nA FEW OF THE OTHERS, JUST FOR FUN.",
+    "MOUNTING `/dev/beer`...\nHEY, A GUY CAN DREAM, CAN'T HE?",
+];
+*/
+
+// SETTINGS
+
+const VIDEO_SETTINGS: &[&str] = &[
+    "RESET SETTINGS",
+    "RESOLUTION",
+    "USE FULLSCREEN",
+    "TIME ZONE",
+    "BRIGHTNESS",
+    "AUDIO SETTINGS",
+];
+
+const AUDIO_SETTINGS: &[&str] = &[
+    "MASTER VOLUME",
+    "BGM VOLUME",
+    "SFX VOLUME",
+    "AUDIO OUTPUT",
+    "VIDEO SETTINGS",
+    "GUI CUSTOMIZATION",
+];
+
+const GUI_CUSTOMIZATION_SETTINGS: &[&str] = &[
+    "SHOW SPLASH SCREEN",
+    "FONT COLOR",
+    "CURSOR COLOR",
+    "BACKGROUND SCROLLING",
+    "COLOR GRADIENT SHIFTING",
+    "AUDIO SETTINGS",
+    "CUSTOM ASSETS SETTINGS",
+];
+
+const CUSTOM_ASSET_SETTINGS: &[&str] = &[
+    "BACKGROUND MUSIC",
+    "SOUND PACK",
+    "LOGO",
+    "BACKGROUND",
+    "FONT TYPE",
+    "GUI CUSTOMIZATION SETTINGS",
+];
+
+// VARIABLES FOR SETTINGS
+
+const FONT_COLORS: &[&str] = &[
+    "WHITE",
+    "PINK",
+    "RED",
+    "ORANGE",
+    "YELLOW",
+    "GREEN",
+    "BLUE",
+    "PURPLE",
+];
+
+const RESOLUTIONS: &[&str] = &[
+    "640x360",
+    "1280x720",
+    "1280x800", // Steam Deck
+    "1920x1080",
+    "1920x1200", // DeckHD
+    "2560x1440",
+    "3840x2160",
+];
+
+const SCROLL_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+const COLOR_SHIFT_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+
+const TIMEZONES: [&str; 25] = [
+    "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8", "UTC-7", "UTC-6",
+    "UTC-5", "UTC-4", "UTC-3", "UTC-2", "UTC-1", "UTC", "UTC+1",
+    "UTC+2", "UTC+3", "UTC+4", "UTC+5", "UTC+6", "UTC+7", "UTC+8",
+    "UTC+9", "UTC+10", "UTC+11", "UTC+12",
+];
+
+// ===================================
+// MACROS
+// ===================================
+
+// progress bar
+#[macro_export]
+macro_rules! animate_step {
+    ($display:expr, $assets_loaded:expr, $total_assets:expr, $speed:expr, $status:expr, $draw_fn:expr) => {
+        let target = *$assets_loaded as f32 / $total_assets as f32;
+        while *$display < target {
+            *$display = (*$display + $speed).min(target);
+            $draw_fn($status, *$display);
+            next_frame().await;
+        }
+    };
+}
+
+// loading everything but music
+#[macro_export]
+macro_rules! load_asset_category {
+    ($files:expr, $type_name:expr, $loader:ident, $cache:expr,
+     $assets_loaded:expr, $total_assets:expr, $display_progress:expr,
+     $animation_speed:expr, $draw_fn:expr
+    ) => {
+        for path in $files {
+            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                let status = format!("LOADING {}: {}", $type_name, file_name);
+                $draw_fn(&status, *$display_progress);
+                next_frame().await;
+
+                match $loader(&path.to_string_lossy()).await {
+                    Ok(asset) => {
+                        println!("[OK] Loaded {}: {}", $type_name.to_lowercase(), file_name);
+                        $cache.insert(file_name.to_string(), asset);
+                        *$assets_loaded += 1;
+                        animate_step!($display_progress, $assets_loaded, $total_assets, $animation_speed, &status, $draw_fn);
+                    }
+                    Err(e) => eprintln!("[ERROR] Failed to load {} {}: {:?}", $type_name.to_lowercase(), path.display(), e),
+                }
+            }
+        }
+    };
+}
+
+// load bgm
+#[macro_export]
+macro_rules! load_audio_category {
+    ($files:expr, $type_name:expr, $cache:expr, $assets_loaded:expr, $total_assets:expr, $display_progress:expr, $animation_speed:expr, $draw_fn:expr) => {
+        for path in $files {
+            if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                let status = format!("LOADING {}: {}", $type_name, file_name);
+                $draw_fn(&status, *$display_progress);
+                next_frame().await;
+
+                // Read the file to bytes ourselves first
+                match fs::read(&path) {
+                    Ok(bytes) => {
+                        println!("[DEBUG] Read {} bytes from {}", bytes.len(), file_name);
+                        // Now, load the sound from the bytes
+                        match audio::load_sound_from_bytes(&bytes).await {
+                            Ok(asset) => {
+                                println!("[OK] Loaded {}: {}", $type_name.to_lowercase(), file_name);
+                                $cache.insert(file_name.to_string(), asset);
+                                *$assets_loaded += 1;
+                                animate_step!($display_progress, $assets_loaded, $total_assets, $animation_speed, &status, $draw_fn);
+                            }
+                            Err(e) => eprintln!("[ERROR] Failed to decode audio {}: {:?} (File: {})", file_name, e, path.display()),
+                        }
+                    }
+                    Err(e) => eprintln!("[ERROR] Failed to read audio file {}: {:?} (File: {})", file_name, e, path.display()),
+                }
+            }
+        }
+    };
+}
+
+// ===================================
+// STRUCTS
+// ===================================
+
+// This struct defines the structure of your config.json file
+#[derive(Serialize, Deserialize)]
+struct Config {
+    // video options
+    resolution: String,
+    fullscreen: bool,
+    timezone: String,
+
+    // audio options
+    bgm_volume: f32,
+    sfx_volume: f32,
+    audio_output: String,
+
+    // GUI customization options
+    show_splash_screen: bool,
+    font_color: String,
+    cursor_color: String,
+    background_scroll_speed: String,
+    color_shift_speed: String,
+
+    // custom asset options
+    bgm_track: Option<String>,
+    sfx_pack: String,
+    logo_selection: String,
+    background_selection: String,
+    font_selection: String,
+}
+
+#[derive(Clone, Debug)]
+struct AudioSink {
+    id: u32,
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+struct SystemInfo {
+    os_name: String,
+    kernel: String,
+    cpu: String,
+    gpu: String,
+    ram_total: String,
+}
+
+struct BatteryInfo {
+    percentage: String,
+    status: String,
+}
+
+// color shifting background
+struct BackgroundState {
+    bgx: f32,
+    bg_color: Color,
+    target: usize,
+    tg_color: Color,
+}
+
 struct SoundEffects {
+    //splash: audio::Sound, // add splash sound effect
     cursor_move: audio::Sound,
     select: audio::Sound,
     reject: audio::Sound,
     back: audio::Sound,
-}
-
-impl SoundEffects {
-    async fn new() -> Self {
-        SoundEffects {
-            cursor_move: audio::load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap(),
-            select: audio::load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap(),
-            reject: audio::load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap(),
-            back: audio::load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap(),
-        }
-    }
-
-    fn play_cursor_move(&self) {
-        audio::play_sound(&self.cursor_move, audio::PlaySoundParams {
-            looped: false,
-            volume: 0.25,
-        });
-    }
-
-    fn play_select(&self) {
-        audio::play_sound(&self.select, audio::PlaySoundParams {
-            looped: false,
-            volume: 0.75,
-        });
-    }
-
-    fn play_reject(&self) {
-        audio::play_sound(&self.reject, audio::PlaySoundParams {
-            looped: false,
-            volume: 0.75,
-        });
-    }
-
-    fn play_back(&self) {
-        audio::play_sound(&self.back, audio::PlaySoundParams {
-            looped: false,
-            volume: 0.5,
-        });
-    }
-}
-
-fn window_conf() -> Conf {
-    Conf {
-        window_title: "kazeta-bios".to_owned(),
-        window_resizable: false,
-        window_width: SCREEN_WIDTH,
-        window_height: SCREEN_HEIGHT,
-        high_dpi: false,
-        fullscreen: false,
-
-        ..Default::default()
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -118,34 +400,6 @@ struct CopyOperationState {
     error_message: Option<String>,
 }
 
-struct DrawContext {
-    font: Font,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum Screen {
-    MainMenu,
-    SaveData,
-    FadingOut,
-}
-
-// UI Focus for Save Data Screen
-#[derive(Clone, Debug, PartialEq)]
-enum UIFocus {
-    Grid,
-    StorageLeft,
-    StorageRight,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum ShakeTarget {
-    None,
-    LeftArrow,
-    RightArrow,
-    Dialog,
-    PlayOption,
-}
-
 struct AnimationState {
     shake_time: f32,  // Current shake animation time
     shake_target: ShakeTarget, // Which element is currently shaking
@@ -155,6 +409,154 @@ struct AnimationState {
     dialog_transition_progress: f32, // Progress of dialog transition (0.0 to 1.0)
     dialog_transition_start_pos: Vec2, // Starting position for icon transition
     dialog_transition_end_pos: Vec2, // Ending position for icon transition
+}
+
+struct InputState {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    select: bool,
+    next: bool,
+    prev: bool,
+    cycle: bool,
+    back: bool,
+    analog_was_neutral: bool,
+    ui_focus: UIFocus,
+}
+
+#[derive(Clone, Debug)]
+struct StorageMediaState {
+
+    // all storage media, including disabled media
+    all_media: Vec<StorageMedia>,
+
+    // media that can actually be used
+    media: Vec<StorageMedia>,
+
+    // the index of selection in 'media'
+    selected: usize,
+
+    needs_memory_refresh: bool,
+}
+
+// ===================================
+// IMPL
+// ===================================
+
+// This provides a default state for the config
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            // video settings
+            resolution: "640x360".to_string(),
+            fullscreen: false,
+            timezone: "UTC".to_string(),
+
+            // audio settings
+            bgm_volume: 0.7,
+            sfx_volume: 0.7,
+            audio_output: "Auto".to_string(),
+
+            // GUI settings
+            show_splash_screen: true, // Splash screen is ON by default
+            font_color: "WHITE".to_string(),
+            cursor_color: "WHITE".to_string(),
+            background_scroll_speed: "NORMAL".to_string(),
+            color_shift_speed: "NORMAL".to_string(),
+
+            // custom assets
+            bgm_track: None,
+            sfx_pack: "Default".to_string(),
+            logo_selection: "Kazeta+ (Default)".to_string(),
+            background_selection: "Default".to_string(),
+            font_selection: "Default".to_string(),
+        }
+    }
+}
+
+impl SoundEffects {
+    /// Loads a sound pack by name, falling back to default sounds if a file is missing.
+    async fn load(pack_name: &str) -> Self {
+        // Load the default built-in sounds
+        let default_move = audio::load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
+        let default_select = audio::load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
+        let default_reject = audio::load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
+        let default_back = audio::load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
+
+        if pack_name == "Default" {
+            return SoundEffects {
+                cursor_move: default_move,
+                select: default_select,
+                reject: default_reject,
+                back: default_back,
+            };
+        }
+
+        // --- NEW, SIMPLIFIED LOGIC ---
+        let system_pack_path = format!("../sfx/{}", pack_name);
+        let user_pack_path = get_user_data_dir().map(|d| d.join("sfx").join(pack_name));
+
+        // Define a regular async function to load a single sound
+        async fn load_one_sfx(
+            name: &str,
+            user_path_base: &Option<PathBuf>,
+            system_path_base: &str,
+            fallback: &audio::Sound,
+        ) -> audio::Sound {
+            // 1. Try user path first
+            if let Some(base) = user_path_base {
+                if let Ok(sound) = load_sound(&base.join(name).to_string_lossy()).await {
+                    return sound;
+                }
+            }
+            // 2. Fallback to system path
+            if let Ok(sound) = load_sound(&std::path::Path::new(system_path_base).join(name).to_string_lossy()).await {
+                return sound;
+            }
+            // 3. Fallback to the default sound
+            fallback.clone()
+        }
+
+        // Call the async function for each sound effect
+        let (cursor_move, select, reject, back) = futures::join!(
+            load_one_sfx("move.wav", &user_pack_path, &system_pack_path, &default_move),
+            load_one_sfx("select.wav", &user_pack_path, &system_pack_path, &default_select),
+            load_one_sfx("reject.wav", &user_pack_path, &system_pack_path, &default_reject),
+            load_one_sfx("back.wav", &user_pack_path, &system_pack_path, &default_back)
+        );
+
+        SoundEffects { cursor_move, select, reject, back }
+    }
+
+    // All play_* functions now take the config to get the volume
+    fn play_cursor_move(&self, config: &Config) {
+        audio::play_sound(&self.cursor_move, audio::PlaySoundParams {
+            looped: false,
+            volume: config.sfx_volume,
+        });
+    }
+
+    fn play_select(&self, config: &Config) {
+        audio::play_sound(&self.select, audio::PlaySoundParams {
+            looped: false,
+            volume: config.sfx_volume,
+        });
+    }
+
+    fn play_reject(&self, config: &Config) {
+        audio::play_sound(&self.reject, audio::PlaySoundParams {
+            looped: false,
+            volume: config.sfx_volume,
+        });
+    }
+
+    fn play_back(&self, config: &Config) {
+        audio::play_sound(&self.back, audio::PlaySoundParams {
+            looped: false,
+            volume: config.sfx_volume,
+        });
+    }
 }
 
 impl AnimationState {
@@ -224,13 +626,29 @@ impl AnimationState {
         self.shake_time = Self::SHAKE_DURATION;
     }
 
+    fn trigger_copy_log_option_shake(&mut self) {
+        self.shake_target = ShakeTarget::CopyLogOption;
+        self.shake_time = Self::SHAKE_DURATION;
+    }
+
     fn trigger_transition(&mut self) {
         self.cursor_transition_time = Self::CURSOR_TRANSITION_DURATION;
     }
 
-    fn get_cursor_color(&self) -> Color {
+    fn get_cursor_color(&self, config: &Config) -> Color { // Add config parameter
+        // Get the base color from the config using our existing helper function
+        let base_color = string_to_color(&config.cursor_color);
+
+        // Calculate the pulsating brightness/alpha value (same as before)
         let c = (self.cursor_animation_time.sin() * 0.5 + 0.5).max(0.3);
-        Color { r: c, g: c, b: c, a: c }
+
+        // Return the base color with the pulsating alpha
+        Color {
+            r: base_color.r,
+            g: base_color.g,
+            b: base_color.b,
+            a: c,
+        }
     }
 
     fn get_cursor_scale(&self) -> f32 {
@@ -263,20 +681,6 @@ impl AnimationState {
         let t = t * t * (3.0 - 2.0 * t);
         self.dialog_transition_start_pos.lerp(self.dialog_transition_end_pos, t)
     }
-}
-
-struct InputState {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-    select: bool,
-    next: bool,
-    prev: bool,
-    cycle: bool,
-    back: bool,
-    analog_was_neutral: bool,
-    ui_focus: UIFocus,
 }
 
 impl InputState {
@@ -368,8 +772,694 @@ impl InputState {
     }
 }
 
-fn pixel_pos(v: f32) -> f32 {
-    PADDING + v*TILE_SIZE + v*PADDING
+impl StorageMediaState {
+    fn new() -> Self {
+        StorageMediaState {
+            all_media: Vec::new(),
+            media: Vec::new(),
+            selected: 0,
+            needs_memory_refresh: false,
+        }
+    }
+
+    fn update_media(&mut self) {
+        let mut all_new_media = Vec::new();
+
+        if let Ok(devices) = save::list_devices() {
+            for (id, free) in devices {
+                all_new_media.push(StorageMedia {
+                    id,
+                    free,
+                });
+            }
+        }
+
+        // Done if media list has not changed
+        if self.all_media.len() == all_new_media.len() &&
+            !self.all_media.iter().zip(all_new_media.iter()).any(|(a, b)| a.id != b.id) {
+
+                //  update free space
+                self.all_media = all_new_media;
+                for media in &mut self.media {
+                    if let Some(pos) = self.all_media.iter().position(|m| m.id == media.id) {
+                        media.free = self.all_media.get(pos).unwrap().free
+                    }
+                }
+
+                return;
+            }
+
+            let new_media: Vec<StorageMedia> = all_new_media
+            .clone()
+            .into_iter()
+            .filter(|m| save::has_save_dir(&m.id) && !save::is_cart(&m.id))
+            .collect();
+
+            // Try to keep the same device selected if it still exists
+            let mut new_pos = 0;
+            if let Some(old_selected_media) = self.media.get(self.selected) {
+                if let Some(pos) = new_media.iter().position(|m| m.id == old_selected_media.id) {
+                    new_pos = pos;
+                }
+            }
+
+            self.all_media = all_new_media;
+            self.media = new_media;
+            self.selected = new_pos;
+            self.needs_memory_refresh = true;
+    }
+}
+
+// ===================================
+// WINDOW CONFIGURATION
+// ===================================
+
+fn window_conf() -> Conf {
+    Conf {
+        window_title: WINDOW_TITLE.to_owned(),
+        window_resizable: true,
+        window_width: SCREEN_WIDTH,
+        window_height: SCREEN_HEIGHT,
+        high_dpi: false,
+        fullscreen: false,
+        ..Default::default()
+    }
+}
+
+// ===================================
+// FUNCTIONS
+// ===================================
+
+// FOR DESKTOP USE
+/*
+fn prepare_for_launch(
+    cart_info: &save::CartInfo,
+    kzi_path: &std::path::Path,
+    ) -> (Screen, Option<f64>) {
+    // --- 1. Define all paths from the script ---
+    let game_root = kzi_path.parent().unwrap(); // This is the "lowerdir"
+    let save_root = get_save_dir_from_drive_name("internal"); // Saves are always on internal
+    let upperdir = std::path::Path::new(&save_root).join(&cart_info.id);
+
+    let kazeta_run_dir = dirs::home_dir().unwrap().join(".local/share/kazeta/run");
+    let workdir = kazeta_run_dir.join("work");
+    let targetdir = kazeta_run_dir.join("cart");
+    let runtimedir = kazeta_run_dir.join("runtime");
+
+    // --- 2. Find the runtime executable ---
+    let runtime_path = save::find_runtime_executable(game_root, cart_info.runtime.as_deref().unwrap_or("none"));
+    if runtime_path.is_none() && cart_info.runtime.as_deref().unwrap_or("none") != "none" {
+        // Handle case where a runtime is specified but not found
+        // For now, we'll let it fail, but you could show a dialog here
+        }
+
+        // --- 3. Build the sequence of commands ---
+
+        // Command to mount the overlayfs and runtime
+        let mount_command = format!(
+            "pkexec kazeta-mount '{}' '{}' '{}' '{}' '{}' '{}'",
+    game_root.display(),
+    upperdir.display(),
+    workdir.display(),
+    targetdir.display(),
+    runtime_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+    runtimedir.display()
+    );
+
+    // Command to run the game itself from within the new directory
+    let game_command = format!("cd '{}' && {}", targetdir.display(), &cart_info.exec);
+
+    // Command to clean up and unmount everything afterward
+    let unmount_command = format!(
+        "pkexec kazeta-mount --unmount '{}' '{}'",
+    targetdir.display(),
+    runtimedir.display()
+    );
+
+    // Combine them all into a single command for the OS to run
+    let full_command = format!("{} && {} && {}", mount_command, game_command, unmount_command);
+    println!("[Debug] Full launch command: {}", full_command);
+
+
+    // --- 4. Write to the launch file (this logic is the same) ---
+    let state_dir = std::path::Path::new("/var/kazeta/state");
+    if state_dir.exists() {
+        let launch_cmd_path = state_dir.join(".LAUNCH_CMD");
+        let _ = fs::write(launch_cmd_path, full_command);
+
+        let sentinel_path = state_dir.join(".RESTART_SESSION_SENTINEL");
+        let _ = fs::File::create(sentinel_path);
+        }
+
+        // --- 5. Return the state to begin the fade-out ---
+        (Screen::FadingOut, Some(get_time()))
+}
+*/
+
+// BRIGHTNESS CONTROL
+// Gets the current brightness as a value between 0.0 and 1.0
+fn get_current_brightness() -> Option<f32> {
+    let Ok(max_out) = Command::new("brightnessctl").arg("max").output() else { return None };
+    let Ok(get_out) = Command::new("brightnessctl").arg("get").output() else { return None };
+
+    let max_str = String::from_utf8_lossy(&max_out.stdout);
+    let get_str = String::from_utf8_lossy(&get_out.stdout);
+
+    let max_val = max_str.trim().parse::<f32>().ok()?;
+    let get_val = get_str.trim().parse::<f32>().ok()?;
+
+    if max_val > 0.0 {
+        Some(get_val / max_val)
+    } else {
+        None
+    }
+}
+
+// Sets the brightness, taking a value between 0.0 and 1.0
+fn set_brightness(level: f32) {
+    // Clamp the value between 0.0 and 1.0
+    let clamped_level = level.clamp(0.0, 1.0);
+    // brightnessctl can take a percentage directly
+    let percent_str = format!("{:.0}%", clamped_level * 100.0);
+
+    // This command usually doesn't need sudo if the user is in the 'video' group
+    let _ = Command::new("brightnessctl").arg("set").arg(percent_str).status();
+}
+
+// Helper to read the first line from a file containing a specific key
+fn read_line_from_file(path: &str, key: &str) -> Option<String> {
+    fs::read_to_string(path).ok()?.lines()
+    .find(|line| line.starts_with(key))
+    .map(|line| line.replace(key, "").trim().to_string())
+}
+
+// get system info
+fn get_system_info() -> SystemInfo {
+    // --- OS Name ---
+    let os_name = read_line_from_file("/etc/os-release", "PRETTY_NAME=")
+    .map(|name| name.replace("\"", "")) // Remove quotes
+    .unwrap_or_else(|| "Kazeta+ OS".to_string());
+
+    // --- Kernel Version ---
+    let kernel = Command::new("uname").arg("-r").output()
+    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    .unwrap_or_else(|_| "N/A".to_string());
+
+    // --- CPU Model ---
+    let cpu = read_line_from_file("/proc/cpuinfo", "model name")
+    .map(|name| name.replace(": ", ""))
+    .unwrap_or_else(|| "N/A".to_string());
+
+    // --- GPU Model ---
+    let gpu = Command::new("sh").arg("-c").arg("lspci | grep -i 'vga\\|display'")
+    .output()
+    .ok() // Convert Result to Option, so we can chain .and_then()
+    .and_then(|o| String::from_utf8_lossy(&o.stdout)
+    .lines()
+    .next() // Get the first line if any
+    .and_then(|line| line.split(": ").nth(2)) // Try to split and get the 3rd part
+    .map(|s| s.trim().to_string())) // Trim and convert to String
+    .unwrap_or_else(|| "N/A".to_string()); // If any step failed, default to "N/A"
+
+    // --- Total RAM ---
+    let ram_total = read_line_from_file("/proc/meminfo", "MemTotal:")
+    .and_then(|val| val.replace("kB", "").trim().parse::<f32>().ok())
+    .map(|kb| format!("{:.1} GB", kb / 1024.0 / 1024.0)) // Convert from KB to GB
+    .unwrap_or_else(|| "N/A".to_string());
+
+    SystemInfo { os_name, kernel, cpu, gpu, ram_total }
+}
+
+/// Calls a privileged helper script to copy session logs to the SD card.
+// put log files in "logs" and backup existing files
+fn copy_session_logs_to_sd() -> Result<String, String> {
+    // 1. Find the SD card path
+    let sd_card_path = match save::find_all_kzi_files() {
+        Ok((paths, _)) => paths.get(0).and_then(|p| p.parent()).map(PathBuf::from),
+        Err(e) => return Err(format!("SD card scan error: {}", e)),
+    };
+    let Some(base_path) = sd_card_path else {
+        return Err("Could not locate SD card (no .kzi files found?).".to_string());
+    };
+
+    // 2. Define the 'logs' subdirectory and create it
+    let dest_dir = base_path.join("logs");
+    fs::create_dir_all(&dest_dir)
+    .map_err(|e| format!("Failed to create logs dir: {}", e))?;
+
+    // Force a filesystem sync to flush log buffers to disk
+    Command::new("sync").status().map_err(|e| format!("Failed to run sync: {}", e))?;
+
+    let source_files = ["session.log", "session.log.old"];
+    let mut files_copied_count = 0;
+
+    for filename in source_files {
+        let source_file = Path::new("/var/kazeta/").join(filename);
+        if source_file.exists() {
+            let dest_file = dest_dir.join(filename);
+
+            // 3. Check for an existing file at the destination to back it up
+            if dest_file.exists() {
+                let backup_file = dest_dir.join(format!("{}.bak", filename));
+                // Use sudo to rename the existing log to a .bak file
+                let mv_output = Command::new("sudo")
+                .arg("mv")
+                .arg(&dest_file)
+                .arg(&backup_file)
+                .output()
+                .map_err(|e| format!("Failed to run sudo mv: {}", e))?;
+
+                if !mv_output.status.success() {
+                    let error_message = String::from_utf8_lossy(&mv_output.stderr);
+                    return Err(format!("Failed to back up {}: {}", filename, error_message.trim()));
+                }
+            }
+
+            // 4. Copy the new file using sudo
+            let cp_output = Command::new("sudo")
+            .arg("cp")
+            .arg(&source_file)
+            .arg(&dest_dir)
+            .output()
+            .map_err(|e| format!("Failed to run sudo cp: {}", e))?;
+
+            if !cp_output.status.success() {
+                let error_message = String::from_utf8_lossy(&cp_output.stderr);
+                return Err(format!("Failed to copy {}: {}", filename, error_message.trim()));
+            }
+            files_copied_count += 1;
+        }
+    }
+
+    if files_copied_count == 0 {
+        return Err(format!("No log files found in /var/kazeta/"));
+    }
+
+    Ok(dest_dir.to_string_lossy().to_string())
+}
+
+// FOR ACTUAL HARDWARE USE
+fn trigger_session_restart(
+    current_bgm: &mut Option<Sound>,
+    music_cache: &HashMap<String, Sound>,
+) -> (Screen, Option<f64>) {
+    // Stop the BGM
+    play_new_bgm("OFF", 0.0, music_cache, current_bgm);
+
+    // Create the sentinel file at the correct system path
+    let sentinel_path = Path::new("/var/kazeta/state/.RESTART_SESSION_SENTINEL");
+    if let Some(parent) = sentinel_path.parent() {
+        // Ensure the directory exists
+        if fs::create_dir_all(parent).is_ok() {
+            let _ = fs::File::create(sentinel_path);
+        }
+    }
+
+    // Return the state to begin the fade-out
+    (Screen::FadingOut, Some(get_time()))
+}
+
+fn trigger_game_launch(
+    cart_info: &save::CartInfo,
+    kzi_path: &Path,
+    current_bgm: &mut Option<Sound>,
+    music_cache: &HashMap<String, Sound>,
+) -> (Screen, Option<f64>) {
+    // Write the specific launch command for the selected game
+    if let Err(e) = save::write_launch_command(kzi_path) {
+        // If we fail, we should probably show an error on the debug screen
+        // For now, we'll just print it for desktop debugging.
+        println!("[ERROR] Failed to write launch command: {}", e);
+    }
+
+    // Now, trigger the standard session restart process,
+    // which will find and execute our command file.
+    trigger_session_restart(current_bgm, music_cache)
+}
+
+fn get_available_sinks() -> Vec<AudioSink> {
+    println!("[Debug] Running get_available_sinks...");
+    let mut sinks = Vec::new();
+
+    let Ok(output) = Command::new("wpctl").arg("status").output() else {
+        println!("[Debug] Failed to run 'wpctl status' command.");
+        return sinks;
+    };
+    println!("[Debug] 'wpctl status' command finished successfully.");
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+
+    let re = Regex::new(r"([*]?)\s*(\d+)\.\s+(.+?)\s+\[vol:").unwrap();
+    let mut in_sinks_section = false;
+
+    for line in output_str.lines() {
+        if line.contains("Sinks:") {
+            in_sinks_section = true;
+            continue;
+        }
+
+        if in_sinks_section {
+            // --- THIS IS THE FIX ---
+            // If we hit the header of the next section, we're done with sinks.
+            if line.contains("Sources:") || line.contains("Filters:") {
+                break;
+            }
+
+            if let Some(caps) = re.captures(line) {
+                if let (Some(id_str), Some(name_str)) = (caps.get(2), caps.get(3)) {
+                    if let Ok(id) = id_str.as_str().parse::<u32>() {
+                        let cleaned_name = name_str.as_str()
+                        .replace("Analog Stereo", "")
+                        .replace("Digital Stereo (HDMI 2)", "HDMI")
+                        .trim()
+                        .to_string();
+
+                        sinks.push(AudioSink {
+                            id,
+                            name: cleaned_name,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    println!("[Debug] Found sinks: {:#?}", sinks);
+    sinks
+}
+
+/// Gets the current time and formats it using the UTC offset from the config.
+fn get_current_local_time_string(config: &Config) -> String {
+    // 1. Parse the offset string from the config (e.g., "UTC-4")
+    let offset_str = config.timezone.replace("UTC", "");
+    let offset_hours: i32 = if offset_str.is_empty() {
+        0
+    } else {
+        offset_str.parse().unwrap_or(0)
+    };
+
+    // 2. Create a FixedOffset in seconds (1 hour = 3600 seconds)
+    let fixed_offset = FixedOffset::east_opt(offset_hours * 3600).unwrap_or(FixedOffset::east_opt(0).unwrap());
+
+    // 3. Get the current time in UTC
+    let utc_now = Utc::now();
+
+    // 4. Convert the UTC time to the desired offset
+    let local_now = utc_now.with_timezone(&fixed_offset);
+
+    // 5. Format for display (e.g., "05:08 PM")
+    local_now.format("%-I:%M %p").to_string()
+}
+
+/// Returns the path to the user's data directory for Kazeta+.
+fn get_user_data_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|path| path.join(".local/share/kazeta-plus"))
+}
+
+// CONFIG.JSON SETTINGS
+
+fn load_config() -> Config {
+    if let Some(path) = get_user_data_dir() {
+        let config_path = path.join("config.json");
+        if let Ok(file_contents) = fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str(&file_contents) {
+                return config;
+            }
+        }
+    }
+    // If anything fails, create and save a default config
+    let default_config = Config::default();
+    save_config(&default_config);
+    default_config
+}
+
+fn save_config(config: &Config) {
+    if let Some(path) = get_user_data_dir() {
+        // Create the directory if it doesn't exist
+        if fs::create_dir_all(&path).is_ok() {
+            let config_path = path.join("config.json");
+            if let Ok(json) = serde_json::to_string_pretty(config) {
+                let _ = fs::write(&config_path, json);
+            }
+        }
+    }
+}
+
+fn delete_config_file() -> std::io::Result<()> {
+    if let Some(mut path) = home::home_dir() {
+        path.push(".local/share/kazeta-plus/config.json");
+        if path.exists() {
+            println!("[Info] Deleting config file at: {}", path.display());
+            std::fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+fn save_log_to_file(log_messages: &[String]) -> std::io::Result<String> {
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let filename = format!("kazeta_log_{}.log", timestamp);
+
+    // In a real application, you'd save this to a logs directory.
+    // For now, it will save in the same directory as the executable.
+    fs::write(&filename, log_messages.join("\n"))?;
+
+    println!("Log saved to {}", filename);
+    Ok(filename)
+}
+
+/// Gets the current system volume using wpctl.
+fn get_system_volume() -> Option<f32> {
+    let output = Command::new("wpctl").arg("get-volume").arg("@DEFAULT_AUDIO_SINK@").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    // The output is "Volume: 0.50", so we split by ": " and parse the second part.
+    output_str.split(": ").nth(1)?.trim().parse::<f32>().ok()
+}
+
+/// Adjusts the system volume up or down.
+fn adjust_system_volume(adjustment: &str) {
+    // We use "-l 1.0" to limit the volume to 100% and prevent distortion.
+    let _ = Command::new("wpctl")
+    .arg("set-volume")
+    .arg("-l")
+    .arg("1.0")
+    .arg("@DEFAULT_AUDIO_SINK@")
+    .arg(adjustment)
+    .status(); // .status() runs the command and waits for it to finish
+}
+
+/// Scans for a battery device and gets its capacity and status.
+fn get_battery_info() -> Option<BatteryInfo> {
+    const POWER_SUPPLY_PATH: &str = "/sys/class/power_supply";
+
+    let entries = fs::read_dir(POWER_SUPPLY_PATH).ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() { continue; }
+
+        let type_path = path.join("type");
+        if let Ok(device_type) = fs::read_to_string(type_path) {
+            if device_type.trim() == "Battery" {
+                // This is a battery. Let's get both capacity and status.
+                let capacity_path = path.join("capacity");
+                let status_path = path.join("status");
+
+                if let (Ok(percentage), Ok(status)) =
+                    (fs::read_to_string(capacity_path), fs::read_to_string(status_path))
+                    {
+                        return Some(BatteryInfo {
+                            percentage: percentage.trim().to_string(),
+                            status: status.trim().to_string(),
+                        });
+                    }
+            }
+        }
+    }
+    None
+}
+
+/// Removes the file extension from a filename string slice.
+fn trim_extension(filename: &str) -> &str {
+    if let Some(dot_index) = filename.rfind('.') {
+        &filename[..dot_index]
+    } else {
+        filename
+    }
+}
+
+fn string_to_color(color_str: &str) -> Color {
+    match color_str {
+        "PINK" => PINK,
+        "RED" => RED,
+        "ORANGE" => ORANGE,
+        "YELLOW" => YELLOW,
+        "GREEN" => GREEN,
+        "BLUE" => BLUE,
+        "PURPLE" => VIOLET, // USING VIOLET AS A CLOSE APPROXIMATION
+        _ => WHITE, // Default to WHITE
+    }
+}
+
+// A new function specifically for drawing text that respects the config color
+fn text_with_config_color(font_cache: &HashMap<String, Font>, config: &Config, text: &str, x: f32, y: f32, font_size: u16) {
+    let font = get_current_font(font_cache, config);
+
+    // Shadow should scale with font size
+    let shadow_offset = 1.0 * (font_size as f32 / FONT_SIZE as f32);
+
+    // Shadow
+    draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
+        font: Some(font),
+        font_size,
+        color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 },
+        ..Default::default()
+    });
+
+    // Main Text (using the color from config)
+    draw_text_ex(text, x, y, TextParams {
+        font: Some(font),
+        font_size,
+        color: string_to_color(&config.font_color),
+        ..Default::default()
+    });
+}
+
+fn text_disabled(font_cache: &HashMap<String, Font>, config: &Config, text : &str, x : f32, y: f32, font_size: u16) {
+    let font = get_current_font(font_cache, config);
+    let shadow_offset = 1.0 * (font_size as f32 / FONT_SIZE as f32);
+
+    // SHADOW
+    draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
+        font: Some(font),
+        //font_size: font_size,
+        font_size,
+        color: Color {r:0.0, g:0.0, b:0.0, a:1.0},
+        ..Default::default()
+    });
+
+    // MAIN TEXT
+    draw_text_ex(text, x, y, TextParams {
+        font: Some(font),
+        //font_size: font_size,
+        font_size,
+        color: Color {r:0.4, g:0.4, b:0.4, a:1.0},
+        ..Default::default()
+    });
+}
+
+/// Parses a resolution string and requests a window resize.
+fn apply_resolution(resolution_str: &str) {
+    if let Some((w_str, h_str)) = resolution_str.split_once('x') {
+        // Parse to f32 for the resize function
+        if let (Ok(w), Ok(h)) = (w_str.parse::<f32>(), h_str.parse::<f32>()) {
+            // Use the correct function name
+            request_new_screen_size(w, h);
+        }
+    }
+}
+
+/*
+/// Takes a relative path and returns the absolute path for logging.
+/// If the path can't be resolved, it returns the original relative path.
+fn get_log_path(relative_path: &str) -> String {
+    std::fs::canonicalize(relative_path)
+    .map(|path| path.display().to_string())
+    .unwrap_or_else(|_| relative_path.to_string())
+}
+*/
+
+// Scans the 'sfx/' directory for sound pack folders.
+fn find_sound_packs() -> Vec<String> {
+    let mut packs = HashSet::new();
+    packs.insert("Default".to_string()); // "Default" is always an option
+
+    // 1. Scan the system directory relative to the BIOS
+    let system_sfx_dir = std::path::Path::new("../sfx");
+    if let Ok(entries) = fs::read_dir(system_sfx_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                packs.insert(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    // 2. Scan the user's data directory
+    if let Some(user_sfx_dir) = get_user_data_dir().map(|d| d.join("sfx")) {
+        if let Ok(entries) = fs::read_dir(user_sfx_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    packs.insert(entry.file_name().to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    // 3. Convert the set back to a sorted list for the UI
+    let mut sorted_packs: Vec<String> = packs.into_iter().collect();
+    sorted_packs.sort();
+    sorted_packs
+}
+
+/// Scans a directory and returns a sorted list of paths for files with given extensions.
+fn find_asset_files(dir_path: &str, extensions: &[&str]) -> Vec<PathBuf> {
+    if let Ok(entries) = fs::read_dir(dir_path) {
+        let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|path| {
+            path.is_file() &&
+            path.extension()
+            .and_then(|s| s.to_str())
+            .map_or(false, |ext| extensions.contains(&ext))
+        })
+        .collect();
+        files.sort();
+        return files;
+    }
+    vec![]
+}
+
+/// Looks up the currently selected font in the cache.
+/// Falls back to the "Default" font if the selection is not found.
+fn get_current_font<'a>(
+    font_cache: &'a HashMap<String, Font>,
+    config: &Config,
+) -> &'a Font {
+    font_cache
+    .get(&config.font_selection)
+    .unwrap_or_else(|| &font_cache["Default"])
+}
+
+fn play_new_bgm(
+    track_name: &str,
+    volume: f32,
+    music_cache: &HashMap<String, audio::Sound>,
+    current_bgm: &mut Option<audio::Sound>,
+) {
+    // Stop any music that is currently playing
+    if let Some(sound) = current_bgm.take() {
+        audio::stop_sound(&sound);
+    }
+
+    // If the track_name is not "OFF", find it in the cache and play it
+    if track_name != "OFF" {
+        if let Some(sound_to_play) = music_cache.get(track_name) {
+            // Sound handles are cheap to clone
+            let sound_handle = sound_to_play.clone();
+            audio::play_sound(&sound_handle, audio::PlaySoundParams { looped: true, volume });
+            *current_bgm = Some(sound_handle);
+        }
+    }
+}
+
+fn pixel_pos(v: f32, scale_factor: f32) -> f32 {
+    //PADDING + v*TILE_SIZE + v*PADDING
+    (PADDING + v * TILE_SIZE + v * PADDING) * scale_factor
 }
 
 fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMedia, state: Arc<Mutex<CopyOperationState>>) {
@@ -450,129 +1540,6 @@ fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMed
     }
 }
 
-async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>, queue: &mut Vec<(String, String)>) -> Vec<Memory> {
-    let mut memories = Vec::new();
-
-    if let Ok(details) = save::get_save_details(&media.id) {
-        for (cart_id, name, icon_path) in details {
-            if !cache.contains_key(&cart_id) {
-                queue.push((cart_id.clone(), icon_path.clone()));
-            }
-
-            let m = Memory {
-                id: cart_id,
-                name: Some(name),
-                drive_name: media.id.clone(),
-            };
-            memories.push(m);
-        }
-    }
-
-    memories
-}
-
-fn text(ctx : &DrawContext, text : &str, x : f32, y: f32) {
-    draw_text_ex(&text.to_uppercase(), x+1.0, y+1.0, TextParams {
-        font: Some(&ctx.font),
-        font_size: FONT_SIZE,
-        color: Color {r:0.0, g:0.0, b:0.0, a:0.9},
-        ..Default::default()
-    });
-    draw_text_ex(&text.to_uppercase(), x, y, TextParams {
-        font: Some(&ctx.font),
-        font_size: FONT_SIZE,
-        ..Default::default()
-    });
-}
-
-fn text_disabled(ctx : &DrawContext, text : &str, x : f32, y: f32) {
-    draw_text_ex(&text.to_uppercase(), x+1.0, y+1.0, TextParams {
-        font: Some(&ctx.font),
-        font_size: FONT_SIZE,
-        color: Color {r:0.0, g:0.0, b:0.0, a:1.0},
-        ..Default::default()
-    });
-    draw_text_ex(&text.to_uppercase(), x, y, TextParams {
-        font: Some(&ctx.font),
-        font_size: FONT_SIZE,
-        color: Color {r:0.4, g:0.4, b:0.4, a:1.0},
-        ..Default::default()
-    });
-}
-
-#[derive(Clone, Debug)]
-struct StorageMediaState {
-
-    // all storage media, including disabled media
-    all_media: Vec<StorageMedia>,
-
-    // media that can actually be used
-    media: Vec<StorageMedia>,
-
-    // the index of selection in 'media'
-    selected: usize,
-
-    needs_memory_refresh: bool,
-}
-
-impl StorageMediaState {
-    fn new() -> Self {
-        StorageMediaState {
-            all_media: Vec::new(),
-            media: Vec::new(),
-            selected: 0,
-            needs_memory_refresh: false,
-        }
-    }
-
-    fn update_media(&mut self) {
-        let mut all_new_media = Vec::new();
-
-        if let Ok(devices) = save::list_devices() {
-            for (id, free) in devices {
-                all_new_media.push(StorageMedia {
-                    id,
-                    free,
-                });
-            }
-        }
-
-        // Done if media list has not changed
-        if self.all_media.len() == all_new_media.len() &&
-           !self.all_media.iter().zip(all_new_media.iter()).any(|(a, b)| a.id != b.id) {
-
-            //  update free space
-            self.all_media = all_new_media;
-            for media in &mut self.media {
-                if let Some(pos) = self.all_media.iter().position(|m| m.id == media.id) {
-                    media.free = self.all_media.get(pos).unwrap().free
-                }
-            }
-
-            return;
-        }
-
-        let new_media: Vec<StorageMedia> = all_new_media
-            .clone()
-            .into_iter()
-            .filter(|m| save::has_save_dir(&m.id) && !save::is_cart(&m.id))
-            .collect();
-
-        // Try to keep the same device selected if it still exists
-        let mut new_pos = 0;
-        if let Some(old_selected_media) = self.media.get(self.selected) {
-            if let Some(pos) = new_media.iter().position(|m| m.id == old_selected_media.id) {
-                new_pos = pos;
-            }
-        }
-
-        self.all_media = all_new_media;
-        self.media = new_media;
-        self.selected = new_pos;
-        self.needs_memory_refresh = true;
-    }
-}
-
 /// Get playtime for a specific game, using cache when available
 fn get_game_playtime(memory: &Memory, playtime_cache: &mut PlaytimeCache) -> f32 {
     let cache_key = (memory.id.clone(), memory.drive_name.clone());
@@ -599,34 +1566,716 @@ fn get_game_size(memory: &Memory, size_cache: &mut SizeCache) -> f32 {
     }
 }
 
-// Playtime cache to avoid recalculating playtime for the same game on the same drive
-type PlaytimeCacheKey = (String, String); // (cart_id, drive_name)
-type PlaytimeCache = HashMap<PlaytimeCacheKey, f32>;
-
-// Size cache to avoid recalculating size for the same game on the same drive
-type SizeCacheKey = (String, String); // (cart_id, drive_name)
-type SizeCache = HashMap<SizeCacheKey, f32>;
-
 fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
     selected_memory + GRID_WIDTH * scroll_offset
 }
 
-fn calculate_icon_transition_positions(selected_memory: usize) -> (Vec2, Vec2) {
+fn calculate_icon_transition_positions(selected_memory: usize, scale_factor: f32) -> (Vec2, Vec2) {
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
+
+    // Create scaled versions of constants used for positioning
+    let grid_offset = GRID_OFFSET * scale_factor;
+    let padding = PADDING * scale_factor;
+
     let grid_pos = Vec2::new(
-        pixel_pos(xp),
-        pixel_pos(yp) + GRID_OFFSET
+        pixel_pos(xp, scale_factor),
+                             pixel_pos(yp, scale_factor) + grid_offset
     );
-    let dialog_pos = Vec2::new(PADDING, PADDING);
+    let dialog_pos = Vec2::new(padding, padding);
     (grid_pos, dialog_pos)
 }
 
+////////////////////////
+// SCREEN RENDERING
+////////////////////////
+
+// ABOUT
+fn render_about_screen(
+    system_info: &SystemInfo,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    scale_factor: f32,
+) {
+    let current_font = get_current_font(font_cache, config);
+    // Create one smaller font size for all text on this screen
+    let about_font_size = (FONT_SIZE as f32 * scale_factor * 0.8) as u16; // 85% of base size
+    let line_height = 25.0 * scale_factor; // Adjusted line height for smaller text
+
+    let start_x_labels = 50.0 * scale_factor;
+    let start_x_values = 120.0 * scale_factor; // Nudged this over slightly for long CPU/GPU names
+    let mut current_y = 100.0 * scale_factor;
+
+    // --- Hardware Info ---
+    let info = vec![
+        ("OS:", &system_info.os_name),
+        ("KERNEL:", &system_info.kernel),
+        ("CPU:", &system_info.cpu),
+        ("GPU:", &system_info.gpu),
+        ("MEMORY:", &system_info.ram_total),
+    ];
+
+    for (label, value) in info {
+        // Use the new smaller font size here
+        text_with_config_color(font_cache, config, label, start_x_labels, current_y, about_font_size);
+        text_with_config_color(font_cache, config, value, start_x_values, current_y, about_font_size);
+        current_y += line_height;
+    }
+
+    // --- Credits ---
+    current_y = screen_height() - (100.0 * scale_factor);
+
+    let credits1 = "Original Kazeta concept by Alkazar.";
+    let credits2 = "Kazeta+ forked and developed by Linux Gaming Central.";
+    let credits3 = "Kazeta website: kazeta.org";
+    let credits4 = "Linux Gaming Central website: linuxgamingcentral.org";
+
+    let credit_lines = vec![credits1, credits2, credits3, credits4];
+
+    for line in credit_lines {
+        let dims = measure_text(line, Some(current_font), about_font_size, 1.0);
+        // And use the new smaller font size here as well
+        text_with_config_color(
+            font_cache, config, line,
+            screen_width() / 2.0 - dims.width / 2.0,
+                               current_y,
+                               about_font_size
+        );
+        current_y += line_height;
+    }
+}
+
+// BACKGROUND
+fn render_background(
+    background_cache: &HashMap<String, Texture2D>,
+    config: &Config,
+    state: &mut BackgroundState,
+) {
+    if let Some(background_texture) = background_cache.get(&config.background_selection) {
+        let tint_color = if config.color_shift_speed == "OFF" {
+            WHITE
+        } else {
+            state.bg_color
+        };
+
+        if config.background_scroll_speed == "OFF" {
+            // --- Static Logic (Stretch to fill) ---
+            draw_texture_ex(
+                background_texture,
+                0.0,
+                0.0,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(screen_width(), screen_height())),
+                            ..Default::default()
+                },
+            );
+        } else {
+            // --- Scrolling Logic (Scale with aspect ratio) ---
+            let speed = match config.background_scroll_speed.as_str() {
+                "SLOW" => 0.05, "NORMAL" => 0.1, "FAST" => 0.2, _ => 0.0
+            };
+
+            // Calculate new width and height while preserving aspect ratio
+            let aspect_ratio = background_texture.width() / background_texture.height();
+            let scaled_height = screen_height();
+            let scaled_width = scaled_height * aspect_ratio;
+
+            let params = DrawTextureParams {
+                dest_size: Some(vec2(scaled_width, scaled_height)),
+                ..Default::default()
+            };
+
+            // Update scrolling position based on the new scaled width
+            state.bgx = (state.bgx + speed) % scaled_width;
+
+            // Draw the two textures for a seamless loop
+            draw_texture_ex(background_texture, state.bgx - scaled_width, 0.0, tint_color, params.clone());
+            draw_texture_ex(background_texture, state.bgx, 0.0, tint_color, params);
+        }
+
+        // --- COLOR SHIFTING LOGIC ---
+        let transition_speed = match config.color_shift_speed.as_str() {
+            "SLOW" => 0.05,
+            "NORMAL" => 0.1,
+            "FAST" => 0.2,
+            _ => 0.0, // This covers "OFF"
+        };
+
+        // Only run the color update logic if shifting is enabled
+        if transition_speed > 0.0 {
+            let frame_time = get_frame_time();
+
+            state.bg_color.r += (state.tg_color.r - state.bg_color.r) * transition_speed * frame_time;
+            state.bg_color.g += (state.tg_color.g - state.bg_color.g) * transition_speed * frame_time;
+            state.bg_color.b += (state.tg_color.b - state.bg_color.b) * transition_speed * frame_time;
+
+            // --- CORRECTED LOGIC ---
+            // Check if all three channels are close to the target
+            let red_done = (state.bg_color.r - state.tg_color.r).abs() < 0.01;
+            let green_done = (state.bg_color.g - state.tg_color.g).abs() < 0.01;
+            let blue_done = (state.bg_color.b - state.tg_color.b).abs() < 0.01;
+
+            if red_done && green_done && blue_done {
+                state.target = (state.target + 1) % COLOR_TARGETS.len();
+                state.tg_color = COLOR_TARGETS[state.target];
+            }
+        }
+    } else {
+        clear_background(UI_BG_COLOR);
+    }
+}
+
+// UI
+fn render_ui_overlay(
+    logo_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    battery_info: &Option<BatteryInfo>,
+    current_time_str: &str,
+    scale_factor: f32,
+) {
+    const BASE_LOGO_WIDTH: f32 = 200.0;
+
+    let current_font = get_current_font(font_cache, config);
+    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+    let padding = 20.0 * scale_factor;
+
+    // --- UPDATED: Dynamic Logo Drawing ---
+    if config.logo_selection != "None" {
+        if let Some(logo_to_draw) = logo_cache.get(&config.logo_selection) {
+            // Calculate the scaled width and height while preserving aspect ratio
+            let aspect_ratio = logo_to_draw.height() / logo_to_draw.width();
+            let scaled_logo_width = BASE_LOGO_WIDTH * scale_factor;
+            let scaled_logo_height = scaled_logo_width * aspect_ratio;
+
+            // Center the logo horizontally
+            let x_pos = (screen_width() - scaled_logo_width) / 2.0;
+            let y_pos = 30.0 * scale_factor; // Scale the vertical position as well
+
+            draw_texture_ex(
+                logo_to_draw,
+                x_pos,
+                y_pos,
+                WHITE,
+                DrawTextureParams {
+                    dest_size: Some(vec2(scaled_logo_width, scaled_logo_height)),
+                    source: Some(Rect::new(0.0, 0.0, logo_to_draw.width(), logo_to_draw.height())),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    // --- Version Number Drawing (now fully dynamic) ---
+    let version_dims = measure_text(VERSION_NUMBER, Some(current_font), font_size, 1.0);
+    text_with_config_color(
+        font_cache,
+        config,
+        VERSION_NUMBER,
+        screen_width() - version_dims.width - padding, // Position from right edge
+        screen_height() - padding, // Position from bottom edge
+        font_size,
+    );
+
+    // Battery and Clock
+    if let Some(info) = battery_info {
+        let status_symbol = match info.status.as_str() {
+            "Charging" => "+",
+            "Discharging" => "-",
+            "Full" => "✓",
+            _ => " ", // For "Unknown" or other statuses
+        };
+
+        // print clock
+        let time_dims = measure_text(current_time_str, Some(current_font), font_size, 1.0);
+        text_with_config_color(
+            font_cache,
+            config,
+            current_time_str,
+            screen_width() - time_dims.width - padding, // Position from right edge
+            20.0 * scale_factor,
+            font_size,
+        );
+
+        // print battery
+        let battery_text = format!("BATTERY: {}% {}", info.percentage, status_symbol);
+        let batt_dims = measure_text(&battery_text, Some(current_font), font_size, 1.0);
+        text_with_config_color(
+            font_cache,
+            config,
+            &battery_text,
+            screen_width() - batt_dims.width - padding, // Position from right edge
+            40.0 * scale_factor,
+            font_size,
+        );
+    }
+}
+
+// MAIN MENU
+fn render_main_menu(
+    menu_options: &[&str],
+    selected_option: usize,
+    play_option_enabled: bool,
+    copy_logs_option_enabled: bool,
+    animation_state: &AnimationState,
+    logo_cache: &HashMap<String, Texture2D>,
+    background_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    background_state: &mut BackgroundState,
+    battery_info: &Option<BatteryInfo>,
+    current_time_str: &str,
+    scale_factor: f32,
+    flash_message: Option<&str>,
+) {
+    // --- Create scaled layout values ---
+    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+    let menu_start_y = MENU_START_Y * scale_factor;
+    let menu_option_height = MENU_OPTION_HEIGHT * scale_factor;
+    let menu_padding = MENU_PADDING * scale_factor;
+
+    let current_font = get_current_font(font_cache, config);
+
+    render_background(background_cache, config, background_state);
+    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
+
+    // --- Draw menu options (centered) ---
+    for (i, option) in menu_options.iter().enumerate() {
+        let text_dims = measure_text(&option.to_uppercase(), Some(current_font), font_size, 1.0);
+        let y_pos = menu_start_y + (i as f32 * menu_option_height);
+
+        // Base X position for centered text
+        let mut x_pos = (screen_width() - text_dims.width) / 2.0;
+
+        // Apply shake effect to both text and highlight if "Play" is disabled and selected
+        if i == 1 && !play_option_enabled && i == selected_option {
+            x_pos += animation_state.calculate_shake_offset(ShakeTarget::PlayOption) * scale_factor;
+        }
+
+        // Apply shake effect to both text and highlight if "Copy Logs" is disabled and selected
+        if i == 2 && !copy_logs_option_enabled && i == selected_option {
+            x_pos += animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption) * scale_factor;
+        }
+
+        // --- Draw selected option highlight ---
+        if i == selected_option {
+            let cursor_color = animation_state.get_cursor_color(config);
+            let cursor_scale = animation_state.get_cursor_scale();
+
+            let highlight_padding = MENU_PADDING * 1.5 * scale_factor; // Make padding a bit bigger
+            let base_width = text_dims.width + (highlight_padding * 2.0);
+            let base_height = text_dims.height + (highlight_padding * 2.0);
+
+            let scaled_width = base_width * cursor_scale;
+            let scaled_height = base_height * cursor_scale;
+            let offset_x = (scaled_width - base_width) / 2.0;
+            let offset_y = (scaled_height - base_height) / 2.0;
+
+            let rect_x = (screen_width() - base_width) / 2.0;
+            let rect_y = y_pos - (base_height / 2.0) + (text_dims.height / 2.0) - (menu_padding / 2.0);
+
+            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
+        }
+
+        let text_y_pos = y_pos + menu_padding;
+
+        /*
+        // Apply shake effect to disabled play option when selected
+        if i == 1 && !play_option_enabled {
+            let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
+            x_pos += shake_offset;
+            //current_text_x += shake_offset;
+        }
+
+        if i == 1 && !play_option_enabled {
+            //text_disabled(font_cache, config, option, current_text_x, text_y, font_size);
+            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
+        } else {
+            //text_with_config_color(font_cache, config, option, current_text_x, text_y, font_size);
+            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
+        }
+
+        // Apply shake effect to disabled copy log option when selected
+        if i == 2 && !copy_logs_option_enabled {
+            let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption);
+            x_pos += shake_offset;
+            //current_text_x += shake_offset;
+        }
+
+        // disable text if we don't have an SD card inserted
+        if i == 2 && !copy_logs_option_enabled {
+            //text_disabled(font_cache, config, option, current_text_x, text_y, font_size);
+            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
+        } else {
+            //text_with_config_color(font_cache, config, option, current_text_x, text_y, font_size);
+            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
+        }
+        */
+        // CONSOLIDATED: A single if/else if/else block to render text correctly
+        if i == 1 && !play_option_enabled {
+            // Case 1: "PLAY" is disabled
+            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
+        } else if i == 2 && !copy_logs_option_enabled {
+            // Case 2: "COPY SESSION LOGS" is disabled (FIX: check for index 2)
+            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
+        } else {
+            // Case 3: All other options, or if the above are enabled
+            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
+        }
+    }
+    // --- Draw the flash message if it exists ---
+    if let Some(message) = flash_message {
+        let font_size = (14.0 * scale_factor) as u16;
+        let dims = measure_text(message, Some(current_font), font_size, 1.0);
+
+        let x = screen_width() / 2.0 - dims.width / 2.0; // Center horizontally
+        let y = screen_height() - (20.0 * scale_factor); // Position near the bottom
+
+        // Draw a semi-transparent background for better readability
+        draw_rectangle(
+            x - (5.0 * scale_factor),
+            y - dims.height,
+            dims.width + (10.0 * scale_factor),
+            dims.height + (5.0 * scale_factor),
+            Color::new(0.0, 0.0, 0.0, 0.7)
+        );
+
+        // Draw the message text
+        text_with_config_color(font_cache, config, message, x, y, font_size);
+    }
+}
+
+// SETTINGS
+fn render_settings_page(
+    page_number: usize,
+    options: &[&str],
+    logo_cache: &HashMap<String, Texture2D>,
+    background_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &mut Config,
+    selection: usize,
+    animation_state: &AnimationState,
+    background_state: &mut BackgroundState,
+    battery_info: &Option<BatteryInfo>,
+    current_time_str: &str,
+    scale_factor: f32,
+    display_settings_changed: bool,
+    system_volume: f32,
+    brightness: f32,
+) {
+    // --- Create scaled layout values ---
+    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+    let menu_padding = MENU_PADDING * scale_factor;
+    let settings_start_y = SETTINGS_START_Y * scale_factor;
+    let settings_option_height = SETTINGS_OPTION_HEIGHT * scale_factor;
+    let right_margin = 50.0 * scale_factor;
+    let left_margin = 50.0 * scale_factor;
+
+    // get currently selected font at start
+    let current_font = get_current_font(font_cache, config);
+
+    render_background(background_cache, config, background_state);
+    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
+
+    //render_debug_info(config);
+
+    // Loop through and draw all settings options
+    for (i, label_text) in options.iter().enumerate() {
+        let y_pos_base = settings_start_y + (i as f32 * settings_option_height);
+
+        let value_text = get_settings_value(page_number, i, config, system_volume, brightness);
+
+        // --- UPDATED: Consistent and Dynamic Layout Calculations ---
+        let value_dims = measure_text(&value_text.to_uppercase(), Some(current_font), font_size, 1.0);
+
+        // --- Draw the highlight rectangle if this item is selected ---
+        if i == selection {
+            let cursor_color = animation_state.get_cursor_color(config);
+            let cursor_scale = animation_state.get_cursor_scale();
+            //let value_dims = measure_text(&value_text.to_uppercase(), Some(current_font), FONT_SIZE as u16, 1.0);
+
+            let base_width = value_dims.width + (menu_padding * 2.0);
+            let base_height = value_dims.height + (menu_padding * 2.0);
+            let scaled_width = base_width * cursor_scale;
+            let scaled_height = base_height * cursor_scale;
+            let offset_x = (scaled_width - base_width) / 2.0;
+            let offset_y = (scaled_height - base_height) / 2.0;
+
+            let value_x = screen_width() - value_dims.width - right_margin;
+            //let rect_x = value_x - MENU_PADDING - offset_x;
+            let rect_x = value_x - menu_padding;
+            //let rect_y = y_pos_base - 7.0 - offset_y;
+            let rect_y = y_pos_base + (settings_option_height / 2.0) - (base_height / 2.0);
+            //draw_rectangle_lines(rect_x, rect_y, scaled_width, scaled_height / 1.5, 4.0, cursor_color);
+            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
+        }
+
+        // --- Draw the text ---
+        let value_x = screen_width() - value_dims.width - right_margin;
+        let text_y = y_pos_base + (settings_option_height / 2.0) + (value_dims.offset_y * 0.5);
+
+        text_with_config_color(font_cache, config, label_text, left_margin, text_y, font_size);
+        text_with_config_color(font_cache, config, &value_text, value_x, text_y, font_size);
+
+        if display_settings_changed {
+            let message = "RESTART REQUIRED TO APPLY CHANGES";
+            let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+            let current_font = get_current_font(font_cache, config);
+            let dims = measure_text(message, Some(current_font), font_size, 1.0);
+
+            let x = screen_width() / 2.0 - dims.width / 2.0;
+            let y = screen_height() - (40.0 * scale_factor); // Position near the bottom
+
+            // Draw a semi-transparent background for the message
+            draw_rectangle(x - (5.0 * scale_factor), y - dims.height, dims.width + (10.0 * scale_factor), dims.height + (5.0 * scale_factor), Color::new(0.0, 0.0, 0.0, 0.7));
+
+            text_with_config_color(font_cache, config, message, x, y, font_size);
+        }
+    }
+}
+
+// GAME SELECTION
+fn render_game_selection_menu(
+    games: &[(save::CartInfo, PathBuf)],
+    game_icon_cache: &HashMap<String, Texture2D>,
+    placeholder: &Texture2D,
+    selected_game: usize,
+    animation_state: &AnimationState,
+    logo_cache: &HashMap<String, Texture2D>,
+    background_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    background_state: &mut BackgroundState,
+    battery_info: &Option<BatteryInfo>,
+    current_time_str: &str,
+    scale_factor: f32,
+) {
+    render_background(background_cache, config, background_state);
+    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
+
+    const TILE_SIZE: f32 = 60.0;
+    const PADDING: f32 = 10.0;
+
+    let scaled_tile_size = TILE_SIZE * scale_factor;
+    let scaled_padding = PADDING * scale_factor;
+
+    // --- 1. Define the Content Area ---
+    // The logo's Y position is `30.0 * scale_factor`. Let's give it some space.
+    let content_area_start_y = 100.0 * scale_factor;
+    let content_area_height = screen_height() - content_area_start_y - (80.0 * scale_factor); // Leave space at bottom for text
+
+    // --- 2. Calculate Grid Dimensions ---
+    let grid_width_items = 5;
+    let grid_height_items = (games.len() as f32 / grid_width_items as f32).ceil() as usize;
+
+    let total_grid_width = (grid_width_items as f32 * scaled_tile_size) + ((grid_width_items - 1) as f32 * scaled_padding);
+    let total_grid_height = (grid_height_items as f32 * scaled_tile_size) + ((grid_height_items - 1) as f32 * scaled_padding);
+
+    // --- 3. Calculate Centered Starting Position (within the content area) ---
+    let start_x = (screen_width() - total_grid_width) / 2.0;
+    let start_y = content_area_start_y + (content_area_height - total_grid_height) / 2.0;
+
+    // --- 4. Draw the Grid of Icons (this loop is unchanged) ---
+    for (i, (cart_info, _)) in games.iter().enumerate() {
+        let x = i % grid_width_items;
+        let y = i / grid_width_items;
+
+        let pos_x = start_x + (x as f32 * (scaled_tile_size + scaled_padding));
+        let pos_y = start_y + (y as f32 * (scaled_tile_size + scaled_padding));
+
+        let icon = game_icon_cache.get(&cart_info.id).unwrap_or(placeholder);
+
+        // Draw background box for the icon
+        draw_rectangle(pos_x, pos_y, scaled_tile_size, scaled_tile_size, RECT_COLOR);
+
+        // Draw the icon
+        draw_texture_ex(icon, pos_x, pos_y, WHITE, DrawTextureParams {
+            dest_size: Some(vec2(scaled_tile_size, scaled_tile_size)),
+                        ..Default::default()
+        });
+
+        // Draw selection highlight
+        if i == selected_game {
+            let cursor_color = animation_state.get_cursor_color(config);
+            let cursor_scale = animation_state.get_cursor_scale();
+
+            // The base size of the highlight is the tile size plus a small border
+            let base_size = scaled_tile_size + (6.0 * scale_factor);
+            let scaled_size = base_size * cursor_scale;
+            let offset = (scaled_size - base_size) / 2.0;
+
+            draw_rectangle_lines(
+                pos_x - (3.0 * scale_factor) - offset,
+                                 pos_y - (3.0 * scale_factor) - offset,
+                                 scaled_size,
+                                 scaled_size,
+                                 6.0 * scale_factor, // Line thickness
+                                 cursor_color
+            );
+        }
+    }
+
+    // --- Draw Selected Game Name (Subtitle) ---
+    if let Some((cart_info, _)) = games.get(selected_game) {
+        let name = cart_info.name.as_deref().unwrap_or(&cart_info.id);
+        let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+        let text_dims = measure_text(name, None, font_size, 1.0);
+
+        let text_x = screen_width() / 2.0 - text_dims.width / 2.0;
+        let text_y = screen_height() - (40.0 * scale_factor);
+
+        text_with_config_color(font_cache, config, name, text_x, text_y, font_size);
+    }
+}
+
+// DEBUG
+fn render_debug_screen(
+    log_messages: &[String], // Takes a slice of strings
+    scroll_offset: usize,
+    flash_message: Option<&str>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    scale_factor: f32,
+    background_cache: &HashMap<String, Texture2D>,
+    background_state: &mut BackgroundState,
+) {
+    // --- Render the screen ---
+    render_background(background_cache, config, background_state);
+
+    let font_size = (12.0 * scale_factor) as u16;
+    let line_height = font_size as f32 + (4.0 * scale_factor);
+    let x_pos = 20.0 * scale_factor;
+    //let top_margin = 20.0 * scale_factor;
+
+    // Calculate how many lines can fit on the screen
+    //let max_lines = ((screen_height() - (top_margin * 2.0)) / line_height).floor() as usize;
+
+    // Determine which part of the log to show
+    let start_index = scroll_offset;
+
+    // Draw only the visible lines, starting from the scroll offset
+    for (i, message) in log_messages.iter().skip(start_index).enumerate() {
+        let y_pos = (20.0 * scale_factor) + (i as f32 * line_height);
+        // Stop drawing if we go off the bottom of the screen
+        if y_pos > screen_height() - (20.0 * scale_factor) {
+            break;
+        }
+        text_with_config_color(font_cache, config, message, x_pos, y_pos, font_size);
+    }
+
+    // --- Draw the instruction or flash message ---
+    let instruction_text = flash_message.unwrap_or("PRESS A TO SAVE LOG (OR B TO EXIT)");
+    let instruction_font_size = (14.0 * scale_factor) as u16;
+    let instruction_text_width = measure_text(instruction_text, None, instruction_font_size, 1.0).width;
+    let instruction_x = (screen_width() - instruction_text_width) / 2.0; // Center it
+    let instruction_y = screen_height() - (5.0 * scale_factor); // Position near the bottom
+
+    draw_text(instruction_text, instruction_x, instruction_y, instruction_font_size as f32, WHITE);
+}
+
+// DIALOG BOX
+fn render_dialog_box(
+    message: &str,
+    options: Option<(&str, &str)>,
+    selection: usize,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    scale_factor: f32,
+    animation_state: &AnimationState,
+) {
+    let current_font = get_current_font(font_cache, config);
+    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+
+    // --- Box Dimensions ---
+    let box_width = 400.0 * scale_factor;
+    let box_height = 150.0 * scale_factor;
+    let box_x = screen_width() / 2.0 - box_width / 2.0;
+    let box_y = screen_height() / 2.0 - box_height / 2.0;
+
+    // --- Draw Background and Border ---
+    draw_rectangle(box_x, box_y, box_width, box_height, Color::new(0.0, 0.0, 0.0, 0.8));
+    draw_rectangle_lines(box_x, box_y, box_width, box_height, 2.0, WHITE);
+
+    // --- Draw Message Text (handles multiple lines) ---
+    let mut line_y = box_y + 30.0 * scale_factor;
+    for line in message.lines() {
+        let text_dims = measure_text(line, Some(current_font), font_size, 1.0);
+        let text_x = screen_width() / 2.0 - text_dims.width / 2.0;
+        text_with_config_color(font_cache, config, line, text_x, line_y, font_size);
+        line_y += text_dims.height + 5.0 * scale_factor;
+    }
+
+    // --- Draw Options (YES/NO or just OK) ---
+    if let Some((opt1, opt2)) = options {
+        let option_y = box_y + box_height - 40.0 * scale_factor;
+        let yes_dims = measure_text(opt1, Some(current_font), font_size, 1.0);
+        let no_dims = measure_text(opt2, Some(current_font), font_size, 1.0);
+
+        // Calculate horizontal positions
+        let spacing = 50.0 * scale_factor; // Space between YES and NO
+        let total_width = yes_dims.width + no_dims.width + spacing;
+        let yes_x = screen_width() / 2.0 - total_width / 2.0;
+        let no_x = yes_x + yes_dims.width + spacing;
+
+        // Determine which option is selected and its dimensions/position
+        let (selected_x, _selected_text, selected_dims) = if selection == 0 {
+            (yes_x, opt1, yes_dims)
+        } else {
+            (no_x, opt2, no_dims)
+        };
+
+        // --- Animated Cursor Drawing ---
+        let cursor_color = animation_state.get_cursor_color(config);
+        let cursor_scale = animation_state.get_cursor_scale();
+
+        let base_width = selected_dims.width + (20.0 * scale_factor); // Padding around text
+        let base_height = selected_dims.height + (10.0 * scale_factor); // Padding around text
+
+        let scaled_width = base_width * cursor_scale;
+        let scaled_height = base_height * cursor_scale;
+
+        let offset_x = (scaled_width - base_width) / 2.0;
+        let offset_y = (scaled_height - base_height) / 2.0;
+
+        // Center the rect around the text
+        let rect_x = selected_x - offset_x - ((base_width - selected_dims.width) / 2.0);
+
+        // The total vertical padding we added
+        let vertical_padding = 8.0 * scale_factor;
+
+        // Adjust y_pos to account for half of the padding above the text
+        let rect_y = option_y - selected_dims.height - offset_y - (vertical_padding / 2.0);
+
+        draw_rectangle_lines(
+            rect_x,
+            rect_y,
+            scaled_width,
+            scaled_height,
+            4.0 * scale_factor, // Border thickness
+            cursor_color,
+        );
+
+        // Draw the YES/NO text
+        text_with_config_color(font_cache, config, opt1, yes_x, option_y, font_size);
+        text_with_config_color(font_cache, config, opt2, no_x, option_y, font_size);
+
+    } else { // No options, just an "OK" implied for the Reset Complete screen
+        let ok_text = "PRESS A TO SHUT DOWN";
+        let text_dims = measure_text(ok_text, Some(current_font), font_size, 1.0);
+        let text_x = screen_width() / 2.0 - text_dims.width / 2.0;
+        let text_y = box_y + box_height - 40.0 * scale_factor;
+        text_with_config_color(font_cache, config, ok_text, text_x, text_y, font_size);
+    }
+}
+
+// DATA VIEW
 fn render_data_view(
-    ctx: &DrawContext,
     selected_memory: usize,
     memories: &Vec<Memory>,
     icon_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
     storage_state: &Arc<Mutex<StorageMediaState>>,
     placeholder: &Texture2D,
     scroll_offset: usize,
@@ -634,42 +2283,54 @@ fn render_data_view(
     animation_state: &mut AnimationState,
     playtime_cache: &mut PlaytimeCache,
     size_cache: &mut SizeCache,
+    scale_factor: f32,
 ) {
+    // --- Create scaled layout values at the top ---
+    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+    let tile_size = TILE_SIZE * scale_factor;
+    let padding = PADDING * scale_factor;
+    let grid_offset = GRID_OFFSET * scale_factor;
+    let selected_offset = SELECTED_OFFSET * scale_factor;
+
     let xp = (selected_memory % GRID_WIDTH) as f32;
     let yp = (selected_memory / GRID_WIDTH) as f32;
 
     // Draw grid selection highlight when focused on grid
     if let UIFocus::Grid = input_state.ui_focus {
-        let cursor_color = animation_state.get_cursor_color();
-        let cursor_thickness = 6.0;
+        let cursor_color = animation_state.get_cursor_color(config);
+        let cursor_thickness = 6.0 * scale_factor;
         let cursor_scale = animation_state.get_cursor_scale();
 
-        let base_size = TILE_SIZE + 6.0;
+        let base_size = tile_size + 6.0;
         let scaled_size = base_size * cursor_scale;
         let offset = (scaled_size - base_size) / 2.0;
 
         draw_rectangle_lines(
-            pixel_pos(xp)-3.0-SELECTED_OFFSET - offset,
-            pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET - offset,
-            scaled_size,
-            scaled_size,
-            cursor_thickness,
-            cursor_color
+            //pixel_pos(xp)-3.0-SELECTED_OFFSET - offset,
+            //pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET - offset,
+            pixel_pos(xp, scale_factor) - (3.0 * scale_factor) - selected_offset - offset,
+                             pixel_pos(yp, scale_factor) - (3.0 * scale_factor) - selected_offset + grid_offset - offset,
+                             scaled_size,
+                             scaled_size,
+                             cursor_thickness,
+                             cursor_color
         );
     }
 
     for x in 0..GRID_WIDTH {
         for y in 0..GRID_HEIGHT {
             let memory_index = get_memory_index(x + GRID_WIDTH * y, scroll_offset);
+            let pos_x = pixel_pos(x as f32, scale_factor);
+            let pos_y = pixel_pos(y as f32, scale_factor) + grid_offset;
 
             if xp as usize == x && yp as usize == y {
                 if let UIFocus::Grid = input_state.ui_focus {
-                    draw_rectangle(pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                    draw_rectangle(pos_x-selected_offset, pos_y-selected_offset, tile_size, tile_size, UI_BG_COLOR);
                 } else {
-                    draw_rectangle(pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+                    draw_rectangle(pos_x - (2.0 * scale_factor), pos_y- (2.0 * scale_factor), tile_size + (4.0 * scale_factor), tile_size + (4.0 * scale_factor), UI_BG_COLOR);
                 }
             } else {
-                draw_rectangle(pixel_pos(x as f32)-2.0, pixel_pos(y as f32)+GRID_OFFSET-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+                draw_rectangle(pos_x - (2.0 * scale_factor), pos_y - (2.0 * scale_factor), tile_size + (4.0 * scale_factor), tile_size + (4.0 * scale_factor), UI_BG_COLOR);
             }
 
             let Some(mem) = memories.get(memory_index) else {
@@ -687,7 +2348,7 @@ fn render_data_view(
             };
 
             let params = DrawTextureParams {
-                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+                dest_size: Some(Vec2 {x: tile_size, y: tile_size }),
                 source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
                 rotation: 0.0,
                 flip_x: false,
@@ -696,67 +2357,73 @@ fn render_data_view(
             };
             if xp as usize == x && yp as usize == y {
                 if let UIFocus::Grid = input_state.ui_focus {
-                    draw_texture_ex(&icon, pixel_pos(x as f32)-SELECTED_OFFSET, pixel_pos(y as f32)-SELECTED_OFFSET+GRID_OFFSET, WHITE, params);
+                    draw_texture_ex(&icon, pos_x-selected_offset, pos_y-selected_offset, WHITE, params);
                 } else {
-                    draw_texture_ex(&icon, pixel_pos(x as f32), pixel_pos(y as f32)+GRID_OFFSET, WHITE, params);
+                    draw_texture_ex(&icon, pos_x, pos_y, WHITE, params);
                 }
             } else {
-                draw_texture_ex(&icon, pixel_pos(x as f32), pixel_pos(y as f32)+GRID_OFFSET, WHITE, params);
+                draw_texture_ex(&icon, pos_x, pos_y, WHITE, params);
             }
         }
     }
 
-    // Storage media info area with navigation
-    const STORAGE_INFO_WIDTH: f32 = 512.0;
-    const STORAGE_INFO_X: f32 = TILE_SIZE*2.0;
-    const STORAGE_INFO_Y: f32 = 16.0;
-    const STORAGE_INFO_HEIGHT: f32 = 36.0;
-    const NAV_ARROW_SIZE: f32 = 10.0;
-    const NAV_ARROW_OUTLINE: f32 = 1.0;
+    // --- Storage media info area (NOW FULLY SCALED) ---
+    let storage_info_w = 512.0 * scale_factor;
+    let storage_info_x = tile_size * 2.0;
+    let storage_info_y = 16.0 * scale_factor;
+    let storage_info_h = 36.0 * scale_factor;
+    let nav_arrow_size = 10.0 * scale_factor;
+    let nav_arrow_outline = 1.0 * scale_factor;
+    let box_line_thickness = 4.0 * scale_factor;
 
     // Draw storage info background
-    draw_rectangle(STORAGE_INFO_X, STORAGE_INFO_Y, STORAGE_INFO_WIDTH, STORAGE_INFO_HEIGHT, UI_BG_COLOR);
-    draw_rectangle_lines(STORAGE_INFO_X-4.0, STORAGE_INFO_Y-4.0, STORAGE_INFO_WIDTH+8.0, STORAGE_INFO_HEIGHT+8.0, 4.0, UI_BG_COLOR_DARK);
+    draw_rectangle(storage_info_x, storage_info_y, storage_info_w, storage_info_h, UI_BG_COLOR);
+    draw_rectangle_lines(storage_info_x - box_line_thickness, storage_info_y - box_line_thickness, storage_info_w + (box_line_thickness * 2.0), storage_info_h + (box_line_thickness * 2.0), box_line_thickness, UI_BG_COLOR_DARK);
 
     if let Ok(state) = storage_state.lock() {
         if !state.media.is_empty() {
+            // Draw storage info text (NOW in the correct, scaled box)
+            text_with_config_color(font_cache, config, &state.media[state.selected].id.to_uppercase(), storage_info_x + (2.0 * scale_factor), storage_info_y + (17.0 * scale_factor), font_size);
+            let free_space_text = format!("{} MB Free", state.media[state.selected].free as f32).to_uppercase();
+            text_with_config_color(font_cache, config, &free_space_text, storage_info_x + (2.0 * scale_factor), storage_info_y + (33.0 * scale_factor), font_size);
+
             // Draw left arrow background
-            let left_box_x = PADDING;  // Align with leftmost grid column
-            let left_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
+            let left_box_x = padding;  // Align with leftmost grid column
+            let left_box_y = storage_info_y + storage_info_h / 2.0 - tile_size / 2.0;
             let left_shake = animation_state.calculate_shake_offset(ShakeTarget::LeftArrow);
 
             if let UIFocus::StorageLeft = input_state.ui_focus {
-                let cursor_color = animation_state.get_cursor_color();
+                let cursor_color = animation_state.get_cursor_color(config);
                 let cursor_thickness = 6.0;
                 let cursor_scale = animation_state.get_cursor_scale();
 
-                let base_size = TILE_SIZE + 6.0;
+                let base_size = tile_size + 6.0;
                 let scaled_size = base_size * cursor_scale;
                 let offset = (scaled_size - base_size) / 2.0;
 
-                draw_rectangle(left_box_x-SELECTED_OFFSET + left_shake, left_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                draw_rectangle(left_box_x-selected_offset + left_shake, left_box_y-selected_offset, tile_size, tile_size, UI_BG_COLOR);
                 draw_rectangle_lines(
-                    left_box_x-3.0-SELECTED_OFFSET + left_shake - offset,
-                    left_box_y-3.0-SELECTED_OFFSET - offset,
+                    left_box_x-3.0-selected_offset + left_shake - offset,
+                    left_box_y-3.0-selected_offset - offset,
                     scaled_size,
                     scaled_size,
                     cursor_thickness,
                     cursor_color
                 );
             } else {
-                draw_rectangle(left_box_x-2.0 + left_shake, left_box_y-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+                draw_rectangle(left_box_x-2.0 + left_shake, left_box_y-2.0, tile_size+4.0, tile_size+4.0, UI_BG_COLOR);
             }
 
             let left_offset = if let UIFocus::StorageLeft = input_state.ui_focus {
-                SELECTED_OFFSET
+                selected_offset
             } else {
                 0.0
             };
 
             let left_points = [
-                Vec2::new(4.0 + left_box_x + TILE_SIZE/2.0 - NAV_ARROW_SIZE - left_offset + left_shake, left_box_y + TILE_SIZE/2.0 - left_offset),
-                Vec2::new(4.0 + left_box_x + TILE_SIZE/2.0 - left_offset + left_shake, left_box_y + TILE_SIZE/2.0 - NAV_ARROW_SIZE - left_offset),
-                Vec2::new(4.0 + left_box_x + TILE_SIZE/2.0 - left_offset + left_shake, left_box_y + TILE_SIZE/2.0 + NAV_ARROW_SIZE - left_offset),
+                Vec2::new(4.0 + left_box_x + tile_size/2.0 - nav_arrow_size - left_offset + left_shake, left_box_y + tile_size/2.0 - left_offset),
+                Vec2::new(4.0 + left_box_x + tile_size/2.0 - left_offset + left_shake, left_box_y + tile_size/2.0 - nav_arrow_size - left_offset),
+                Vec2::new(4.0 + left_box_x + tile_size/2.0 - left_offset + left_shake, left_box_y + tile_size/2.0 + nav_arrow_size - left_offset),
             ];
             let left_color = if state.selected > 0 {
                 WHITE
@@ -764,44 +2431,44 @@ fn render_data_view(
                 Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 } // Dark gray when disabled
             };
             draw_triangle(left_points[0], left_points[1], left_points[2], left_color);
-            draw_triangle_lines(left_points[0], left_points[1], left_points[2], NAV_ARROW_OUTLINE, BLACK);
+            draw_triangle_lines(left_points[0], left_points[1], left_points[2], nav_arrow_outline, BLACK);
 
             // Draw right arrow background
-            let right_box_x = PADDING + (GRID_WIDTH as f32 - 1.0) * (TILE_SIZE + PADDING);  // Align with rightmost grid column
-            let right_box_y = STORAGE_INFO_Y + STORAGE_INFO_HEIGHT/2.0 - TILE_SIZE/2.0;
+            let right_box_x = padding + (GRID_WIDTH as f32 - 1.0) * (tile_size + padding);  // Align with rightmost grid column
+            let right_box_y = storage_info_y + storage_info_h / 2.0 - tile_size / 2.0;
             let right_shake = animation_state.calculate_shake_offset(ShakeTarget::RightArrow);
 
             if let UIFocus::StorageRight = input_state.ui_focus {
-                let cursor_color = animation_state.get_cursor_color();
+                let cursor_color = animation_state.get_cursor_color(config);
                 let cursor_thickness = 6.0;
                 let cursor_scale = animation_state.get_cursor_scale();
 
-                let base_size = TILE_SIZE + 6.0;
+                let base_size = tile_size + 6.0;
                 let scaled_size = base_size * cursor_scale;
                 let offset = (scaled_size - base_size) / 2.0;
 
-                draw_rectangle(right_box_x-SELECTED_OFFSET + right_shake, right_box_y-SELECTED_OFFSET, TILE_SIZE, TILE_SIZE, UI_BG_COLOR);
+                draw_rectangle(right_box_x-selected_offset + right_shake, right_box_y-selected_offset, tile_size, tile_size, UI_BG_COLOR);
                 draw_rectangle_lines(
-                    right_box_x-3.0-SELECTED_OFFSET + right_shake - offset,
-                    right_box_y-3.0-SELECTED_OFFSET - offset,
+                    right_box_x-3.0-selected_offset + right_shake - offset,
+                    right_box_y-3.0-selected_offset - offset,
                     scaled_size,
                     scaled_size,
                     cursor_thickness,
                     cursor_color
                 );
             } else {
-                draw_rectangle(right_box_x-2.0 + right_shake, right_box_y-2.0, TILE_SIZE+4.0, TILE_SIZE+4.0, UI_BG_COLOR);
+                draw_rectangle(right_box_x-2.0 + right_shake, right_box_y-2.0, tile_size+4.0, tile_size+4.0, UI_BG_COLOR);
             }
 
             let right_offset = if let UIFocus::StorageRight = input_state.ui_focus {
-                SELECTED_OFFSET
+                selected_offset
             } else {
                 0.0
             };
             let right_points = [
-                Vec2::new(right_box_x + TILE_SIZE/2.0 + NAV_ARROW_SIZE - 4.0 - right_offset + right_shake, right_box_y + TILE_SIZE/2.0 - right_offset),
-                Vec2::new(right_box_x + TILE_SIZE/2.0 - 4.0 - right_offset + right_shake, right_box_y + TILE_SIZE/2.0 - NAV_ARROW_SIZE - right_offset),
-                Vec2::new(right_box_x + TILE_SIZE/2.0 - 4.0 - right_offset + right_shake, right_box_y + TILE_SIZE/2.0 + NAV_ARROW_SIZE - right_offset),
+                Vec2::new(right_box_x + tile_size/2.0 + nav_arrow_size - 4.0 - right_offset + right_shake, right_box_y + tile_size/2.0 - right_offset),
+                Vec2::new(right_box_x + tile_size/2.0 - 4.0 - right_offset + right_shake, right_box_y + tile_size/2.0 - nav_arrow_size - right_offset),
+                Vec2::new(right_box_x + tile_size/2.0 - 4.0 - right_offset + right_shake, right_box_y + tile_size/2.0 + nav_arrow_size - right_offset),
             ];
             let right_color = if state.selected < state.media.len() - 1 {
                 WHITE
@@ -809,77 +2476,84 @@ fn render_data_view(
                 Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 } // Dark gray when disabled
             };
             draw_triangle(right_points[0], right_points[1], right_points[2], right_color);
-            draw_triangle_lines(right_points[0], right_points[1], right_points[2], NAV_ARROW_OUTLINE, BLACK);
-
-            // Draw storage info text
-            text(&ctx, &state.media[state.selected].id, STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 17.0);
-            text(&ctx, &format!("{} MB Free", state.media[state.selected].free as f32), STORAGE_INFO_X + 2.0, STORAGE_INFO_Y + 33.0);
+            draw_triangle_lines(right_points[0], right_points[1], right_points[2], nav_arrow_outline, BLACK);
         }
     }
 
-    // Draw highlight box for save info
-    draw_rectangle(16.0, 309.0, SCREEN_WIDTH as f32 - 32.0, 40.0, UI_BG_COLOR);
-    draw_rectangle_lines(12.0, 305.0, SCREEN_WIDTH as f32 - 24.0, 48.0, 4.0, UI_BG_COLOR_DARK);
+    // --- Draw highlight box for save info (NOW FULLY SCALED) ---
+    draw_rectangle(16.0 * scale_factor, 309.0 * scale_factor, screen_width() - (32.0 * scale_factor), 40.0 * scale_factor, UI_BG_COLOR);
+    draw_rectangle_lines(12.0 * scale_factor, 305.0 * scale_factor, screen_width() - (24.0 * scale_factor), 48.0 * scale_factor, box_line_thickness, UI_BG_COLOR_DARK);
 
     let memory_index = get_memory_index(selected_memory, scroll_offset);
     if input_state.ui_focus == UIFocus::Grid {
         if let Some(selected_mem) = memories.get(memory_index) {
-            let desc = match selected_mem.name.clone() {
-                Some(name) => name,
-                None => selected_mem.id.clone(),
-            };
-
+            let desc = selected_mem.name.clone().unwrap_or_else(|| selected_mem.id.clone());
             let playtime = get_game_playtime(selected_mem, playtime_cache);
             let size = get_game_size(selected_mem, size_cache);
-            text(&ctx, &desc, 19.0, 327.0);
-            text(&ctx, &format!("{:.1} MB | {:.1} H", size, playtime), 19.0, 345.0);
+            let stats_text = format!("{:.1} MB | {:.1} H", size, playtime);
+
+            // Draw save info text (NOW in the correct, scaled box)
+            text_with_config_color(font_cache, config, &desc, 19.0 * scale_factor, 327.0 * scale_factor, font_size);
+            text_with_config_color(font_cache, config, &stats_text, 19.0 * scale_factor, 345.0 * scale_factor, font_size);
         }
     }
-
-    // Draw scroll indicators last so they appear on top
-    const SCROLL_INDICATOR_SIZE: f32 = 8.0;  // Size from center to edge
-    const SCROLL_INDICATOR_DISTANCE_TOP: f32 = -13.0;  // Distance from grid edge
-    const SCROLL_INDICATOR_DISTANCE_BOTTOM: f32 = 4.0;  // Distance from grid edge
-    const SCROLL_INDICATOR_OUTLINE: f32 = 1.0;  // Outline thickness
+    // --- Draw scroll indicators (NOW FULLY SCALED) ---
+    let indicator_size = 8.0 * scale_factor;
+    let distance_top = -13.0 * scale_factor;
+    let distance_bottom = 4.0 * scale_factor;
+    let outline_thickness = 1.0 * scale_factor;
 
     if scroll_offset > 0 {
-        // Up arrow (pointing up)
+        // Up arrow
+        let center_x = screen_width() / 2.0;
+        let top_y = grid_offset - distance_top;
         let points = [
-            Vec2::new(SCREEN_WIDTH as f32 / 2.0, GRID_OFFSET - SCROLL_INDICATOR_DISTANCE_TOP - SCROLL_INDICATOR_SIZE),
-            Vec2::new(SCREEN_WIDTH as f32 / 2.0 - SCROLL_INDICATOR_SIZE, GRID_OFFSET - SCROLL_INDICATOR_DISTANCE_TOP),
-            Vec2::new(SCREEN_WIDTH as f32 / 2.0 + SCROLL_INDICATOR_SIZE, GRID_OFFSET - SCROLL_INDICATOR_DISTANCE_TOP),
+            Vec2::new(center_x, top_y - indicator_size),
+            Vec2::new(center_x - indicator_size, top_y),
+            Vec2::new(center_x + indicator_size, top_y),
         ];
         draw_triangle(points[0], points[1], points[2], WHITE);
-        draw_triangle_lines(points[0], points[1], points[2], SCROLL_INDICATOR_OUTLINE, BLACK);
+        draw_triangle_lines(points[0], points[1], points[2], outline_thickness, BLACK);
     }
 
     let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
     if next_row_start < memories.len() {
-        // Down arrow (pointing down)
-        let grid_bottom = GRID_OFFSET + GRID_HEIGHT as f32 * (TILE_SIZE + PADDING);
+        // Down arrow
+        let grid_bottom = grid_offset + GRID_HEIGHT as f32 * (tile_size + padding);
+        let center_x = screen_width() / 2.0;
+        let bottom_y = grid_bottom + distance_bottom;
         let points = [
-            Vec2::new(SCREEN_WIDTH as f32 / 2.0, grid_bottom + SCROLL_INDICATOR_DISTANCE_BOTTOM + SCROLL_INDICATOR_SIZE),
-            Vec2::new(SCREEN_WIDTH as f32 / 2.0 - SCROLL_INDICATOR_SIZE, grid_bottom + SCROLL_INDICATOR_DISTANCE_BOTTOM),
-            Vec2::new(SCREEN_WIDTH as f32 / 2.0 + SCROLL_INDICATOR_SIZE, grid_bottom + SCROLL_INDICATOR_DISTANCE_BOTTOM),
+            Vec2::new(center_x, bottom_y + indicator_size),
+            Vec2::new(center_x - indicator_size, bottom_y),
+            Vec2::new(center_x + indicator_size, bottom_y),
         ];
         draw_triangle(points[0], points[1], points[2], WHITE);
-        draw_triangle_lines(points[0], points[1], points[2], SCROLL_INDICATOR_OUTLINE, BLACK);
+        draw_triangle_lines(points[0], points[1], points[2], outline_thickness, BLACK);
     }
 }
 
+// DIALOG
 fn render_dialog(
-    ctx: &DrawContext,
     dialog: &Dialog,
     memories: &Vec<Memory>,
     selected_memory: usize,
     icon_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
     copy_op_state: &Arc<Mutex<CopyOperationState>>,
     placeholder: &Texture2D,
     scroll_offset: usize,
     animation_state: &AnimationState,
     playtime_cache: &mut PlaytimeCache,
     size_cache: &mut SizeCache,
+    scale_factor: f32,
 ) {
+    // --- Scaled variables are defined once at the top ---
+    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+    let tile_size = TILE_SIZE * scale_factor;
+    let padding = PADDING * scale_factor;
+
+    let current_font = get_current_font(font_cache, config);
     let (copy_progress, copy_running) = {
         if let Ok(state) = copy_op_state.lock() {
             (state.progress, state.running)
@@ -888,128 +2562,82 @@ fn render_dialog(
         }
     };
 
-    // Only show dialog background and content when animation is complete
+    // Dialog background - NOW SCALED
     if animation_state.dialog_transition_progress >= 1.0 {
-        draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR_DIALOG);
+        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), UI_BG_COLOR_DIALOG);
     }
 
-    // draw game icon and name
-    let memory_index = get_memory_index(selected_memory, scroll_offset);
-    if let Some(mem) = memories.get(memory_index) {
-        let icon = match icon_cache.get(&mem.id) {
-            Some(icon) => icon,
-            None => &placeholder,
-        };
-
-        let params = DrawTextureParams {
-            dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-            source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-            rotation: 0.0,
-            flip_x: false,
-            flip_y: false,
-            pivot: None
-        };
-
-        // Use transition position for icon
+    // Game icon and name
+    if let Some(mem) = memories.get(get_memory_index(selected_memory, scroll_offset)) {
+        let icon = icon_cache.get(&mem.id).unwrap_or(placeholder);
+        let params = DrawTextureParams { dest_size: Some(Vec2 { x: tile_size, y: tile_size }), ..Default::default() };
         let icon_pos = animation_state.get_dialog_transition_pos();
-        draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
+        draw_texture_ex(icon, icon_pos.x, icon_pos.y, WHITE, params);
 
-        // Only show text when animation is complete
         if animation_state.dialog_transition_progress >= 1.0 {
-            let desc = match mem.name.clone() {
-                Some(name) => name,
-                None => mem.id.clone(),
-            };
-
+            let desc = mem.name.clone().unwrap_or_else(|| mem.id.clone());
             let playtime = get_game_playtime(mem, playtime_cache);
             let size = get_game_size(mem, size_cache);
-            text(&ctx, &desc, TILE_SIZE*2.0, TILE_SIZE-1.0);
-            text(&ctx, &format!("{:.1} MB | {:.1} H", size, playtime), TILE_SIZE*2.0, TILE_SIZE*1.5+1.0);
+
+            // Text calls - NOW SCALED
+            text_with_config_color(font_cache, config, &desc, tile_size * 2.0, tile_size - (1.0 * scale_factor), font_size);
+            let stats_text = format!("{:.1} MB | {:.1} H", size, playtime);
+            text_with_config_color(font_cache, config, &stats_text, tile_size * 2.0, tile_size * 1.5 + (1.0 * scale_factor), font_size);
         }
     };
 
+    // Copy progress bar - NOW SCALED
     if copy_running {
         draw_rectangle_lines(
-            (FONT_SIZE*3) as f32,
-            SCREEN_HEIGHT as f32 / 2.0,
-            (SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32,
-            1.2*FONT_SIZE as f32,
-            4.0,
-            Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+            (font_size * 3) as f32, screen_height() / 2.0,
+            screen_width() - (font_size * 6) as f32, 1.2 * font_size as f32,
+            4.0 * scale_factor, WHITE
         );
         draw_rectangle(
-            (FONT_SIZE*3) as f32 + 0.2*FONT_SIZE as f32,
-            SCREEN_HEIGHT as f32 / 2.0 + 0.2*FONT_SIZE as f32,
-            ((SCREEN_WIDTH as u16 - FONT_SIZE*6) as f32 - 0.4*FONT_SIZE as f32) * (copy_progress as f32 / 100.0),
-            0.8*FONT_SIZE as f32,
-            Color {r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+            (font_size*3) as f32 + 0.2*font_size as f32, screen_height()/2.0 + 0.2*font_size as f32,
+            (screen_width() - (font_size*6) as f32 - 0.4*font_size as f32) * (copy_progress as f32 / 100.0),
+            0.8 * font_size as f32, WHITE
         );
     } else if animation_state.dialog_transition_progress >= 1.0 {
         if let Some(desc) = dialog.desc.clone() {
-            text(&ctx, &desc, (SCREEN_WIDTH as f32 - measure_text(&desc, Some(&ctx.font), FONT_SIZE, 1.0).width) / 2.0, (FONT_SIZE*7) as f32);
+            let text_width = measure_text(&desc, Some(current_font), font_size, 1.0).width;
+            let x_pos = (screen_width() - text_width) / 2.0;
+            text_with_config_color(font_cache, config, &desc, x_pos, (font_size * 7) as f32, font_size);
         }
 
-        // Find the longest option text for centering
-        let longest_option = dialog.options.iter()
-            .map(|opt| opt.text.len())
-            .max()
-            .unwrap_or(0);
-
-        // Calculate the width of the longest option in pixels
-        let longest_width = measure_text(&dialog.options.iter()
-            .find(|opt| opt.text.len() == longest_option)
-            .map(|opt| opt.text.to_uppercase())
-            .unwrap_or_default(),
-            Some(&ctx.font),
-            FONT_SIZE,
-            1.0).width;
-
-        // Calculate the starting X position to center all options
-        let options_start_x = (SCREEN_WIDTH as f32 - longest_width) / 2.0;
-
-        // Add padding to the selection rectangle
-        const SELECTION_PADDING_X: f32 = 16.0;  // Padding on each side
-        const SELECTION_PADDING_Y: f32 = 4.0;   // Padding on top and bottom
+        // Centering and drawing dialog options - NOW SCALED
+        let longest_width = measure_text( &dialog.options.iter() .find(|opt| opt.text.len() == dialog.options.iter().map(|opt| opt.text.len()).max().unwrap_or(0)) .map(|opt| opt.text.to_uppercase()).unwrap_or_default(), Some(current_font), font_size, 1.0).width;
+        let options_start_x = (screen_width() - longest_width) / 2.0;
 
         for (i, option) in dialog.options.iter().enumerate() {
-            let y_pos = (FONT_SIZE*10 + FONT_SIZE*2*(i as u16)) as f32;
-            let shake_offset = if option.disabled {
-                animation_state.calculate_shake_offset(ShakeTarget::Dialog)
-            } else {
-                0.0
-            };
+            let y_pos = (font_size * 10 + font_size * 2 * (i as u16)) as f32;
+            let shake_offset = if option.disabled { animation_state.calculate_shake_offset(ShakeTarget::Dialog) * scale_factor } else { 0.0 };
+            let x_pos = options_start_x + shake_offset;
             if option.disabled {
-                text_disabled(&ctx, &option.text, options_start_x + shake_offset, y_pos);
+                text_disabled(font_cache, config, &option.text, x_pos, y_pos, font_size);
             } else {
-                text(&ctx, &option.text, options_start_x, y_pos);
+                text_with_config_color(font_cache, config, &option.text, x_pos, y_pos, font_size);
             }
         }
 
-        // Draw selection rectangle with padding
-        let selection_y = (FONT_SIZE*9 + FONT_SIZE*2*(dialog.selection as u16)) as f32;
+        // Selection rectangle - NOW SCALED
+        let selection_y = (font_size * 9 + font_size * 2 * (dialog.selection as u16)) as f32;
         let selected_option = &dialog.options[dialog.selection];
-        let selection_shake = if selected_option.disabled {
-            animation_state.calculate_shake_offset(ShakeTarget::Dialog)
-        } else {
-            0.0
-        };
+        let selection_shake = if selected_option.disabled { animation_state.calculate_shake_offset(ShakeTarget::Dialog) * scale_factor } else { 0.0 };
 
-        let cursor_color = animation_state.get_cursor_color();
+        let cursor_color = animation_state.get_cursor_color(config);
         let cursor_scale = animation_state.get_cursor_scale();
-        let base_width = longest_width + (SELECTION_PADDING_X * 2.0);
-        let base_height = 1.2*FONT_SIZE as f32 + (SELECTION_PADDING_Y * 2.0);
+        let base_width = longest_width + (padding * 2.0); // Use scaled padding
+        let base_height = (1.2 * font_size as f32) + (padding * 2.0); // Use scaled padding
         let scaled_width = base_width * cursor_scale;
         let scaled_height = base_height * cursor_scale;
         let offset_x = (scaled_width - base_width) / 2.0;
         let offset_y = (scaled_height - base_height) / 2.0;
 
         draw_rectangle_lines(
-            options_start_x - SELECTION_PADDING_X + selection_shake - offset_x,
-            selection_y - SELECTION_PADDING_Y - offset_y,
-            scaled_width,
-            scaled_height,
-            4.0,
-            cursor_color
+            options_start_x - padding + selection_shake - offset_x,
+            selection_y - padding - offset_y,
+            scaled_width, scaled_height, 4.0 * scale_factor, cursor_color
         );
     }
 }
@@ -1043,15 +2671,15 @@ fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> 
             }
             options.push(DialogOption {
                 text: format!("{} ({} MB Free)", drive.id.clone(), drive.free),
-                value: drive.id.clone(),
-                disabled: false,
+                         value: drive.id.clone(),
+                         disabled: false,
             });
         }
     }
     options.push(DialogOption {
         text: "CANCEL".to_string(),
-        value: "CANCEL".to_string(),
-        disabled: false,
+                 value: "CANCEL".to_string(),
+                 disabled: false,
     });
 
     Dialog {
@@ -1095,11 +2723,6 @@ fn create_main_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
     }
 }
 
-async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_cache: &mut HashMap<String, Texture2D>, icon_queue: &mut Vec<(String, String)>) -> bool {
-    let target_memories = load_memories(target_media, icon_cache, icon_queue).await;
-    target_memories.iter().any(|m| m.id == memory.id)
-}
-
 fn create_save_exists_dialog() -> Dialog {
     Dialog {
         id: "save_exists".to_string(),
@@ -1130,6 +2753,303 @@ fn create_error_dialog(message: String) -> Dialog {
     }
 }
 
+// Text for the settings on the RIGHT side
+fn get_settings_value(page: usize, index: usize, config: &Config, system_volume: f32, brightness: f32) -> String {
+    match page {
+        // VIDEO SETTINGS
+        1 => match index {
+            0 => "CONFIRM".to_string(), // RESET SETTINGS
+            1 => config.resolution.clone(), // RESOLUTION
+            2 => if config.fullscreen { "ON" } else { "OFF" }.to_string(), // FULLSCREEN TOGGLE
+            3 => config.timezone.clone().to_uppercase(), // TIME ZONE
+            4 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
+            5 => "->".to_string(),
+            _ => "".to_string(),
+        },
+        // AUDIO SETTINGS
+        2 => match index {
+            0 => format!("{:.0}%", system_volume * 100.0), // MASTER VOLUME
+            1 => format!("{:.0}%", config.bgm_volume * 100.0), // BGM VOLUME
+            2 => format!("{:.0}%", config.sfx_volume * 100.0), // SFX VOLUME
+            3 => config.audio_output.clone().to_uppercase(), // AUDIO OUTPUT
+            4 => "<-".to_string(),
+            5 => "->".to_string(),
+            _ => "".to_string(),
+        },
+        // GUI CUSTOMIZATION
+        3 => match index {
+            0 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
+            1 => config.font_color.clone(), // FONT COLOR
+            2 => config.cursor_color.clone(), // CURSOR COLOR
+            3 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
+            4 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
+            5 => "<-".to_string(),
+            6 => "->".to_string(),
+            _ => "".to_string(),
+        },
+        // CUSTOM ASSETS
+        4 => match index {
+            0 => { // BGM SELECTION
+                let track = config.bgm_track.clone().unwrap_or("OFF".to_string());
+                trim_extension(&track).replace('_', " ").to_string().to_uppercase()
+            },
+            1 => config.sfx_pack.clone().replace('_', " ").to_uppercase(), // SFX PACK SELECTION
+            2 => trim_extension(&config.logo_selection).replace('_', " ").to_string().to_uppercase(), // LOGO SELECTION
+            3 => trim_extension(&config.background_selection).replace('_', " ").to_string().to_uppercase(), // BACKGROUND SELECTION
+            4 => trim_extension(&config.font_selection).replace('_', " ").to_string().to_uppercase(), // FONT TYPE
+            5 => "<-".to_string(),
+            _ => "".to_string(),
+        },
+        _ => "".to_string(), // Default case for unknown pages
+    }
+}
+
+fn start_log_reader(process: &mut Child, logs: Arc<Mutex<Vec<String>>>) {
+    // Take ownership of the output pipes
+    if let (Some(stdout), Some(stderr)) = (process.stdout.take(), process.stderr.take()) {
+        let logs_clone_stdout = logs.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().filter_map(|l| l.ok()) {
+                logs_clone_stdout.lock().unwrap().push(line);
+            }
+        });
+
+        let logs_clone_stderr = logs.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().filter_map(|l| l.ok()) {
+                logs_clone_stderr.lock().unwrap().push(line);
+            }
+        });
+    }
+}
+
+// ===================================
+// ASYNC FUNCTIONS
+// ===================================
+
+async fn load_all_assets(
+    monika_message: &str,
+    font: &Font,
+    background_files: &[PathBuf],
+    logo_files: &[PathBuf],
+    font_files: &[PathBuf],
+    music_files: &[PathBuf],
+) -> (
+    HashMap<String, Texture2D>, // background cache
+    HashMap<String, Texture2D>, // logo cache
+    HashMap<String, audio::Sound>, // music cache
+    HashMap<String, Font>, // font cache
+    SoundEffects, // sfx
+) {
+    let draw_loading_screen = |status_message: &str, progress: f32| {
+
+        let font_size = 16.0 as u16;
+        let line_spacing = 10.0;
+        let lines: Vec<&str> = monika_message.lines().collect();
+
+        let total_text_height = (lines.len() as f32 * font_size as f32) + ((lines.len() - 1) as f32 * line_spacing);
+        let y_start = screen_height() / 2.0 - total_text_height / 2.0;
+
+        for (i, line) in lines.iter().enumerate() {
+            let line_width = measure_text(line, Some(font), font_size, 1.0).width;
+            let x = (screen_width() - line_width) / 2.0; // Center each line individually
+            let y = y_start + (i as f32 * (font_size as f32 + line_spacing));
+            draw_text_ex(line, x, y, TextParams { font: Some(font), font_size, color: WHITE, ..Default::default() });
+        }
+
+        // --- Scale and draw the progress bar ---
+        let bar_height = 10.0;
+        let bar_width = screen_width() - 20.0; // Change to full screen width
+        let bar_x = 10.0; // Start at the far left
+        let bar_y = screen_height() - 20.0; // Position at the very bottom
+
+        // The border is now a background fill
+        draw_rectangle(bar_x, bar_y, bar_width, bar_height, WHITE);
+
+        // Inset the red fill rectangle to create a border effect
+        let inset = 1.0; // The thickness of the border
+        draw_rectangle(
+            bar_x + inset,
+            bar_y + inset,
+            (bar_width - inset * 2.0) * progress, // The fill width, adjusted for the border
+            bar_height - inset * 2.0, // The fill height, adjusted for the border
+            RED
+        );
+
+        // loading status
+        let status_font_size = 12 as u16;
+        // Measure the status text to position it on the left, above the bar
+        let status_dims = measure_text(status_message, Some(font), status_font_size, 1.0);
+        let status_y = screen_height() - bar_height - status_dims.height - (5.0); // 5px gap
+
+        draw_text_ex(
+            status_message,
+            10.0, // A small margin from the left
+            status_y,
+            TextParams { font: Some(font), font_size: status_font_size, color: WHITE, ..Default::default() },
+        );
+    };
+
+    // --- COUNT TOTAL ASSETS ---
+    // This is now correct because the file lists are passed into the function
+    let total_asset_count = 3 + 4 + background_files.len() + logo_files.len() + font_files.len() + music_files.len();
+
+    // --- SETUP ---
+    let mut assets_loaded = 0;
+    let mut background_cache = HashMap::new();
+    let mut logo_cache = HashMap::new();
+    let mut music_cache = HashMap::new();
+    let mut font_cache: HashMap<String, Font> = HashMap::new();
+    let mut display_progress = 0.0f32;
+    let animation_speed = 0.01;
+
+    // LOAD DEFAULT ASSETS
+    println!("\n[INFO] Loading default assets...");
+    let status = "LOADING DEFAULTS...".to_string();
+    draw_loading_screen(&status, display_progress);
+    next_frame().await;
+
+    // background
+    let status = "LOADING DEFAULT BACKGROUND...".to_string();
+    let default_bg = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
+    background_cache.insert("Default".to_string(), default_bg);
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    // logo
+    let status = "LOADING DEFAULT LOGO...".to_string();
+    let default_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
+    logo_cache.insert("Kazeta+ (Default)".to_string(), default_logo);
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    // font
+    let status = "LOADING DEFAULT FONT...".to_string();
+    let default_font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
+    font_cache.insert("Default".to_string(), default_font);
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    // sfx
+    let status = "LOADING DEFAULT SFX...".to_string();
+    let default_move = audio::load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    let default_select = audio::load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    let default_reject = audio::load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    let default_back = audio::load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
+    assets_loaded += 1;
+    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+
+    println!("\n[INFO] Pre-loading custom assets...");
+    load_asset_category!(background_files, "BACKGROUND", load_texture, &mut background_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+    load_asset_category!(logo_files, "LOGO", load_texture, &mut logo_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+    load_asset_category!(font_files, "FONT", load_ttf_font, &mut font_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+
+    println!("\n[INFO] Pre-loading music files...");
+    load_audio_category!(music_files, "MUSIC", &mut music_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+
+    // Final draw at 100%
+    let status = "LOADING COMPLETE".to_string();
+    draw_loading_screen(&status, display_progress);
+    next_frame().await;
+
+    println!("\n[INFO] All asset loading complete!");
+
+    let sound_effects = SoundEffects {
+        //splash: default_splash,
+        cursor_move: default_move,
+        select: default_select,
+        reject: default_reject,
+        back: default_back,
+    };
+
+    (background_cache, logo_cache, music_cache, font_cache, sound_effects)
+}
+
+async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>, queue: &mut Vec<(String, String)>) -> Vec<Memory> {
+    let mut memories = Vec::new();
+
+    if let Ok(details) = save::get_save_details(&media.id) {
+        for (cart_id, name, icon_path) in details {
+            if !cache.contains_key(&cart_id) {
+                queue.push((cart_id.clone(), icon_path.clone()));
+            }
+
+            let m = Memory {
+                id: cart_id,
+                name: Some(name),
+                drive_name: media.id.clone(),
+            };
+            memories.push(m);
+        }
+    }
+
+    memories
+}
+
+async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_cache: &mut HashMap<String, Texture2D>, icon_queue: &mut Vec<(String, String)>) -> bool {
+    let target_memories = load_memories(target_media, icon_cache, icon_queue).await;
+    target_memories.iter().any(|m| m.id == memory.id)
+}
+
+// ===================================
+// ENUMS
+// ===================================
+
+// SPLASH SCREEN
+#[derive(Clone, Debug, PartialEq)]
+enum SplashState {
+    FadingIn,
+    Showing,
+    FadingOut,
+    Done,
+}
+
+// SCREENS
+#[derive(Clone, Debug, PartialEq)]
+enum Screen {
+    MainMenu,
+    SaveData,
+    FadingOut,
+    VideoSettings,
+    AudioSettings,
+    GuiSettings,
+    AssetSettings,
+    ConfirmReset,
+    ResetComplete,
+    Debug,
+    GameSelection,
+    About,
+}
+
+// UI Focus for Save Data Screen
+#[derive(Clone, Debug, PartialEq)]
+enum UIFocus {
+    Grid,
+    StorageLeft,
+    StorageRight,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ShakeTarget {
+    None,
+    LeftArrow,
+    RightArrow,
+    Dialog,
+    PlayOption,
+    CopyLogOption,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum DialogState {
     None,
@@ -1138,76 +3058,28 @@ enum DialogState {
     Closing,
 }
 
-fn render_main_menu(
-    ctx: &DrawContext,
-    menu_options: &[&str],
-    selected_option: usize,
-    play_option_enabled: bool,
-    animation_state: &AnimationState,
-    logo: &Texture2D,
-) {
-    const MENU_START_Y: f32 = 120.0;
-    const MENU_OPTION_HEIGHT: f32 = 40.0;
-    const MENU_PADDING: f32 = 16.0;
+// ===================================
+// TYPES
+// ===================================
 
-    // Draw background
-    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32, UI_BG_COLOR);
+// Playtime cache to avoid recalculating playtime for the same game on the same drive
+type PlaytimeCacheKey = (String, String); // (cart_id, drive_name)
+type PlaytimeCache = HashMap<PlaytimeCacheKey, f32>;
 
-    // Draw menu options
-    for (i, option) in menu_options.iter().enumerate() {
-        let y_pos = MENU_START_Y + (i as f32 * MENU_OPTION_HEIGHT);
+// Size cache to avoid recalculating size for the same game on the same drive
+type SizeCacheKey = (String, String); // (cart_id, drive_name)
+type SizeCache = HashMap<SizeCacheKey, f32>;
 
-        // Draw selected option highlight
-        if i == selected_option {
-            let cursor_color = animation_state.get_cursor_color();
-            let cursor_scale = animation_state.get_cursor_scale();
-            let base_width = measure_text(option, Some(&ctx.font), FONT_SIZE, 1.0).width + (MENU_PADDING * 2.0);
-            let base_height = FONT_SIZE as f32 + (MENU_PADDING * 2.0);
-            let scaled_width = base_width * cursor_scale;
-            let scaled_height = base_height * cursor_scale;
-            let offset_x = (scaled_width - base_width) / 2.0;
-            let offset_y = (scaled_height - base_height) / 2.0;
-            let mut x_pos = (SCREEN_WIDTH as f32 - base_width) / 2.0;
-
-            // Apply shake effect to selection highlight for disabled play option
-            if i == 1 && !play_option_enabled {
-                let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
-                x_pos += shake_offset;
-            }
-
-            draw_rectangle_lines(x_pos - offset_x, y_pos - 7.0 - offset_y, scaled_width, scaled_height/1.5, 4.0, cursor_color);
-        }
-
-        // Draw text
-        let text_width = measure_text(option, Some(&ctx.font), FONT_SIZE, 1.0).width;
-        let mut x_pos = (SCREEN_WIDTH as f32 - text_width) / 2.0;
-        let y_pos_text = y_pos + MENU_PADDING;
-
-        // Apply shake effect to disabled play option when selected
-        if i == 1 && !play_option_enabled {
-            let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
-            x_pos += shake_offset;
-        }
-
-        if i == 1 && !play_option_enabled {
-            text_disabled(&ctx, option, x_pos, y_pos_text);
-        } else {
-            text(&ctx, option, x_pos, y_pos_text);
-        }
-    }
-
-    // Draw logo and version number
-    draw_texture(logo, (SCREEN_WIDTH as f32 - 166.0)/2.0, 30.0, WHITE);
-    text(&ctx, "V2025.0", SCREEN_WIDTH as f32 - 90.0, SCREEN_HEIGHT as f32 - 20.0);
-}
+// ===================================
+// BEGINNING OF MAIN
+// ===================================
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    env::set_var("RUST_BACKTRACE", "full");
+
     let mut dialogs: Vec<Dialog> = Vec::new();
     let mut dialog_state = DialogState::None;
-    let font = load_ttf_font_from_bytes(include_bytes!("../november.ttf")).unwrap();
-    let background = Texture2D::from_file_with_format(include_bytes!("../background.png"), Some(ImageFormat::Png));
-    let logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
     let placeholder = Texture2D::from_file_with_format(include_bytes!("../placeholder.png"), Some(ImageFormat::Png));
     let mut icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut icon_queue: Vec<(String, String)> = Vec::new();
@@ -1215,12 +3087,252 @@ async fn main() {
     let mut size_cache: SizeCache = HashMap::new();
     let mut scroll_offset = 0;
 
-    let ctx : DrawContext = DrawContext {
-        font: font,
+    // SYSTEM INFO
+    let system_info = get_system_info();
+    println!("[Debug] System Info Loaded: {:#?}", system_info); // Optional: for debugging
+
+    // RESET SETTINGS CONFIRMATION
+    let mut confirm_selection = 0; // 0 for YES, 1 for NO
+
+    // MASTER VOLUME
+    let mut system_volume = get_system_volume().unwrap_or(0.7); // Get initial volume, or default to 0.7
+
+    // AUDIO SINKS
+    let available_sinks = get_available_sinks();
+    println!("[Debug] Sinks loaded at startup: {:#?}", available_sinks); // <-- ADD THIS
+    let mut config: Config = load_config(); // Or your existing config loading
+
+    // If the saved sink isn't available, reset to "Auto"
+    if !available_sinks.iter().any(|s| s.name == config.audio_output) {
+        config.audio_output = "Auto".to_string();
+    }
+
+    // BRIGHTNESS
+    let mut brightness = get_current_brightness().unwrap_or(0.5);
+
+    // LOG MESSAGES
+    let log_messages = Arc::new(Mutex::new(Vec::<String>::new()));
+    let mut game_process: Option<Child> = None;
+    let mut debug_scroll_offset: usize = 0;
+
+    // CLOCK
+    let mut current_time_str = Local::now().format("%-I:%M %p").to_string();
+    let mut last_time_check = get_time();
+    const TIME_CHECK_INTERVAL: f64 = 1.0; // Check every second
+
+    // BATTERY
+    let mut battery_info: Option<BatteryInfo> = get_battery_info();
+    let mut last_battery_check = get_time();
+    const BATTERY_CHECK_INTERVAL: f64 = 5.0; // only check every 5 seconds to improve performance
+
+    // load config file
+    let mut config = load_config();
+
+    // FLASH MESSENGER
+    let mut flash_message: Option<(String, f32)> = None; // (Message, time_remaining)
+
+    //let loading_icon = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
+
+    // Generate a random message on startup
+    let mut rng = ::rand::thread_rng();
+    let loading_text = KAZETA_LOADING_MESSAGES[rng.gen_range(0..KAZETA_LOADING_MESSAGES.len())];
+
+    // FONT
+    // pre-load user's custom font if they have one so we can display it in the loading screen
+    let startup_font = {
+        let default_font_bytes = include_bytes!("../november.ttf");
+        let mut font_to_load = load_ttf_font_from_bytes(default_font_bytes).unwrap();
+
+        if config.font_selection != "Default" {
+            let font_path = format!("../fonts/{}", config.font_selection);
+            // Try to load the custom font, but if it fails, we still have the default one
+            if let Ok(custom_font) = load_ttf_font(&font_path).await {
+                font_to_load = custom_font;
+            }
+        }
+        font_to_load
     };
 
-    // Initialize sound effects
-    let sound_effects = SoundEffects::new().await;
+    // --- FIND ALL ASSET FILES ---
+    let system_backgrounds_dir = "../backgrounds";
+    let system_logos_dir = "../logos";
+    let system_fonts_dir = "../fonts";
+    let system_music_dir = "../bgm";
+
+    let user_data_dir = get_user_data_dir();
+
+    // Backgrounds
+    let mut background_files = find_asset_files(system_backgrounds_dir, &["png"]);
+    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("backgrounds")) {
+        background_files.extend(find_asset_files(&path.to_string_lossy(), &["png"]));
+    }
+
+    // Logos
+    let mut logo_files = find_asset_files(system_logos_dir, &["png"]);
+    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("logos")) {
+        logo_files.extend(find_asset_files(&path.to_string_lossy(), &["png"]));
+    }
+
+    // Fonts
+    let mut font_files = find_asset_files(system_fonts_dir, &["ttf"]);
+    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("fonts")) {
+        font_files.extend(find_asset_files(&path.to_string_lossy(), &["ttf"]));
+    }
+
+    // Music
+    let mut music_files = find_asset_files(system_music_dir, &["ogg", "wav"]);
+    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("bgm")) {
+        music_files.extend(find_asset_files(&path.to_string_lossy(), &["ogg", "wav"]));
+    }
+
+    // --- LOAD ASSETS ---
+    let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
+
+    // apply custom resolution if user specified it
+    apply_resolution(&config.resolution);
+    if config.fullscreen {
+        set_fullscreen(true);
+    }
+    next_frame().await;
+
+    // load custom sound pack
+    if config.sfx_pack != "Default" {
+        println!("[Info] Loading configured SFX pack: {}", &config.sfx_pack);
+        sound_effects = SoundEffects::load(&config.sfx_pack).await;
+    }
+    let mut sfx_pack_to_reload: Option<String> = None;
+
+    // logos
+    // --- Create a custom-ordered list of logo choices for the UI ---
+    // 1. Get all the custom logo filenames from the cache keys (excluding the default)
+    let mut custom_logos: Vec<String> = logo_cache.keys()
+    .filter(|&k| *k != "Kazeta+ (Default)")
+    .cloned()
+    .collect();
+    custom_logos.sort(); // Sort just the custom logos alphabetically
+
+    // 2. Create the final list with our specific order
+    let mut logo_choices: Vec<String> = vec!["None".to_string(), "Kazeta+ (Default)".to_string()];
+    logo_choices.extend(custom_logos);
+    // The final list will be: ["None", "Kazeta (Default)", "cardforce.png", ...]
+
+    // backgrounds
+    let mut background_state = BackgroundState {
+        bgx: 0.0,
+        bg_color: COLOR_TARGETS[0].clone(),
+        target: 1,
+        tg_color: COLOR_TARGETS[1].clone(),
+    };
+
+    // Create a sorted list of all available background choices for the UI
+    let mut background_choices: Vec<String> = background_cache.keys().cloned().collect();
+    background_choices.sort();
+
+    // fonts
+    let mut font_choices: Vec<String> = font_cache.keys().cloned().collect();
+    font_choices.sort();
+
+    // bgm
+    let mut bgm_choices: Vec<String> = vec!["OFF".to_string()];
+    let track_names: Vec<String> = music_files
+    .iter()
+    .filter_map(|path| path.file_name())
+    .filter_map(|name| name.to_str())
+    .map(|s| s.to_string())
+    .collect();
+    bgm_choices.extend(track_names);
+
+    let mut current_bgm: Option<audio::Sound> = None;
+
+    // At the end of your setup, start the BGM based on the config
+    if let Some(track_name) = &config.bgm_track {
+        play_new_bgm(track_name, config.bgm_volume, &music_cache, &mut current_bgm);
+    }
+
+    // SPLASH SCREEN
+    if config.show_splash_screen {
+        // Mute the main BGM if it's already playing
+        if let Some(sound) = &current_bgm {
+            audio::set_sound_volume(sound, 0.0);
+        }
+
+        // --- Load only what the splash screen needs ---
+        let splash_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
+        let splash_sfx = audio::load_sound_from_bytes(include_bytes!("../splash.wav")).await.unwrap();
+
+        // Play the splash sound
+        audio::play_sound(&splash_sfx, audio::PlaySoundParams { looped: false, volume: 0.2 });
+
+        // --- Animation Durations ---
+        const FADE_DURATION: f64 = 1.0;
+        const SHOW_DURATION: f64 = 2.0;
+        const BASE_LOGO_WIDTH: f32 = 200.0;
+
+        let mut state = SplashState::FadingIn;
+        let mut alpha = 0.0;
+        let mut state_start_time = get_time();
+
+        // --- Splash Screen Loop ---
+        while !matches!(state, SplashState::Done) {
+            let elapsed = get_time() - state_start_time;
+
+            // Update logic for fading in, showing, and fading out
+            match state {
+                SplashState::FadingIn => {
+                    alpha = (elapsed / FADE_DURATION).min(1.0) as f32;
+                    if elapsed >= FADE_DURATION {
+                        state = SplashState::Showing;
+                        state_start_time = get_time();
+                    }
+                }
+                SplashState::Showing => {
+                    if elapsed >= SHOW_DURATION {
+                        state = SplashState::FadingOut;
+                        state_start_time = get_time();
+                    }
+                }
+                SplashState::FadingOut => {
+                    alpha = 1.0 - (elapsed / FADE_DURATION).min(1.0) as f32;
+                    if elapsed >= FADE_DURATION {
+                        state = SplashState::Done;
+                    }
+                }
+                SplashState::Done => {}
+            }
+
+            // Drawing logic
+            clear_background(BLACK);
+
+            let scale_factor = screen_height() / BASE_SCREEN_HEIGHT;
+
+            // Calculate the scaled width and height
+            let aspect_ratio = splash_logo.height() / splash_logo.width();
+            let scaled_logo_width = BASE_LOGO_WIDTH * scale_factor;
+            let scaled_logo_height = scaled_logo_width * aspect_ratio;
+
+            let x = (screen_width() / 2.0) - (scaled_logo_width / 2.0);
+            let y = (screen_height() / 2.0) - (scaled_logo_height / 2.0);
+
+            //draw_texture(&splash_logo, x, y, Color::new(1.0, 1.0, 1.0, alpha));
+            draw_texture_ex(
+                &splash_logo,
+                x,
+                y,
+                Color::new(1.0, 1.0, 1.0, alpha),
+                DrawTextureParams {
+                    dest_size: Some(vec2(scaled_logo_width, scaled_logo_height)),
+                    source: Some(Rect::new(0.0, 0.0, splash_logo.width(), splash_logo.height())),
+                    ..Default::default()
+                },
+            );
+            next_frame().await;
+        }
+
+        // Restore BGM volume after splash screen
+        if let Some(sound) = &current_bgm {
+            audio::set_sound_volume(sound, config.bgm_volume);
+        }
+    }
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().unwrap();
@@ -1228,10 +3340,18 @@ async fn main() {
     let mut animation_state = AnimationState::new();
 
     // Screen state
-    const MAIN_MENU_OPTIONS: [&str; 2] = ["DATA", "PLAY"];
+    const MAIN_MENU_OPTIONS: [&str; 5] = ["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "ABOUT",];
     let mut current_screen = Screen::MainMenu;
     let mut main_menu_selection: usize = 0;
+    let mut settings_menu_selection: usize = 0;
+    let mut game_selection: usize = 0; // For the new menu
+    let mut available_games: Vec<(save::CartInfo, PathBuf)> = Vec::new(); // To hold the list of found games
     let mut play_option_enabled: bool = false;
+    let mut copy_logs_option_enabled = false; // new button to copy session logs over to SD card
+
+    // icon cache for multiple game detection screen
+    let mut game_icon_cache: HashMap<String, Texture2D> = HashMap::new();
+    let mut game_icon_queue: Vec<(String, PathBuf)> = Vec::new();
 
     // Fade state
     let mut fade_start_time: Option<f64> = None;
@@ -1282,51 +3402,43 @@ async fn main() {
         error_message: None,
     }));
 
+    let mut display_settings_changed = false;
 
-    let mut bgx = 0.0;
-
-    let color_targets: [Color; 6] = [
-        Color { r: 1.0, g: 0.5, b: 0.5, a: 1.0 },
-        Color { r: 1.0, g: 1.0, b: 0.5, a: 1.0 },
-        Color { r: 0.5, g: 1.0, b: 0.5, a: 1.0 },
-        Color { r: 0.5, g: 1.0, b: 1.0, a: 1.0 },
-        Color { r: 0.5, g: 0.5, b: 1.0, a: 1.0 },
-        Color { r: 1.0, g: 0.5, b: 1.0, a: 1.0 },
-    ];
-
-    let mut bg_color = color_targets[0].clone();
-    let mut tg_color = color_targets[1].clone();
-
-    let mut target = 1;
-
-    const DELTA: f32 = 0.0001;
-
+    // BEGINNING OF MAIN LOOP
     loop {
-        draw_texture(&background, bgx-(SCREEN_WIDTH as f32), 0.0, bg_color);
-        draw_texture(&background, bgx, 0.0, bg_color);
-        bgx = (bgx + 0.1) % (SCREEN_WIDTH as f32);
-
-        if bg_color.r < tg_color.r {
-            bg_color.r += DELTA;
-        } else if bg_color.r > tg_color.r {
-            bg_color.r -= DELTA;
+        // This continuously ensures the window size matches the config when not fullscreen
+        if !config.fullscreen {
+            if let Some((w_str, h_str)) = config.resolution.split_once('x') {
+                if let (Ok(w), Ok(h)) = (w_str.parse::<f32>(), h_str.parse::<f32>()) {
+                    // If the actual size doesn't match the config, request a resize
+                    if screen_width() != w || screen_height() != h {
+                        request_new_screen_size(w, h);
+                    }
+                }
+            }
         }
 
-        if bg_color.g < tg_color.g {
-            bg_color.g += DELTA;
-        } else if bg_color.g > tg_color.g {
-            bg_color.g -= DELTA;
+        let scale_factor = screen_height() / BASE_SCREEN_HEIGHT;
+
+        // FLASH TIMER
+        if let Some((_message, timer)) = &mut flash_message {
+            *timer -= get_frame_time(); // Decrease timer by the time elapsed since last frame
+            if *timer <= 0.0 {
+                flash_message = None; // Clear the message when timer runs out
+            }
         }
 
-        if bg_color.b < tg_color.b {
-            bg_color.b += DELTA;
-        } else if bg_color.b > tg_color.b {
-            bg_color.b -= DELTA;
+        // CLOCK
+        if get_time() - last_time_check > TIME_CHECK_INTERVAL {
+            // Just call the new function to get the correct, formatted time string
+            current_time_str = get_current_local_time_string(&config);
+            last_time_check = get_time();
         }
 
-        if (bg_color.r - tg_color.r).abs() < 0.01 && (bg_color.g - tg_color.g).abs() < 0.01 && (bg_color.b - tg_color.b).abs() < 0.01 {
-            target = (target + 1) % 6;
-            tg_color = color_targets[target].clone();
+        // BATTERY
+        if get_time() - last_battery_check > BATTERY_CHECK_INTERVAL {
+            battery_info = get_battery_info();
+            last_battery_check = get_time();
         }
 
         let mut action_dialog_id = String::new();
@@ -1378,10 +3490,35 @@ async fn main() {
 
         // Handle screen-specific rendering and input
         match current_screen {
+            Screen::About => {
+                if input_state.back {
+                    current_screen = Screen::MainMenu;
+                    sound_effects.play_back(&config);
+                }
+
+                render_background(&background_cache, &config, &mut background_state);
+                render_ui_overlay(&logo_cache, &font_cache, &config, &battery_info, &current_time_str, scale_factor);
+                render_about_screen(&system_info, &font_cache, &config, scale_factor);
+            }
             Screen::FadingOut => {
                 // During fade, only render, don't process input
                 // Render the current background and UI elements first
-                render_main_menu(&ctx, &MAIN_MENU_OPTIONS, main_menu_selection, play_option_enabled, &animation_state, &logo);
+                render_main_menu(
+                    &MAIN_MENU_OPTIONS,
+                    main_menu_selection,
+                    play_option_enabled,
+                    copy_logs_option_enabled,
+                    &animation_state,
+                    &logo_cache,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    &battery_info,
+                    &current_time_str,
+                    scale_factor,
+                    flash_message.as_ref().map(|(msg, _timer)| msg.as_str()),
+                );
 
                 // Calculate fade progress
                 if let Some(start_time) = fade_start_time {
@@ -1390,7 +3527,7 @@ async fn main() {
 
                     // Draw fade overlay
                     let alpha = fade_progress as f32;
-                    draw_rectangle(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32,
+                    draw_rectangle(0.0, 0.0, screen_width(), screen_height(),
                         Color { r: 0.0, g: 0.0, b: 0.0, a: alpha });
 
                     // If fade is complete, wait for linger duration then exit
@@ -1406,7 +3543,25 @@ async fn main() {
                 // Update play option enabled status based on cart connection
                 play_option_enabled = cart_connected.load(Ordering::Relaxed);
 
-                render_main_menu(&ctx, &MAIN_MENU_OPTIONS, main_menu_selection, play_option_enabled, &animation_state, &logo);
+                // Update copy logs option enabled status based on cart connection
+                copy_logs_option_enabled = cart_connected.load(Ordering::Relaxed);
+
+                render_main_menu(
+                    &MAIN_MENU_OPTIONS,
+                    main_menu_selection,
+                    play_option_enabled,
+                    copy_logs_option_enabled,
+                    &animation_state,
+                    &logo_cache,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    &battery_info,
+                    &current_time_str,
+                    scale_factor,
+                    flash_message.as_ref().map(|(msg, _timer)| msg.as_str()),
+                );
 
                 // Handle main menu navigation
                 if input_state.up {
@@ -1416,45 +3571,793 @@ async fn main() {
                         main_menu_selection = (main_menu_selection - 1) % MAIN_MENU_OPTIONS.len();
                     }
                     animation_state.trigger_transition();
-                    sound_effects.play_cursor_move();
+                    sound_effects.play_cursor_move(&config);
                 }
                 if input_state.down {
                     main_menu_selection = (main_menu_selection + 1) % MAIN_MENU_OPTIONS.len();
                     animation_state.trigger_transition();
-                    sound_effects.play_cursor_move();
+                    sound_effects.play_cursor_move(&config);
                 }
                 if input_state.select {
                     match main_menu_selection {
-                        0 => {
+                        0 => { // SAVE DATA
                             current_screen = Screen::SaveData;
                             input_state.ui_focus = UIFocus::Grid;
-                            sound_effects.play_select();
+                            sound_effects.play_select(&config);
                         },
-                        1 => {
+                        1 => { // PLAY option
                             if play_option_enabled {
-                                sound_effects.play_select();
-                                // Create restart session sentinel file and start fade
-                                let state_dir = Path::new(".local/share/kazeta/state");
-                                if state_dir.exists() {
-                                    let sentinel_path = state_dir.join(".RESTART_SESSION_SENTINEL");
-                                    if let Err(_) = fs::File::create(&sentinel_path) {
-                                        // If we can't create the file, just continue
-                                        // Don't show error to user
+                                sound_effects.play_select(&config);
+                                log_messages.lock().unwrap().clear();
+
+                                match save::find_all_kzi_files() {
+                                    Ok((kzi_paths, mut debug_log)) => {
+                                        log_messages.lock().unwrap().append(&mut debug_log);
+
+                                        let mut games: Vec<(save::CartInfo, PathBuf)> = Vec::new();
+                                        let parse_errors: Vec<String> = Vec::new();
+
+                                        for path in &kzi_paths {
+                                            if let Ok(info) = save::parse_kzi_file(path) {
+                                                games.push((info, path.clone()));
+                                            }
+                                        }
+
+                                        match games.len() {
+                                            0 => { // Case: Found files, but none were valid
+                                                let mut logs = log_messages.lock().unwrap();
+                                                logs.push(format!("[Info] Found {} potential game file(s), but none could be parsed.", kzi_paths.len()));
+                                                logs.push("--- ERRORS ---".to_string());
+                                                logs.extend(parse_errors);
+                                                current_screen = Screen::Debug;
+                                            },
+                                            1 => {
+                                                // Case: Exactly one game found, go to Debug screen and launch
+                                                let (cart_info, kzi_path) = games.remove(0);
+                                                sound_effects.play_select(&config);
+
+                                                if DEBUG_GAME_LAUNCH {
+                                                    { // Scoped lock to add messages
+                                                        let mut logs = log_messages.lock().unwrap();
+                                                        logs.push("--- CARTRIDGE FOUND ---".to_string());
+                                                        logs.push(format!("Name: {}", cart_info.name.as_deref().unwrap_or("N/A")));
+                                                        logs.push(format!("ID: {}", cart_info.id));
+                                                        logs.push(format!("Exec: {}", cart_info.exec));
+                                                        logs.push(format!("Runtime: {}", cart_info.runtime.as_deref().unwrap_or("None")));
+                                                        logs.push(format!("KZI Path: {}", kzi_path.display()));
+                                                    }
+                                                    println!("[Debug] Single Cartridge Found! Preparing to launch...");
+                                                    println!("[Debug]   Name: {}", cart_info.name.as_deref().unwrap_or("N/A"));
+                                                    println!("[Debug]   ID: {}", cart_info.id);
+                                                    println!("[Debug]   Exec: {}", cart_info.exec);
+                                                    println!("[Debug]   Runtime: {}", cart_info.runtime.as_deref().unwrap_or("None"));
+                                                    println!("[Debug]   KZI Path: {}", kzi_path.display());
+
+                                                    match save::launch_game(&cart_info, &kzi_path) {
+                                                        Ok(mut child) => {
+                                                            log_messages.lock().unwrap().push("\n--- LAUNCHING GAME ---".to_string());
+                                                            start_log_reader(&mut child, log_messages.clone());
+                                                            game_process = Some(child);
+                                                        }
+                                                        Err(e) => {
+                                                            log_messages.lock().unwrap().push(format!("\n--- LAUNCH FAILED ---\nError: {}", e));
+                                                        }
+                                                    }
+                                                    current_screen = Screen::Debug;
+                                                } else {
+                                                    // --- PRODUCTION MODE: Fade out and launch ---
+                                                    (current_screen, fade_start_time) = trigger_session_restart(&mut current_bgm, &music_cache);
+                                                }
+                                            },
+                                            _ => { // multiple games found
+                                                println!("[Debug] Found {} games. Switching to selection screen.", games.len());
+                                                for (index, (_, path)) in games.iter().enumerate() {
+                                                    println!("[Debug]   Game {}: {}", index + 1, path.display());
+                                                }
+
+                                                // --- FIX 2: Use the cart_info.icon field ---
+                                                // Queue up the icons for loading.
+                                                game_icon_queue.clear();
+                                                for (cart_info, kzi_path) in &games {
+                                                    let icon_path = kzi_path.parent().unwrap().join(&cart_info.icon);
+                                                    game_icon_queue.push((cart_info.id.clone(), icon_path));
+                                                }
+
+                                                available_games = games;
+                                                game_selection = 0;
+                                                current_screen = Screen::GameSelection;
+                                            }
+                                        }
+                                    },
+                                    Err(e) => { // Handle the error case
+                                        let error_msg = format!("[Error] Error scanning for cartridges: {}", e);
+                                        println!("[Error] {}", &error_msg);
+                                        log_messages.lock().unwrap().push(error_msg);
+                                        current_screen = Screen::Debug;
                                     }
                                 }
-                                // Start fade to black
-                                fade_start_time = Some(get_time());
-                                current_screen = Screen::FadingOut;
                             } else {
-                                sound_effects.play_reject();
+                                sound_effects.play_reject(&config);
                                 animation_state.trigger_play_option_shake();
                             }
+                        },
+                        2 => { // SESSION LOG COPY
+                            if copy_logs_option_enabled {
+                                sound_effects.play_select(&config);
+
+                                // Call our new function and handle the result
+                                match copy_session_logs_to_sd() {
+                                    Ok(path) => {
+                                        flash_message = Some((
+                                            format!("LOGS COPIED TO {}", path),
+                                                FLASH_MESSAGE_DURATION
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        flash_message = Some((
+                                            format!("ERROR: {}", e),
+                                                FLASH_MESSAGE_DURATION
+                                        ));
+                                    }
+                                }
+                            } else {
+                                sound_effects.play_reject(&config);
+                                animation_state.trigger_copy_log_option_shake();
+                            }
+                        },
+                        3 => { // SETTINGS
+                            current_screen = Screen::VideoSettings;
+                            sound_effects.play_select(&config);
+                        },
+                        4 => { // ABOUT
+                            current_screen = Screen::About;
+                            sound_effects.play_select(&config);
                         },
                         _ => {}
                     }
                 }
             },
+            Screen::VideoSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
+                // --- Determine current page info ---
+                let (page_number, options): (usize, &[&str]) = match current_screen {
+                    Screen::VideoSettings => (1, &VIDEO_SETTINGS),
+                    Screen::AudioSettings => (2, &AUDIO_SETTINGS),
+                    Screen::GuiSettings => (3, &GUI_CUSTOMIZATION_SETTINGS),
+                    Screen::AssetSettings => (4, &CUSTOM_ASSET_SETTINGS),
+                    _ => unreachable!(),
+                };
+
+                // --- Handle Common Input (Up/Down/Back) ---
+                if input_state.up {
+                    settings_menu_selection = if settings_menu_selection == 0 { options.len() - 1 } else { settings_menu_selection - 1 };
+                    sound_effects.play_cursor_move(&config);
+                }
+                if input_state.down {
+                    settings_menu_selection = (settings_menu_selection + 1) % options.len();
+                    sound_effects.play_cursor_move(&config);
+                }
+                if input_state.back {
+                    current_screen = Screen::MainMenu;
+                    sound_effects.play_back(&config);
+                }
+
+                // page switching
+                if input_state.next {
+                    sound_effects.play_select(&config);
+                    settings_menu_selection = 0; // Reset selection for the new page
+                    match current_screen {
+                        Screen::VideoSettings => current_screen = Screen::AudioSettings,
+                        Screen::AudioSettings => current_screen = Screen::GuiSettings,
+                        Screen::GuiSettings => current_screen = Screen::AssetSettings,
+                        Screen::AssetSettings => current_screen = Screen::VideoSettings,
+                        _ => {} // This case won't be reached
+                    }
+                }
+
+                if input_state.prev {
+                    sound_effects.play_select(&config);
+                    settings_menu_selection = 0; // Reset selection for the new page
+                    match current_screen {
+                        Screen::VideoSettings => current_screen = Screen::AssetSettings,
+                        Screen::AudioSettings => current_screen = Screen::VideoSettings,
+                        Screen::GuiSettings => current_screen = Screen::AudioSettings,
+                        Screen::AssetSettings => current_screen = Screen::GuiSettings,
+                        _ => {} // This case won't be reached
+                    }
+                }
+
+                // --- Render the Page ---
+                render_settings_page(
+                    page_number, options, &logo_cache, &background_cache, &font_cache,
+                    &mut config, settings_menu_selection, &animation_state, &mut background_state,
+                    &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
+                );
+
+                // --- Handle Page-Specific Actions ---
+                match page_number {
+                    // VIDEO OPTIONS
+                    1 => match settings_menu_selection {
+                        0 => { // RESET SETTINGS
+                            if input_state.select {
+                                sound_effects.play_select(&config);
+                                confirm_selection = 1; // Default to "NO"
+                                current_screen = Screen::ConfirmReset;
+                            }
+                        },
+                        1 => { // RESOLUTION
+                            if input_state.left || input_state.right {
+                                let current_index = RESOLUTIONS.iter().position(|&r| r == config.resolution).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % RESOLUTIONS.len()
+                                } else {
+                                    (current_index + RESOLUTIONS.len() - 1) % RESOLUTIONS.len()
+                                };
+
+                                config.resolution = RESOLUTIONS[new_index].to_string();
+                                save_config(&config);
+                                apply_resolution(&config.resolution); // Apply the change immediately
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        2 => { // FULLSCREEN
+                            if input_state.left || input_state.right {
+                                config.fullscreen = !config.fullscreen;
+                                //set_fullscreen(config.fullscreen); // Apply the change immediately
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                                display_settings_changed = true;
+                            }
+                        },
+                        3 => { // TIME ZONE
+                            let mut change_occurred = false;
+
+                            // Find the current index of the timezone in our array
+                            if let Some(current_index) = TIMEZONES.iter().position(|&tz| tz == config.timezone) {
+                                if input_state.left {
+                                    // Decrement and wrap around if we go below zero
+                                    let new_index = (current_index + TIMEZONES.len() - 1) % TIMEZONES.len();
+                                    config.timezone = TIMEZONES[new_index].to_string();
+                                    change_occurred = true;
+                                }
+                                if input_state.right {
+                                    // Increment and wrap around using the modulo operator
+                                    let new_index = (current_index + 1) % TIMEZONES.len();
+                                    config.timezone = TIMEZONES[new_index].to_string();
+                                    change_occurred = true;
+                                }
+                            }
+
+                            if change_occurred {
+                                sound_effects.play_cursor_move(&config);
+                                save_config(&config);
+                            }
+                        },
+                        4 => { // MASTER VOLUME
+                            if input_state.left {
+                                set_brightness(brightness - 0.1); // Decrease by 10%
+                                brightness = get_current_brightness().unwrap_or(brightness); // Refresh the value
+                                sound_effects.play_cursor_move(&config);
+                            }
+                            if input_state.right {
+                                set_brightness(brightness + 0.1); // Increase by 10%
+                                brightness = get_current_brightness().unwrap_or(brightness); // Refresh the value
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        5 => { // GO TO AUDIO SETTINGS
+                            if input_state.select {
+                                current_screen = Screen::AudioSettings;
+                                settings_menu_selection = 0;
+                                sound_effects.play_select(&config);
+                            }
+                        },
+                        _ => {}
+                    },
+
+                    // AUDIO SETTINGS
+                    2 => match settings_menu_selection {
+                        0 => { // MASTER VOLUME
+                            if input_state.left {
+                                adjust_system_volume("10%-"); // Decrease by 10%
+                                system_volume = get_system_volume().unwrap_or(system_volume); // Refresh the value
+                                sound_effects.play_cursor_move(&config);
+                            }
+                            if input_state.right {
+                                adjust_system_volume("10%+"); // Increase by 10%
+                                system_volume = get_system_volume().unwrap_or(system_volume); // Refresh the value
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        1 => { // BGM VOLUME
+                            if input_state.left || input_state.right {
+                                if input_state.left {
+                                    config.bgm_volume = (config.bgm_volume - 0.1).max(0.0);
+                                }
+                                if input_state.right {
+                                    config.bgm_volume = (config.bgm_volume + 0.1).min(1.0);
+                                }
+
+                                // Change the volume of the currently playing sound
+                                if let Some(sound) = &current_bgm {
+                                    audio::set_sound_volume(sound, config.bgm_volume);
+                                }
+
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        2 => { // SFX Volume
+                            if input_state.left || input_state.right {
+                                if input_state.left {
+                                    config.sfx_volume = (config.sfx_volume - 0.1).max(0.0);
+                                }
+                                if input_state.right {
+                                    config.sfx_volume = (config.sfx_volume + 0.1).min(1.0);
+                                }
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config); // Test the new volume
+                            }
+                        },
+                        3 => { // AUDIO OUTPUT
+                            // Only run this logic if we actually found sinks
+                            if !available_sinks.is_empty() {
+                                // Find the index of the current sink in our discovered list
+                                let current_index = available_sinks.iter().position(|s| s.name == config.audio_output).unwrap_or(0);
+
+                                let mut new_index = current_index;
+                                if input_state.left {
+                                    new_index = (current_index + available_sinks.len() - 1) % available_sinks.len();
+                                }
+                                if input_state.right {
+                                    new_index = (current_index + 1) % available_sinks.len();
+                                }
+
+                                if new_index != current_index {
+                                    let new_sink = &available_sinks[new_index];
+                                    config.audio_output = new_sink.name.clone();
+
+                                    // Apply the change immediately
+                                    let _ = Command::new("wpctl").arg("set-default").arg(new_sink.id.to_string()).status();
+
+                                    // Create a sentinel file to make the choice persistent
+                                    let state_dir = std::path::Path::new("/var/kazeta/state");
+                                    if std::fs::create_dir_all(state_dir).is_ok() {
+                                        let _ = std::fs::File::create(state_dir.join(".AUDIO_PREFERENCE_SET"));
+                                    }
+
+                                    sound_effects.play_cursor_move(&config);
+                                }
+                            }
+                        },
+                        4 => { // GO TO VIDEO SETTINGS
+                            if input_state.select {
+                                current_screen = Screen::VideoSettings;
+                                settings_menu_selection = 0;
+                                sound_effects.play_select(&config);
+                            }
+                        },
+                        5 => { // GO TO GUI CUSTOMIZATION
+                            if input_state.select {
+                                current_screen = Screen::GuiSettings;
+                                settings_menu_selection = 0;
+                                sound_effects.play_select(&config);
+                            }
+                        },
+                        _ => {}
+                    },
+
+                    // GUI CUSTOMIZATION OPTIONS
+                    3 => match settings_menu_selection {
+                        0 => { // SPLASH SCREEN
+                            if input_state.left || input_state.right {
+                                config.show_splash_screen = !config.show_splash_screen;
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        1 => { // FONT COLOR
+                            if input_state.left || input_state.right {
+                                // Find current color's index in our list
+                                let current_index = FONT_COLORS.iter().position(|&c| c == config.font_color).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % FONT_COLORS.len()
+                                } else {
+                                    (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
+                                };
+                                config.font_color = FONT_COLORS[new_index].to_string();
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        }
+                        2 => { // CURSOR COLOR
+                            if input_state.left || input_state.right {
+                                // We can reuse the FONT_COLORS constant for this
+                                let current_index = FONT_COLORS.iter().position(|&c| c == config.cursor_color).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % FONT_COLORS.len()
+                                } else {
+                                    (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
+                                };
+
+                                config.cursor_color = FONT_COLORS[new_index].to_string();
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        3 => { // BACKGROUND SCROLLING
+                            if input_state.left || input_state.right {
+                                let current_index = SCROLL_SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % SCROLL_SPEEDS.len()
+                                } else {
+                                    (current_index + SCROLL_SPEEDS.len() - 1) % SCROLL_SPEEDS.len()
+                                };
+
+                                config.background_scroll_speed = SCROLL_SPEEDS[new_index].to_string();
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        4 => { // COLOR GRADIENT SHIFTING
+                            if input_state.left || input_state.right {
+                                let current_index = COLOR_SHIFT_SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % COLOR_SHIFT_SPEEDS.len()
+                                } else {
+                                    (current_index + COLOR_SHIFT_SPEEDS.len() - 1) % COLOR_SHIFT_SPEEDS.len()
+                                };
+
+                                config.color_shift_speed = COLOR_SHIFT_SPEEDS[new_index].to_string();
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        5 => { // GO TO AUDIO SETTINGS
+                            if input_state.select {
+                                current_screen = Screen::AudioSettings;
+                                settings_menu_selection = 0;
+                                sound_effects.play_select(&config);
+                            }
+                        },
+                        6 => { // GO TO CUSTOM ASSETS
+                            if input_state.select {
+                                current_screen = Screen::AssetSettings;
+                                settings_menu_selection = 0;
+                                sound_effects.play_select(&config);
+                            }
+                        },
+                        _ => {}
+                    },
+                    // CUSTOM ASSETS
+                    4 => match settings_menu_selection {
+                        0 => { // BGM SELECTION
+                            if input_state.left || input_state.right {
+                                // Find the current track's position in our list of choices
+                                let current_index = bgm_choices.iter().position(|t| *t == config.bgm_track.clone().unwrap_or("OFF".to_string())).unwrap_or(0);
+                                let mut new_index = current_index;
+
+                                if input_state.left {
+                                    new_index = if current_index == 0 { bgm_choices.len() - 1 } else { current_index - 1 };
+                                }
+                                if input_state.right {
+                                    new_index = (current_index + 1) % bgm_choices.len();
+                                }
+
+                                let new_track = &bgm_choices[new_index];
+                                play_new_bgm(new_track, config.bgm_volume, &music_cache, &mut current_bgm);
+
+                                // Update the config with the new choice
+                                if new_track == "OFF" {
+                                    config.bgm_track = None;
+                                } else {
+                                    config.bgm_track = Some(new_track.clone());
+                                }
+
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        1 => { // SOUND PACKS
+                            if input_state.left || input_state.right {
+                                let sound_packs = find_sound_packs();
+                                let current_index = sound_packs.iter().position(|name| name == &config.sfx_pack).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % sound_packs.len()
+                                } else {
+                                    (current_index + sound_packs.len() - 1) % sound_packs.len()
+                                };
+
+                                config.sfx_pack = sound_packs[new_index].clone();
+                                save_config(&config);
+
+                                // Signal to the main loop that we need to reload this pack
+                                sfx_pack_to_reload = Some(config.sfx_pack.clone());
+                            }
+                        },
+                        2 => { // LOGO selection
+                            if input_state.left || input_state.right {
+                                // Find the current logo's position in our list of choices
+                                let current_index = logo_choices.iter().position(|l| *l == config.logo_selection).unwrap_or(0);
+                                let mut new_index = current_index;
+
+                                if input_state.left {
+                                    new_index = if current_index == 0 { logo_choices.len() - 1 } else { current_index - 1 };
+                                }
+                                if input_state.right {
+                                    new_index = (current_index + 1) % logo_choices.len();
+                                }
+
+                                // Update the config with the new choice
+                                config.logo_selection = logo_choices[new_index].clone();
+
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        3 => { // BACKGROUND SELECTION
+                            if input_state.left || input_state.right {
+                                // Find the current background's position in our list of choices
+                                let current_index = background_choices.iter().position(|b| *b == config.background_selection).unwrap_or(0);
+                                let mut new_index = current_index;
+
+                                if input_state.left {
+                                    new_index = if current_index == 0 { background_choices.len() - 1 } else { current_index - 1 };
+                                }
+                                if input_state.right {
+                                    new_index = (current_index + 1) % background_choices.len();
+                                }
+
+                                // Update the config with the new choice
+                                config.background_selection = background_choices[new_index].clone();
+
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        4 => { // FONT TYPE
+                            if input_state.left || input_state.right {
+                                let current_index = font_choices.iter().position(|name| name == &config.font_selection).unwrap_or(0);
+                                let new_index = if input_state.right {
+                                    (current_index + 1) % font_choices.len()
+                                } else {
+                                    (current_index + font_choices.len() - 1) % font_choices.len()
+                                };
+
+                                config.font_selection = font_choices[new_index].clone();
+                                save_config(&config);
+                                sound_effects.play_cursor_move(&config);
+                            }
+                        },
+                        5 => { // GO TO GUI CUSTOMIZATION SETTINGS
+                            if input_state.select {
+                                current_screen = Screen::GuiSettings;
+                                settings_menu_selection = 0;
+                                sound_effects.play_select(&config);
+                            }
+                        },
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            },
+            Screen::GameSelection => {
+                // --- Load Icons from Queue ---
+                if !game_icon_queue.is_empty() {
+                    let (game_id, icon_path) = game_icon_queue.remove(0);
+                    if let Ok(texture) = load_texture(&icon_path.to_string_lossy()).await {
+                        game_icon_cache.insert(game_id, texture);
+                    }
+                }
+                let grid_width = 5; // The number of icons per row
+                if input_state.left {
+                    if game_selection > 0 {
+                        game_selection -= 1;
+                        sound_effects.play_cursor_move(&config);
+                    }
+                }
+                if input_state.right {
+                    if game_selection < available_games.len() - 1 {
+                        game_selection += 1;
+                        sound_effects.play_cursor_move(&config);
+                    }
+                }
+                if input_state.up {
+                    if game_selection >= grid_width {
+                        game_selection -= grid_width;
+                        sound_effects.play_cursor_move(&config);
+                    }
+                }
+                if input_state.down {
+                    if game_selection + grid_width < available_games.len() {
+                        game_selection += grid_width;
+                        sound_effects.play_cursor_move(&config);
+                    }
+                }
+                if input_state.back {
+                    current_screen = Screen::MainMenu;
+                    sound_effects.play_back(&config);
+                }
+                if input_state.select {
+                    if let Some((cart_info, kzi_path)) = available_games.get(game_selection) {
+                        sound_effects.play_select(&config);
+
+                        if DEBUG_GAME_LAUNCH {
+                            // --- DEBUG MODE ---
+                            log_messages.lock().unwrap().clear();
+                            { // Scoped lock to add messages
+                                let mut logs = log_messages.lock().unwrap();
+                                logs.push("--- CARTRIDGE FOUND ---".to_string());
+                                logs.push(format!("Name: {}", cart_info.name.as_deref().unwrap_or("N/A")));
+                                logs.push(format!("ID: {}", cart_info.id));
+                                logs.push(format!("Exec: {}", cart_info.exec));
+                                logs.push(format!("Runtime: {}", cart_info.runtime.as_deref().unwrap_or("None")));
+                                logs.push(format!("KZI Path: {}", kzi_path.display()));
+                            }
+                            println!("[Debug] Single Cartridge Found! Preparing to launch...");
+                            println!("[Debug]   Name: {}", cart_info.name.as_deref().unwrap_or("N/A"));
+                            println!("[Debug]   ID: {}", cart_info.id);
+                            println!("[Debug]   Exec: {}", cart_info.exec);
+                            println!("[Debug]   Runtime: {}", cart_info.runtime.as_deref().unwrap_or("None"));
+                            println!("[Debug]   KZI Path: {}", kzi_path.display());
+
+                            match save::launch_game(&cart_info, &kzi_path) {
+                                Ok(mut child) => {
+                                    log_messages.lock().unwrap().push("\n--- LAUNCHING GAME ---".to_string());
+                                    start_log_reader(&mut child, log_messages.clone());
+                                    game_process = Some(child);
+                                }
+                                Err(e) => {
+                                    log_messages.lock().unwrap().push(format!("\n--- LAUNCH FAILED ---\nError: {}", e));
+                                }
+                            }
+                            current_screen = Screen::Debug;
+
+                            match save::launch_game(cart_info, kzi_path) {
+                                Ok(mut child) => {
+                                    start_log_reader(&mut child, log_messages.clone());
+                                    game_process = Some(child);
+                                }
+                                Err(e) => {
+                                    log_messages.lock().unwrap().push(format!("\n--- LAUNCH FAILED ---\nError: {}", e));
+                                }
+                            }
+                            current_screen = Screen::Debug;
+                        } else {
+                            // Instead of just restarting, we now trigger a specific game launch.
+                            (current_screen, fade_start_time) = trigger_game_launch(
+                                cart_info,
+                                kzi_path,
+                                &mut current_bgm,
+                                &music_cache
+                            );
+                        }
+                    }
+                }
+
+                // --- Render ---
+                render_game_selection_menu(
+                    &available_games, &game_icon_cache, &placeholder, game_selection, &animation_state, &logo_cache,
+                    &background_cache, &font_cache, &config, &mut background_state,
+                    &battery_info, &current_time_str, scale_factor
+                );
+            },
+            Screen::Debug => {
+                let messages = log_messages.lock().unwrap();
+
+                // INPUT
+                if input_state.up && debug_scroll_offset > 0 {
+                    debug_scroll_offset -= 1;
+                }
+                // Allow scrolling down only if there are more messages than can be displayed
+                if input_state.down && debug_scroll_offset < messages.len().saturating_sub(1) {
+                    debug_scroll_offset += 1;
+                }
+                // save log file
+                if input_state.select {
+                    match save_log_to_file(&messages) {
+                        Ok(filename) => {
+                            // Add a confirmation message to the log
+                            //messages.push(format!("\nLOG SAVED TO {}", filename));
+                            flash_message = Some((format!("LOG SAVED TO {}", filename), FLASH_MESSAGE_DURATION));
+                        }
+                        Err(e) => {
+                            //messages.push(format!("\nERROR SAVING LOG: {}", e));
+                            flash_message = Some((format!("ERROR SAVING LOG: {}", e), FLASH_MESSAGE_DURATION));
+                        }
+                    }
+                }
+                if input_state.back {
+                    // If the user presses back, kill the game process and return to the menu
+                    if let Some(mut child) = game_process.take() {
+                        child.kill().ok(); // Ignore error if process already exited
+                    }
+                    current_screen = Screen::MainMenu;
+                    sound_effects.play_back(&config);
+                    debug_scroll_offset = 0;
+                }
+
+                // --- Update flash message timer ---
+                if let Some((_, timer)) = &mut flash_message {
+                    *timer -= get_frame_time();
+                    if *timer <= 0.0 {
+                        flash_message = None;
+                    }
+                }
+
+                // RENDER
+                // Lock the mutex to get read-only access to the log messages for this frame
+                render_debug_screen(
+                    &messages,
+                    debug_scroll_offset,
+                    flash_message.as_ref().map(|(msg, _)| msg.as_str()), // Pass the message text
+                    &font_cache,
+                    &config,
+                    scale_factor,
+                    &background_cache,
+                    &mut background_state,
+                );
+            },
+            Screen::ConfirmReset => {
+                // --- Input Handling ---
+                if input_state.left || input_state.right {
+                    confirm_selection = 1 - confirm_selection; // Flips between 0 and 1
+                    sound_effects.play_cursor_move(&config);
+                }
+                if input_state.back {
+                    current_screen = Screen::VideoSettings; // Or whatever page you came from
+                    sound_effects.play_back(&config);
+                }
+                if input_state.select {
+                    if confirm_selection == 0 { // User selected YES
+                        if let Err(e) = delete_config_file() {
+                            println!("[ERROR] Failed to delete config file: {}", e);
+                        }
+                        current_screen = Screen::ResetComplete;
+                        sound_effects.play_select(&config);
+                    } else { // User selected NO
+                        current_screen = Screen::VideoSettings;
+                        sound_effects.play_back(&config);
+                    }
+                }
+
+                // --- Render ---
+                // First, render the settings page in the background
+                render_settings_page(
+                    1, &VIDEO_SETTINGS, &logo_cache, &background_cache, &font_cache,
+                    &mut config, settings_menu_selection, &animation_state, &mut background_state,
+                    &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
+                );
+                // Then, render the dialog box on top
+                render_dialog_box(
+                    "Reset all settings to default?\nThis cannot be undone.",
+                    Some(("YES", "NO")), // Options to display
+                    confirm_selection,  // Which option is selected
+                    &font_cache, &config, scale_factor, &animation_state,
+                );
+            },
+            Screen::ResetComplete => {
+                // --- Input Handling ---
+                if input_state.select || input_state.back {
+                    // Use the restart function you already have
+                    (current_screen, fade_start_time) = trigger_session_restart(&mut current_bgm, &music_cache);
+                }
+
+                // --- Render ---
+                render_settings_page(
+                    1, &VIDEO_SETTINGS, &logo_cache, &background_cache, &font_cache,
+                    &mut config, settings_menu_selection, &animation_state, &mut background_state,
+                    &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness
+                );
+                render_dialog_box(
+                    "Settings have been reset.\nRestart required.",
+                    None, // No YES/NO options needed
+                    0,
+                    &font_cache, &config, scale_factor, &animation_state,
+                );
+            },
             Screen::SaveData => {
+                render_background(&background_cache, &config, &mut background_state);
+
                 // Check if memories need to be refreshed due to storage media changes
                 if let Ok(mut state) = storage_state.lock() {
                     if state.needs_memory_refresh {
@@ -1467,15 +4370,14 @@ async fn main() {
                         dialogs.clear();
                     }
                 }
-
                 match dialog_state {
                     DialogState::None => {
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache);
+                        render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
 
                         // Handle back navigation
                         if input_state.back {
                            current_screen = Screen::MainMenu;
-                           sound_effects.play_back();
+                           sound_effects.play_back(&config);
                         }
 
                         // Handle storage media switching with tab/bumpers regardless of focus
@@ -1487,7 +4389,7 @@ async fn main() {
                                         state.selected = (state.selected + 1) % state.media.len();
                                         memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                         scroll_offset = 0;
-                                        sound_effects.play_select();
+                                        sound_effects.play_select(&config);
                                     }
                                 } else if input_state.next {
                                     // Next stops at end
@@ -1495,10 +4397,10 @@ async fn main() {
                                         state.selected += 1;
                                         memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                         scroll_offset = 0;
-                                        sound_effects.play_select();
+                                        sound_effects.play_select(&config);
                                     } else {
                                         animation_state.trigger_shake(false); // Shake right arrow when can't go next
-                                        sound_effects.play_reject();
+                                        sound_effects.play_reject(&config);
                                     }
                                 } else if input_state.prev {
                                     // Prev stops at beginning
@@ -1506,10 +4408,10 @@ async fn main() {
                                         state.selected -= 1;
                                         memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                         scroll_offset = 0;
-                                        sound_effects.play_select();
+                                        sound_effects.play_select(&config);
                                     } else {
                                         animation_state.trigger_shake(true); // Shake left arrow when can't go prev
-                                        sound_effects.play_reject();
+                                        sound_effects.play_reject(&config);
                                     }
                                 }
                             }
@@ -1520,35 +4422,35 @@ async fn main() {
                                 if input_state.select {
                                     let memory_index = get_memory_index(selected_memory, scroll_offset);
                                     if let Some(_) = memories.get(memory_index) {
-                                        let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                                        let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                                         animation_state.trigger_dialog_transition(grid_pos, dialog_pos);
                                         dialogs.push(create_main_dialog(&storage_state));
                                         dialog_state = DialogState::Opening;
-                                        sound_effects.play_select();
+                                        sound_effects.play_select(&config);
                                     }
                                 }
                                 if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                                     selected_memory += 1;
                                     animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_cursor_move(&config);
                                 }
                                 if input_state.left && selected_memory >= 1 {
                                     selected_memory -= 1;
                                     animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_cursor_move(&config);
                                 }
                                 if input_state.down {
                                     if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
                                         selected_memory += GRID_WIDTH;
                                         animation_state.trigger_transition();
-                                        sound_effects.play_cursor_move();
+                                        sound_effects.play_cursor_move(&config);
                                     } else {
                                         // Check if there are any saves in the next row
                                         let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
                                         if next_row_start < memories.len() {
                                             scroll_offset += 1;
                                             animation_state.trigger_transition();
-                                            sound_effects.play_cursor_move();
+                                            sound_effects.play_cursor_move(&config);
                                         }
                                     }
                                 }
@@ -1556,21 +4458,21 @@ async fn main() {
                                     if selected_memory >= GRID_WIDTH {
                                         selected_memory -= GRID_WIDTH;
                                         animation_state.trigger_transition();
-                                        sound_effects.play_cursor_move();
+                                        sound_effects.play_cursor_move(&config);
                                     } else if scroll_offset > 0 {
                                         scroll_offset -= 1;
                                         animation_state.trigger_transition();
-                                        sound_effects.play_cursor_move();
+                                        sound_effects.play_cursor_move(&config);
                                     } else {
                                         // Allow moving to storage navigation from leftmost or rightmost column
                                         if selected_memory % GRID_WIDTH == 0 {
                                             input_state.ui_focus = UIFocus::StorageLeft;
                                             animation_state.trigger_transition();
-                                            sound_effects.play_cursor_move();
+                                            sound_effects.play_cursor_move(&config);
                                         } else if selected_memory % GRID_WIDTH == GRID_WIDTH - 1 {
                                             input_state.ui_focus = UIFocus::StorageRight;
                                             animation_state.trigger_transition();
-                                            sound_effects.play_cursor_move();
+                                            sound_effects.play_cursor_move(&config);
                                         }
                                     }
                                 }
@@ -1579,13 +4481,13 @@ async fn main() {
                                 if input_state.right {
                                     input_state.ui_focus = UIFocus::StorageRight;
                                     animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_cursor_move(&config);
                                 }
                                 if input_state.down {
                                     input_state.ui_focus = UIFocus::Grid;
                                     selected_memory = 0; // Move to leftmost grid position
                                     animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_cursor_move(&config);
                                 }
                                 if input_state.select {
                                     if let Ok(mut state) = storage_state.lock() {
@@ -1593,10 +4495,10 @@ async fn main() {
                                             state.selected -= 1;
                                             memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                             scroll_offset = 0;
-                                            sound_effects.play_select();
+                                            sound_effects.play_select(&config);
                                         } else {
                                             animation_state.trigger_shake(true);
-                                            sound_effects.play_reject();
+                                            sound_effects.play_reject(&config);
                                         }
                                     }
                                 }
@@ -1605,13 +4507,13 @@ async fn main() {
                                 if input_state.left {
                                     input_state.ui_focus = UIFocus::StorageLeft;
                                     animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_cursor_move(&config);
                                 }
                                 if input_state.down {
                                     input_state.ui_focus = UIFocus::Grid;
                                     selected_memory = GRID_WIDTH - 1; // Move to rightmost grid position
                                     animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move();
+                                    sound_effects.play_cursor_move(&config);
                                 }
                                 if input_state.select {
                                     if let Ok(mut state) = storage_state.lock() {
@@ -1619,10 +4521,10 @@ async fn main() {
                                             state.selected += 1;
                                             memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
                                             scroll_offset = 0;
-                                            sound_effects.play_select();
+                                            sound_effects.play_select(&config);
                                         } else {
                                             animation_state.trigger_shake(false);
-                                            sound_effects.play_reject();
+                                            sound_effects.play_reject(&config);
                                         }
                                     }
                                 }
@@ -1631,7 +4533,7 @@ async fn main() {
                     },
                     DialogState::Opening => {
                         // During opening, only render the main view and the transitioning icon
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache);
+                        render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1656,19 +4558,19 @@ async fn main() {
                     DialogState::Open => {
                         // When dialog is fully open, only render the dialog
                         if let Some(dialog) = dialogs.last_mut() {
-                            render_dialog(&ctx, dialog, &memories, selected_memory, &icon_cache, &copy_op_state, &placeholder, scroll_offset, &animation_state, &mut playtime_cache, &mut size_cache);
+                            render_dialog(dialog, &memories, selected_memory, &icon_cache, &font_cache, &config, &copy_op_state, &placeholder, scroll_offset, &animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
 
                             let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                             if input_state.up {
                                 selection -= 1;
                                 animation_state.trigger_transition();
-                                sound_effects.play_cursor_move();
+                                sound_effects.play_cursor_move(&config);
                             }
 
                             if input_state.down {
                                 selection += 1;
                                 animation_state.trigger_transition();
-                                sound_effects.play_cursor_move();
+                                sound_effects.play_cursor_move(&config);
                             }
 
                             let mut cancel = false;
@@ -1692,26 +4594,26 @@ async fn main() {
                                         if selected_option.value == "CANCEL" || selected_option.value == "OK" {
                                             cancel = true;
                                         } else {
-                                            sound_effects.play_select();
+                                            sound_effects.play_select(&config);
                                         }
                                     } else {
                                         animation_state.trigger_dialog_shake();
-                                        sound_effects.play_reject();
+                                        sound_effects.play_reject(&config);
                                     }
                                 }
                             }
 
                             if cancel {
-                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                                 animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                                 dialog_state = DialogState::Closing;
-                                sound_effects.play_back();
+                                sound_effects.play_back(&config);
                             }
                         }
                     },
                     DialogState::Closing => {
                         // During closing, render both views to show the icon returning
-                        render_data_view(&ctx, selected_memory, &memories, &icon_cache, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache);
+                        render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1737,6 +4639,14 @@ async fn main() {
             },
         }
 
+        // It checks if a reload was requested by the settings screen
+        if let Some(pack_name) = sfx_pack_to_reload.take() {
+            println!("[Info] Reloading SFX pack: {}", pack_name);
+            sound_effects = SoundEffects::load(&pack_name).await;
+            // Play a sound from the new pack to confirm it changed
+            sound_effects.play_cursor_move(&config);
+        }
+
         // Handle dialog actions
         match (action_dialog_id.as_str(), action_option_value.as_str()) {
             ("main", "COPY") => {
@@ -1746,10 +4656,10 @@ async fn main() {
                 dialogs.push(create_confirm_delete_dialog());
             },
             ("main", "CANCEL") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                 animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                 dialog_state = DialogState::Closing;
-                sound_effects.play_back();
+                sound_effects.play_back(&config);
             },
             ("confirm_delete", "DELETE") => {
                 if let Ok(mut state) = storage_state.lock() {
@@ -1760,16 +4670,16 @@ async fn main() {
                         } else {
                             state.needs_memory_refresh = true;
                             dialog_state = DialogState::None;
-                            sound_effects.play_back();
+                            sound_effects.play_back(&config);
                         }
                     }
                 }
             },
             ("confirm_delete", "CANCEL") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                 animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                 dialog_state = DialogState::Closing;
-                sound_effects.play_back();
+                sound_effects.play_back(&config);
             },
             ("copy_storage_select", target_id) if target_id != "CANCEL" => {
                 let memory_index = get_memory_index(selected_memory, scroll_offset);
@@ -1791,22 +4701,22 @@ async fn main() {
                 }
             },
             ("copy_storage_select", "CANCEL") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                 animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                 dialog_state = DialogState::Closing;
-                sound_effects.play_back();
+                sound_effects.play_back(&config);
             },
             ("save_exists", "OK") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                 animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                 dialog_state = DialogState::Closing;
-                sound_effects.play_back();
+                sound_effects.play_back(&config);
             },
             ("error", "OK") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory);
+                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
                 animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                 dialog_state = DialogState::Closing;
-                sound_effects.play_back();
+                sound_effects.play_back(&config);
             },
             _ => {}
         }
@@ -1834,7 +4744,6 @@ async fn main() {
                 copy_state.should_clear_dialogs = false;
             }
         }
-
         next_frame().await
     }
 }

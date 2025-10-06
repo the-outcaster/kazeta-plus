@@ -6,8 +6,11 @@ if [ $EUID -ne 0 ]; then
 fi
 
 if [ "$1" == "--unmount" ]; then
-	umount "$2"
-	umount "$3"
+	#umount "$2"
+	#umount "$3"
+	# Use -l for a "lazy" unmount, which is more reliable in cleanup scripts
+	umount -l "$2"
+	umount -l "$3"
 else
 	lowerdir="$1"
 	upperdir="$2"

@@ -104,7 +104,7 @@ sed -i '/OPTIONS/s/ debug/ !debug/g' /etc/makepkg.conf
 # install kernel package
 if [ "$KERNEL_PACKAGE_ORIGIN" == "local" ] ; then
 	pacman --noconfirm -U --overwrite '*' \
-	/own_pkgs/${KERNEL_PACKAGE}-*.pkg.tar.zst 
+	/own_pkgs/${KERNEL_PACKAGE}-*.pkg.tar.zst
 else
 	pacman --noconfirm -S "${KERNEL_PACKAGE}" "${KERNEL_PACKAGE}-headers"
 fi
@@ -128,7 +128,7 @@ rm -rf /var/cache/pacman/pkg
 # Since base package group adds iptables by default
 # pacman will ask for confirmation to replace that package
 # but the default answer is no.
-# doing yes | pacman omitting --noconfirm is a necessity 
+# doing yes | pacman omitting --noconfirm is a necessity
 yes | pacman -S iptables-nft
 
 # enable services

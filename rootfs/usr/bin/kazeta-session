@@ -1,49 +1,67 @@
-#! /bin/bash
+#!/bin/bash
 
-# ensure inputplumber manages all controllers
+LAUNCH_CMD_FILE="/var/kazeta/state/.LAUNCH_CMD"
+
+# If a game was selected from the BIOS, launch it in this self-contained block.
+if [ -f "$LAUNCH_CMD_FILE" ]; then
+    LAUNCH_CMD=$(cat "$LAUNCH_CMD_FILE")
+    rm -f "$LAUNCH_CMD_FILE"
+
+    # Run the game session script.
+    eval "$LAUNCH_CMD"
+
+    # IMPORTANT: After the game quits, restart the entire session.
+    # This will cause the script to run again from the top, where it will
+    # then fall through to the BIOS Launch Section below.
+    exec kazeta-session
+fi
+
+# -- BIOS Launch Section --
+# This section is only reached on a fresh boot or after a session restart.
+
+# Ensure inputplumber manages controllers.
 for i in $(seq 1 100); do
-        inputplumber devices manage-all --enable
-
-        if [ "$?" == "0" ]; then
-                break
-        fi
-
-        sleep 0.1
+    inputplumber devices manage-all --enable
+    if [ "$?" == "0" ]; then break; fi
+    sleep 0.1
 done
 
-# hack to fix bios app audio
+# Hack to fix audio.
 wpctl status > /dev/null
 
-# start session
-mv /var/kazeta/session.log /var/kazeta/session.log.old
+# Rotate the old log file.
+if [ -f /var/kazeta/session.log ]; then
+    mv /var/kazeta/session.log /var/kazeta/session.log.old
+fi
+
+# Launch the BIOS application in the background.
 /usr/bin/kazeta > /var/kazeta/session.log 2>&1 &
 
-# default to using HDMI audio output and set a reasonable volume
-if [ ! -e /var/kazeta/state/wireplumber ]; then
-	mkdir -p /var/kazeta/state/wireplumber
-
+# Set default HDMI audio only if the user hasn't set a preference.
+if [ ! -e /var/kazeta/state/.AUDIO_PREFERENCE_SET ]; then
 	for i in $(seq 1 60); do
 		sink_id=$(wpctl status --name | grep output | grep hdmi | head -1 | grep -oE " [0-9]+\. " | tr -d ' .')
-		wpctl set-default $sink_id
-
-		if [ "$?" == "0" ]; then
-			wpctl set-volume $sink_id 0.8
-			break
+		if [ -n "$sink_id" ]; then
+			wpctl set-default $sink_id
+			if [ "$?" == "0" ]; then
+				wpctl set-volume $sink_id 0.8
+				break
+			fi
 		fi
-
 		sleep 1
 	done
 fi
 
+# Wait for the BIOS process to exit.
 wait
 
-POWER_OFF=1
-RESTART_SESSION_SENTINEL=/var/kazeta/state/.RESTART_SESSION_SENTINEL
-if [ -f $RESTART_SESSION_SENTINEL ]; then
-	rm -f $RESTART_SESSION_SENTINEL
-	POWER_OFF=0
-fi
-
-if [ "$POWER_OFF" == "1" ]; then
-	poweroff
+# After the BIOS quits, check if it wants to restart or shut down.
+RESTART_SESSION_SENTINEL="/var/kazeta/state/.RESTART_SESSION_SENTINEL"
+if [ -f "$RESTART_SESSION_SENTINEL" ]; then
+    rm -f "$RESTART_SESSION_SENTINEL"
+    # Use exec here to replace the current process cleanly.
+    exec kazeta-session
+else
+    # If no sentinel is found, shut down the system.
+    poweroff
 fi

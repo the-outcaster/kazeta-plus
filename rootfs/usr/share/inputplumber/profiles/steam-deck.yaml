@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+version: 1
+kind: DeviceProfile
+name: Brightness control
+description: Adjust brightness of Steam Deck with back paddles
+mapping:
+  - name: Brightness down
+    source_event:
+      gamepad:
+        button: LeftPaddle1
+    target_events:
+      - keyboard: KeyF13
+
+  - name: Brightness up
+    source_event:
+      gamepad:
+        button: RightPaddle1
+    target_events:
+      - keyboard: KeyF14
