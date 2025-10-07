@@ -389,25 +389,6 @@ fn sync_to_disk() {
 // PUBLIC FUNCTIONS
 // ===================================
 
-/*
-/// Searches a directory for a runtime file matching a base name (e.g., "windows").
-pub fn find_runtime_executable(game_root: &Path, runtime_name: &str) -> Option<PathBuf> {
-    if let Ok(entries) = fs::read_dir(game_root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                    if filename.starts_with(runtime_name) && filename.ends_with(".kzr") {
-                        return Some(path); // Found the runtime file
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-*/
-
 pub fn write_launch_command(kzi_path: &Path) -> std::io::Result<()> {
     let state_dir = Path::new("/var/kazeta/state");
     fs::create_dir_all(state_dir)?; // Ensure the directory exists

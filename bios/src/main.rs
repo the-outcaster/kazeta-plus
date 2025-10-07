@@ -1,4 +1,3 @@
-//use macroquad::{audio, prelude::*};
 use macroquad::prelude::*;
 use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use std::sync::{Arc, Mutex};
@@ -16,7 +15,6 @@ use std::process::Child;
 // extra stuff I'm using
 use std::path::PathBuf; // for loading assets
 use std::io::BufReader; // logger
- // controlling master volume and fetching user's hardware info
 use std::env; // backtracing
 use ::rand::Rng; // for selecting a random message on startup
 use chrono::Local; // for getting clock
