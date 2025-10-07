@@ -6,10 +6,11 @@ use std::sync::atomic::Ordering;
 // --- Corrected Imports ---
 
 // Items from your new modules
-use crate::audio::{SoundEffects, play_new_bgm};
+use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
 use crate::config::Config;
 use crate::save;
-use crate::types::{AnimationState, BackgroundState, BatteryInfo, ShakeTarget};
+use crate::types::{AnimationState, BackgroundState, BatteryInfo};
+use crate::ShakeTarget;
 
 // Items that are still in `main.rs` (the crate root)
 use crate::{
@@ -39,7 +40,7 @@ pub fn update(
     play_option_enabled: &mut bool,
     copy_logs_option_enabled: &mut bool,
     cart_connected: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    input_state: &InputState,
+    input_state: &mut InputState,
     animation_state: &mut AnimationState,
     sound_effects: &SoundEffects,
     config: &Config,
@@ -142,7 +143,7 @@ pub fn update(
                                         *current_screen = Screen::Debug;
                                     } else {
                                         // --- PRODUCTION MODE: Fade out and launch ---
-                                        (*current_screen, *fade_start_time) = trigger_session_restart(&mut current_bgm, &music_cache);
+                                        (*current_screen, *fade_start_time) = trigger_session_restart(current_bgm, &music_cache);
                                     }
                                 },
                                 _ => { // multiple games found

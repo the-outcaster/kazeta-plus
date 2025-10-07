@@ -1,11 +1,10 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::process::Command;
-//use macroquad::audio;
+use macroquad::audio::{Sound, set_sound_volume};
 
 // Import things from our new modules
-use crate::assets::find_sound_packs;
-use crate::audio::{SoundEffects, play_new_bgm};
+use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
 use crate::config::{Config, save_config};
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
@@ -15,7 +14,7 @@ use crate::{FONT_SIZE, MENU_PADDING, SETTINGS_START_Y, SETTINGS_OPTION_HEIGHT};
 use crate::{
     AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen,
     render_background, render_ui_overlay, get_current_font, measure_text,
-    text_with_config_color, find_sound_packs, play_new_bgm
+    text_with_config_color,
 };
 
 // SETTINGS
@@ -240,9 +239,9 @@ pub fn update(
     brightness: &mut f32,
     system_volume: &mut f32,
     available_sinks: &Vec<AudioSink>,
-    current_bgm: &mut Option<audio::Sound>,
+    current_bgm: &mut Option<Sound>,
     bgm_choices: &Vec<String>,
-    music_cache: &HashMap<String, audio::Sound>,
+    music_cache: &HashMap<String, Sound>,
     sfx_pack_to_reload: &mut Option<String>,
     logo_choices: &Vec<String>,
     background_choices: &Vec<String>,
@@ -398,7 +397,7 @@ pub fn update(
 
                     // Change the volume of the currently playing sound
                     if let Some(sound) = &current_bgm {
-                        audio::set_sound_volume(sound, config.bgm_volume);
+                        set_sound_volume(sound, config.bgm_volume);
                     }
 
                     save_config(&config);

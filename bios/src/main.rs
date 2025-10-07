@@ -1,5 +1,6 @@
 //use macroquad::{audio, prelude::*};
 use macroquad::prelude::*;
+use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
@@ -23,12 +24,13 @@ use chrono::Local; // for getting clock
 use regex::Regex; // fetching audio sinks
 
 // Import our new modules
-use crate::{self, Sound, PlaySoundParams, load_sound, load_sound_from_bytes, set_sound_volume, stop_sound};
+//use crate::{self, Sound, PlaySoundParams, load_sound, load_sound_from_bytes, set_sound_volume, stop_sound};
 use crate::assets::find_asset_files;
-//use crate::audio::{SoundEffects, play_new_bgm};
+use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
 use crate::components::{get_current_font, text_with_config_color, text_disabled};
 use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::system::*; // Wildcard to get all system functions
+use crate::ui::main_menu::MAIN_MENU_OPTIONS;
 use crate::ui::settings;
 use crate::utils::*; // Wildcard to get all utility functions
 use crate::settings::VIDEO_SETTINGS;
@@ -1660,6 +1662,7 @@ fn render_dialog(
 // ===================================
 
 async fn load_all_assets(
+    config: &Config,
     monika_message: &str,
     font: &Font,
     background_files: &[PathBuf],
@@ -1804,7 +1807,7 @@ async fn load_all_assets(
         back: default_back,
     };
     */
-    sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
+    let mut sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
 
     (background_cache, logo_cache, music_cache, font_cache, sound_effects)
 }
@@ -1839,6 +1842,16 @@ async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_ca
 // ENUMS
 // ===================================
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShakeTarget {
+    None,
+    LeftArrow,
+    RightArrow,
+    Dialog,
+    PlayOption,
+    CopyLogOption,
+}
+
 // SPLASH SCREEN
 #[derive(Clone, Debug, PartialEq)]
 enum SplashState {
@@ -1871,16 +1884,6 @@ enum UIFocus {
     Grid,
     StorageLeft,
     StorageRight,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum ShakeTarget {
-    None,
-    LeftArrow,
-    RightArrow,
-    Dialog,
-    PlayOption,
-    CopyLogOption,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2019,7 +2022,7 @@ async fn main() {
     }
 
     // --- LOAD ASSETS ---
-    let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
+    let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
 
     // apply custom resolution if user specified it
     apply_resolution(&config.resolution);
@@ -2348,7 +2351,7 @@ async fn main() {
                     &mut play_option_enabled,
                     &mut copy_logs_option_enabled,
                     &cart_connected,
-                    &input_state,
+                    &mut input_state,
                     &mut animation_state,
                     &sound_effects,
                     &config,
@@ -2389,7 +2392,7 @@ async fn main() {
                     &mut play_option_enabled,
                     &mut copy_logs_option_enabled,
                     &cart_connected,
-                    &input_state,
+                    &mut input_state,
                     &mut animation_state,
                     &sound_effects,
                     &config,
@@ -2405,6 +2408,7 @@ async fn main() {
                 );
 
                 ui::main_menu::draw(
+                    &MAIN_MENU_OPTIONS,
                     main_menu_selection,
                     play_option_enabled,
                     copy_logs_option_enabled,

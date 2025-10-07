@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
-use crate::audio::{SoundEffects, play_new_bgm};
+use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
 
 use crate::{
     config::Config, FONT_SIZE, SystemInfo, Screen, BackgroundState, BatteryInfo, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, InputState,
