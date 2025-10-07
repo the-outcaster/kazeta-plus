@@ -1472,18 +1472,6 @@ async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_ca
 }
 
 // ===================================
-// TYPES
-// ===================================
-
-// Playtime cache to avoid recalculating playtime for the same game on the same drive
-type PlaytimeCacheKey = (String, String); // (cart_id, drive_name)
-type PlaytimeCache = HashMap<PlaytimeCacheKey, f32>;
-
-// Size cache to avoid recalculating size for the same game on the same drive
-type SizeCacheKey = (String, String); // (cart_id, drive_name)
-type SizeCache = HashMap<SizeCacheKey, f32>;
-
-// ===================================
 // BEGINNING OF MAIN
 // ===================================
 
