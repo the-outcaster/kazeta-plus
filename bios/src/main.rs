@@ -23,7 +23,6 @@ use chrono::Local; // for getting clock
 use regex::Regex; // fetching audio sinks
 
 // Import our new modules
-mod assets;
 mod audio;
 mod components;
 mod config;
@@ -34,7 +33,6 @@ mod types;
 mod ui;
 mod utils;
 
-use crate::assets::find_asset_files;
 use crate::audio::{SoundEffects, play_new_bgm};
 use crate::components::{get_current_font, text_with_config_color, text_disabled};
 use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
