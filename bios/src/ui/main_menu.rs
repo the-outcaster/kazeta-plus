@@ -6,11 +6,10 @@ use std::sync::atomic::Ordering;
 // --- Corrected Imports ---
 
 // Items from your new modules
-use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
+use crate::audio::SoundEffects;
 use crate::config::Config;
 use crate::save;
 use crate::types::{AnimationState, BackgroundState, BatteryInfo};
-use crate::ShakeTarget;
 
 // Items that are still in `main.rs` (the crate root)
 use crate::{
@@ -29,7 +28,8 @@ use crate::{
     FONT_SIZE,
     MENU_PADDING,
     MENU_START_Y,
-    MENU_OPTION_HEIGHT
+    MENU_OPTION_HEIGHT,
+    ShakeTarget,
 };
 
 pub const MAIN_MENU_OPTIONS: [&str; 5] = ["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "ABOUT"];
@@ -234,64 +234,88 @@ pub fn draw(
     render_background(background_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
 
-    let current_font = get_current_font(font_cache, config);
+    // --- Create scaled layout values ---
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+    let menu_start_y = MENU_START_Y * scale_factor;
+    let menu_option_height = MENU_OPTION_HEIGHT * scale_factor;
     let menu_padding = MENU_PADDING * scale_factor;
 
-    // --- Draw menu options (centered) ---
-    for (i, option) in menu_options.iter().enumerate() {
-        let text_dims = measure_text(&option.to_uppercase(), Some(current_font), font_size, 1.0);
-        let y_pos = MENU_START_Y + (i as f32 * MENU_OPTION_HEIGHT); // Use the imported constants
+    let current_font = get_current_font(font_cache, config);
+
+    // Draw menu options
+    for (i, &option) in menu_options.iter().enumerate() {
+        let y_pos = menu_start_y + (i as f32 * menu_option_height);
+
+        // --- Calculate text dimensions and position ONCE ---
+        let text_dims = measure_text(option, Some(current_font), font_size, 1.0);
         let mut x_pos = (screen_width() - text_dims.width) / 2.0;
 
+        // --- Handle shake effect for disabled options ---
+        // Note: index '0' is DATA, '1' is PLAY. Update if your menu order changes.
         if i == 1 && !play_option_enabled && i == selected_option {
-            x_pos += animation_state.calculate_shake_offset(ShakeTarget::PlayOption) * scale_factor;
+            x_pos += animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
         }
         if i == 2 && !copy_logs_option_enabled && i == selected_option {
-            x_pos += animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption) * scale_factor;
+            x_pos += animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption);
         }
 
+        // --- Draw selected option highlight ---
         if i == selected_option {
             let cursor_color = animation_state.get_cursor_color(config);
             let cursor_scale = animation_state.get_cursor_scale();
-            let highlight_padding = MENU_PADDING * 1.5 * scale_factor;
-            let base_width = text_dims.width + (highlight_padding * 2.0);
-            let base_height = text_dims.height + (highlight_padding * 2.0);
+
+            let base_width = text_dims.width + (menu_padding * 2.0);
+            let base_height = text_dims.height + (menu_padding * 2.0);
+
             let scaled_width = base_width * cursor_scale;
             let scaled_height = base_height * cursor_scale;
             let offset_x = (scaled_width - base_width) / 2.0;
             let offset_y = (scaled_height - base_height) / 2.0;
+
             let rect_x = (screen_width() - base_width) / 2.0;
-            let rect_y = y_pos - (base_height / 2.0) + (text_dims.height / 2.0) - (menu_padding / 2.0);
-            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
+            let rect_y = y_pos - (base_height / 2.0) + (text_dims.height / 2.0) - (menu_padding / 2.0) - (2.0 * scale_factor);
+
+            draw_rectangle_lines(
+                rect_x - offset_x,
+                rect_y - offset_y,
+                scaled_width,
+                scaled_height,
+                4.0 * scale_factor,
+                cursor_color,
+            );
         }
 
-        let text_y_pos = y_pos + menu_padding;
+        // --- Draw text ---
+        let y_pos_text = y_pos + (text_dims.offset_y / 2.0); // Better vertical centering for text
 
         if (i == 1 && !play_option_enabled) || (i == 2 && !copy_logs_option_enabled) {
-            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
+            text_disabled(font_cache, config, option, x_pos, y_pos_text, font_size);
         } else {
-            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
+            text_with_config_color(font_cache, config, option, x_pos, y_pos_text, font_size);
         }
     }
-    // --- Draw the flash message if it exists ---
+    // --- Draw the Flash Message if it exists ---
     if let Some(message) = flash_message {
-        let font_size = (14.0 * scale_factor) as u16;
+        let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
+        let current_font = get_current_font(font_cache, config);
+
+        // Measure the text to center it
         let dims = measure_text(message, Some(current_font), font_size, 1.0);
 
-        let x = screen_width() / 2.0 - dims.width / 2.0; // Center horizontally
-        let y = screen_height() - (20.0 * scale_factor); // Position near the bottom
+        // Calculate position (centered, near the bottom)
+        let x = screen_width() / 2.0 - dims.width / 2.0;
+        let y = screen_height() - (60.0 * scale_factor); // A bit above the version number
 
-        // Draw a semi-transparent background for better readability
+        // Draw a semi-transparent background for readability
         draw_rectangle(
-            x - (5.0 * scale_factor),
+            x - (10.0 * scale_factor),
                        y - dims.height,
-                       dims.width + (10.0 * scale_factor),
-                       dims.height + (5.0 * scale_factor),
-                       Color::new(0.0, 0.0, 0.0, 0.7)
+                       dims.width + (20.0 * scale_factor),
+                       dims.height + (10.0 * scale_factor),
+                       Color::new(0.0, 0.0, 0.0, 0.7),
         );
 
-        // Draw the message text
+        // Draw the message text itself
         text_with_config_color(font_cache, config, message, x, y, font_size);
     }
 }

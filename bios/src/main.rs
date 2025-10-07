@@ -4,7 +4,7 @@ use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, Play
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use gilrs::{Gilrs, Button, Axis};
 use std::panic;
 use futures;
@@ -26,7 +26,7 @@ use regex::Regex; // fetching audio sinks
 // Import our new modules
 //use crate::{self, Sound, PlaySoundParams, load_sound, load_sound_from_bytes, set_sound_volume, stop_sound};
 use crate::assets::find_asset_files;
-use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
+use crate::audio::{SoundEffects, play_new_bgm};
 use crate::components::{get_current_font, text_with_config_color, text_disabled};
 use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::system::*; // Wildcard to get all system functions
@@ -558,7 +558,7 @@ fn trigger_session_restart(
 }
 
 fn trigger_game_launch(
-    cart_info: &save::CartInfo,
+    _cart_info: &save::CartInfo,
     kzi_path: &Path,
     current_bgm: &mut Option<Sound>,
     music_cache: &HashMap<String, Sound>,
@@ -1018,37 +1018,6 @@ fn render_ui_overlay(
         );
     }
 }
-
-/*
-// MAIN MENU
-fn render_main_menu(
-    menu_options: &[&str],
-    selected_option: usize,
-    play_option_enabled: bool,
-    copy_logs_option_enabled: bool,
-    animation_state: &AnimationState,
-    logo_cache: &HashMap<String, Texture2D>,
-    background_cache: &HashMap<String, Texture2D>,
-    font_cache: &HashMap<String, Font>,
-    config: &Config,
-    background_state: &mut BackgroundState,
-    battery_info: &Option<BatteryInfo>,
-    current_time_str: &str,
-    scale_factor: f32,
-    flash_message: Option<&str>,
-) {
-    // --- Create scaled layout values ---
-    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-    let menu_start_y = MENU_START_Y * scale_factor;
-    let menu_option_height = MENU_OPTION_HEIGHT * scale_factor;
-    let menu_padding = MENU_PADDING * scale_factor;
-
-    let current_font = get_current_font(font_cache, config);
-
-    render_background(background_cache, config, background_state);
-    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
-}
-*/
 
 // GAME SELECTION
 fn render_game_selection_menu(
@@ -1767,19 +1736,19 @@ async fn load_all_assets(
 
     // sfx
     let status = "LOADING DEFAULT SFX...".to_string();
-    let default_move = load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
+    //let default_move = load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    let default_select = load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
+    //let default_select = load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    let default_reject = load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
+    //let default_reject = load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    let default_back = load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
+    //let default_back = load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
@@ -1807,7 +1776,7 @@ async fn load_all_assets(
         back: default_back,
     };
     */
-    let mut sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
+    let sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
 
     (background_cache, logo_cache, music_cache, font_cache, sound_effects)
 }
@@ -2425,6 +2394,16 @@ async fn main() {
                 );
             },
             Screen::VideoSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
+                // --- STEP 1: Determine what to draw BEFORE updating state ---
+                let (page_number, options) = match current_screen {
+                    Screen::VideoSettings => (1, ui::settings::VIDEO_SETTINGS),
+                    Screen::AudioSettings => (2, ui::settings::AUDIO_SETTINGS),
+                    Screen::GuiSettings => (3, ui::settings::GUI_CUSTOMIZATION_SETTINGS),
+                    Screen::AssetSettings => (4, ui::settings::CUSTOM_ASSET_SETTINGS),
+                    _ => (0, &[] as &[&str]),
+                };
+
+                // --- STEP 2: Now, handle input and potential state changes ---
                 ui::settings::update(
                     &mut current_screen, &input_state, &mut config, &mut settings_menu_selection,
                     &sound_effects, &mut confirm_selection, &mut display_settings_changed,
@@ -2433,14 +2412,8 @@ async fn main() {
                     &background_choices, &font_choices
                 );
 
-                // The render call is now separate from the logic
-                let (page_number, options) = match current_screen {
-                    Screen::VideoSettings => (1, ui::settings::VIDEO_SETTINGS),
-                    Screen::AudioSettings => (2, ui::settings::AUDIO_SETTINGS),
-                    Screen::GuiSettings => (3, ui::settings::GUI_CUSTOMIZATION_SETTINGS),
-                    Screen::AssetSettings => (4, ui::settings::CUSTOM_ASSET_SETTINGS),
-                    _ => (0, &[] as &[&str]), // Default case
-                };
+                // --- STEP 3: Unconditionally draw what we determined in Step 1 ---
+                // (This 'if' check is still good practice, but it will no longer cause a flicker)
                 if page_number > 0 {
                     ui::settings::render_settings_page(
                         page_number, options, &logo_cache, &background_cache, &font_cache,
@@ -2519,7 +2492,8 @@ async fn main() {
                                     log_messages.lock().unwrap().push(format!("\n--- LAUNCH FAILED ---\nError: {}", e));
                                 }
                             }
-                            current_screen = Screen::Debug;
+                            // uncomment the line below when you are ready to debug
+                            //current_screen = Screen::Debug;
 
                             match save::launch_game(cart_info, kzi_path) {
                                 Ok(mut child) => {

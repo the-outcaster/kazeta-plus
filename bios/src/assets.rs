@@ -1,4 +1,4 @@
-use crate::{PathBuf, fs, HashSet, get_user_data_dir};
+use crate::{PathBuf, fs};
 
 /// Scans a directory and returns a sorted list of paths for files with given extensions.
 pub fn find_asset_files(dir_path: &str, extensions: &[&str]) -> Vec<PathBuf> {
