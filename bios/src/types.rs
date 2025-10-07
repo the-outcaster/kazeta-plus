@@ -1,4 +1,83 @@
-use crate::{Color, ShakeTarget, Vec2, Config, string_to_color};
+use crate::{Color, Vec2, Config, string_to_color, HashMap};
+
+// ===================================
+// TYPES
+// ===================================
+
+// Playtime cache to avoid recalculating playtime for the same game on the same drive
+pub type PlaytimeCacheKey = (String, String); // (cart_id, drive_name)
+pub type PlaytimeCache = HashMap<PlaytimeCacheKey, f32>;
+
+// Size cache to avoid recalculating size for the same game on the same drive
+pub type SizeCacheKey = (String, String); // (cart_id, drive_name)
+pub type SizeCache = HashMap<SizeCacheKey, f32>;
+
+// ===================================
+// ENUMS
+// ===================================
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShakeTarget {
+    None,
+    LeftArrow,
+    RightArrow,
+    Dialog,
+    PlayOption,
+    CopyLogOption,
+}
+
+// SPLASH SCREEN
+#[derive(Clone, Debug, PartialEq)]
+pub enum SplashState {
+    FadingIn,
+    Showing,
+    FadingOut,
+    Done,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DialogState {
+    None,
+    Opening,
+    Open,
+    Closing,
+}
+
+// SCREENS
+#[derive(Clone, Debug, PartialEq)]
+pub enum Screen {
+    MainMenu,
+    SaveData,
+    FadingOut,
+    VideoSettings,
+    AudioSettings,
+    GuiSettings,
+    AssetSettings,
+    ConfirmReset,
+    ResetComplete,
+    Debug,
+    GameSelection,
+    About,
+}
+
+// UI Focus for Save Data Screen
+#[derive(Clone, Debug, PartialEq)]
+pub enum UIFocus {
+    Grid,
+    StorageLeft,
+    StorageRight,
+}
+
+// ===================================
+// STRUCTS
+// ===================================
+
+pub struct CopyOperationState {
+    pub progress: u16,
+    pub running: bool,
+    pub should_clear_dialogs: bool,
+    pub error_message: Option<String>,
+}
 
 #[derive(Clone, Debug)]
 pub struct AudioSink {

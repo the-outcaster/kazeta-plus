@@ -24,27 +24,29 @@ use chrono::Local; // for getting clock
 use regex::Regex; // fetching audio sinks
 
 // Import our new modules
-//use crate::{self, Sound, PlaySoundParams, load_sound, load_sound_from_bytes, set_sound_volume, stop_sound};
-use crate::assets::find_asset_files;
-use crate::audio::{SoundEffects, play_new_bgm};
-use crate::components::{get_current_font, text_with_config_color, text_disabled};
-use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
-use crate::system::*; // Wildcard to get all system functions
-use crate::ui::main_menu::MAIN_MENU_OPTIONS;
-use crate::ui::settings;
-use crate::utils::*; // Wildcard to get all utility functions
-use crate::settings::VIDEO_SETTINGS;
-use crate::settings::render_settings_page;
-
 mod assets;
 mod audio;
 mod components;
 mod config;
+mod input;
 mod save;
 mod system;
 mod types;
 mod ui;
 mod utils;
+
+use crate::assets::find_asset_files;
+use crate::audio::{SoundEffects, play_new_bgm};
+use crate::components::{get_current_font, text_with_config_color, text_disabled};
+use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
+use crate::input::InputState;
+use crate::system::*; // Wildcard to get all system functions
+use crate::ui::main_menu::MAIN_MENU_OPTIONS;
+use crate::ui::settings;
+use crate::utils::*; // Wildcard to get all utility functions
+use crate::save::StorageMediaState;
+use crate::settings::VIDEO_SETTINGS;
+use crate::settings::render_settings_page;
 
 pub use types::*;
 
@@ -251,197 +253,6 @@ macro_rules! load_audio_category {
 }
 
 // ===================================
-// STRUCTS
-// ===================================
-
-struct CopyOperationState {
-    progress: u16,
-    running: bool,
-    should_clear_dialogs: bool,
-    error_message: Option<String>,
-}
-
-struct InputState {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-    select: bool,
-    next: bool,
-    prev: bool,
-    cycle: bool,
-    back: bool,
-    analog_was_neutral: bool,
-    ui_focus: UIFocus,
-}
-
-#[derive(Clone, Debug)]
-struct StorageMediaState {
-
-    // all storage media, including disabled media
-    all_media: Vec<StorageMedia>,
-
-    // media that can actually be used
-    media: Vec<StorageMedia>,
-
-    // the index of selection in 'media'
-    selected: usize,
-
-    needs_memory_refresh: bool,
-}
-
-// ===================================
-// IMPL
-// ===================================
-
-impl InputState {
-    const ANALOG_DEADZONE: f32 = 0.5;  // Increased deadzone for less sensitivity
-
-    fn new() -> Self {
-        InputState {
-            up: false,
-            down: false,
-            left: false,
-            right: false,
-            select: false,
-            next: false,
-            prev: false,
-            cycle: false,
-            back: false,
-            analog_was_neutral: true,
-            ui_focus: UIFocus::Grid,
-        }
-    }
-
-    fn update_keyboard(&mut self) {
-        self.up = is_key_pressed(KeyCode::Up);
-        self.down = is_key_pressed(KeyCode::Down);
-        self.left = is_key_pressed(KeyCode::Left);
-        self.right = is_key_pressed(KeyCode::Right);
-        self.select = is_key_pressed(KeyCode::Enter);
-        self.next = is_key_pressed(KeyCode::RightBracket);
-        self.prev = is_key_pressed(KeyCode::LeftBracket);
-        self.back = is_key_pressed(KeyCode::Backspace);
-        self.cycle = is_key_pressed(KeyCode::Tab);
-    }
-
-    fn update_controller(&mut self, gilrs: &mut Gilrs) {
-        // Handle button events
-        while let Some(ev) = gilrs.next_event() {
-            match ev.event {
-                gilrs::EventType::ButtonPressed(Button::DPadUp, _) => self.up = true,
-                gilrs::EventType::ButtonReleased(Button::DPadUp, _) => self.up = false,
-                gilrs::EventType::ButtonPressed(Button::DPadDown, _) => self.down = true,
-                gilrs::EventType::ButtonReleased(Button::DPadDown, _) => self.down = false,
-                gilrs::EventType::ButtonPressed(Button::DPadLeft, _) => self.left = true,
-                gilrs::EventType::ButtonReleased(Button::DPadLeft, _) => self.left = false,
-                gilrs::EventType::ButtonPressed(Button::DPadRight, _) => self.right = true,
-                gilrs::EventType::ButtonReleased(Button::DPadRight, _) => self.right = false,
-                gilrs::EventType::ButtonPressed(Button::South, _) => self.select = true,
-                gilrs::EventType::ButtonReleased(Button::South, _) => self.select = false,
-                gilrs::EventType::ButtonPressed(Button::RightTrigger, _) => self.next = true,
-                gilrs::EventType::ButtonReleased(Button::RightTrigger, _) => self.next = false,
-                gilrs::EventType::ButtonPressed(Button::LeftTrigger, _) => self.prev = true,
-                gilrs::EventType::ButtonReleased(Button::LeftTrigger, _) => self.prev = false,
-                gilrs::EventType::ButtonPressed(Button::East, _) => self.back = true,
-                gilrs::EventType::ButtonReleased(Button::East, _) => self.back = false,
-                _ => {}
-            }
-        }
-
-        // Handle analog stick input
-        for (_, gamepad) in gilrs.gamepads() {
-            let x = gamepad.value(Axis::LeftStickX);
-            let y = gamepad.value(Axis::LeftStickY);
-
-            // Apply deadzone to analog values
-            let apply_deadzone = |value: f32| {
-                if value.abs() < Self::ANALOG_DEADZONE {
-                    0.0
-                } else {
-                    value
-                }
-            };
-
-            let x = apply_deadzone(x);
-            let y = apply_deadzone(y);
-
-            // Check if stick is in neutral position
-            let is_neutral = x.abs() < Self::ANALOG_DEADZONE && y.abs() < Self::ANALOG_DEADZONE;
-
-            // Only trigger movement if stick was in neutral position last frame
-            if self.analog_was_neutral {
-                self.up = self.up || y > Self::ANALOG_DEADZONE;
-                self.down = self.down || y < -Self::ANALOG_DEADZONE;
-                self.left = self.left || x < -Self::ANALOG_DEADZONE;
-                self.right = self.right || x > Self::ANALOG_DEADZONE;
-            }
-
-            // Update neutral state for next frame
-            self.analog_was_neutral = is_neutral;
-        }
-    }
-}
-
-impl StorageMediaState {
-    fn new() -> Self {
-        StorageMediaState {
-            all_media: Vec::new(),
-            media: Vec::new(),
-            selected: 0,
-            needs_memory_refresh: false,
-        }
-    }
-
-    fn update_media(&mut self) {
-        let mut all_new_media = Vec::new();
-
-        if let Ok(devices) = save::list_devices() {
-            for (id, free) in devices {
-                all_new_media.push(StorageMedia {
-                    id,
-                    free,
-                });
-            }
-        }
-
-        // Done if media list has not changed
-        if self.all_media.len() == all_new_media.len() &&
-            !self.all_media.iter().zip(all_new_media.iter()).any(|(a, b)| a.id != b.id) {
-
-                //  update free space
-                self.all_media = all_new_media;
-                for media in &mut self.media {
-                    if let Some(pos) = self.all_media.iter().position(|m| m.id == media.id) {
-                        media.free = self.all_media.get(pos).unwrap().free
-                    }
-                }
-
-                return;
-            }
-
-            let new_media: Vec<StorageMedia> = all_new_media
-            .clone()
-            .into_iter()
-            .filter(|m| save::has_save_dir(&m.id) && !save::is_cart(&m.id))
-            .collect();
-
-            // Try to keep the same device selected if it still exists
-            let mut new_pos = 0;
-            if let Some(old_selected_media) = self.media.get(self.selected) {
-                if let Some(pos) = new_media.iter().position(|m| m.id == old_selected_media.id) {
-                    new_pos = pos;
-                }
-            }
-
-            self.all_media = all_new_media;
-            self.media = new_media;
-            self.selected = new_pos;
-            self.needs_memory_refresh = true;
-    }
-}
-
-// ===================================
 // WINDOW CONFIGURATION
 // ===================================
 
@@ -460,132 +271,6 @@ fn window_conf() -> Conf {
 // ===================================
 // FUNCTIONS
 // ===================================
-
-// Helper to read the first line from a file containing a specific key
-fn read_line_from_file(path: &str, key: &str) -> Option<String> {
-    fs::read_to_string(path).ok()?.lines()
-    .find(|line| line.starts_with(key))
-    .map(|line| line.replace(key, "").trim().to_string())
-}
-
-/// Calls a privileged helper script to copy session logs to the SD card.
-// put log files in "logs" and backup existing files
-fn copy_session_logs_to_sd() -> Result<String, String> {
-    // 1. Find the SD card path
-    let sd_card_path = match save::find_all_kzi_files() {
-        Ok((paths, _)) => paths.get(0).and_then(|p| p.parent()).map(PathBuf::from),
-        Err(e) => return Err(format!("SD card scan error: {}", e)),
-    };
-    let Some(base_path) = sd_card_path else {
-        return Err("Could not locate SD card (no .kzi files found?).".to_string());
-    };
-
-    // 2. Define the 'logs' subdirectory and create it
-    let dest_dir = base_path.join("logs");
-    fs::create_dir_all(&dest_dir)
-    .map_err(|e| format!("Failed to create logs dir: {}", e))?;
-
-    // Force a filesystem sync to flush log buffers to disk
-    Command::new("sync").status().map_err(|e| format!("Failed to run sync: {}", e))?;
-
-    let source_files = ["session.log", "session.log.old"];
-    let mut files_copied_count = 0;
-
-    for filename in source_files {
-        let source_file = Path::new("/var/kazeta/").join(filename);
-        if source_file.exists() {
-            let dest_file = dest_dir.join(filename);
-
-            // 3. Check for an existing file at the destination to back it up
-            if dest_file.exists() {
-                let backup_file = dest_dir.join(format!("{}.bak", filename));
-                // Use sudo to rename the existing log to a .bak file
-                let mv_output = Command::new("sudo")
-                .arg("mv")
-                .arg(&dest_file)
-                .arg(&backup_file)
-                .output()
-                .map_err(|e| format!("Failed to run sudo mv: {}", e))?;
-
-                if !mv_output.status.success() {
-                    let error_message = String::from_utf8_lossy(&mv_output.stderr);
-                    return Err(format!("Failed to back up {}: {}", filename, error_message.trim()));
-                }
-            }
-
-            // 4. Copy the new file using sudo
-            let cp_output = Command::new("sudo")
-            .arg("cp")
-            .arg(&source_file)
-            .arg(&dest_dir)
-            .output()
-            .map_err(|e| format!("Failed to run sudo cp: {}", e))?;
-
-            if !cp_output.status.success() {
-                let error_message = String::from_utf8_lossy(&cp_output.stderr);
-                return Err(format!("Failed to copy {}: {}", filename, error_message.trim()));
-            }
-            files_copied_count += 1;
-        }
-    }
-
-    if files_copied_count == 0 {
-        return Err(format!("No log files found in /var/kazeta/"));
-    }
-
-    Ok(dest_dir.to_string_lossy().to_string())
-}
-
-// FOR ACTUAL HARDWARE USE
-fn trigger_session_restart(
-    current_bgm: &mut Option<Sound>,
-    music_cache: &HashMap<String, Sound>,
-) -> (Screen, Option<f64>) {
-    // Stop the BGM
-    play_new_bgm("OFF", 0.0, music_cache, current_bgm);
-
-    // Create the sentinel file at the correct system path
-    let sentinel_path = Path::new("/var/kazeta/state/.RESTART_SESSION_SENTINEL");
-    if let Some(parent) = sentinel_path.parent() {
-        // Ensure the directory exists
-        if fs::create_dir_all(parent).is_ok() {
-            let _ = fs::File::create(sentinel_path);
-        }
-    }
-
-    // Return the state to begin the fade-out
-    (Screen::FadingOut, Some(get_time()))
-}
-
-fn trigger_game_launch(
-    _cart_info: &save::CartInfo,
-    kzi_path: &Path,
-    current_bgm: &mut Option<Sound>,
-    music_cache: &HashMap<String, Sound>,
-) -> (Screen, Option<f64>) {
-    // Write the specific launch command for the selected game
-    if let Err(e) = save::write_launch_command(kzi_path) {
-        // If we fail, we should probably show an error on the debug screen
-        // For now, we'll just print it for desktop debugging.
-        println!("[ERROR] Failed to write launch command: {}", e);
-    }
-
-    // Now, trigger the standard session restart process,
-    // which will find and execute our command file.
-    trigger_session_restart(current_bgm, music_cache)
-}
-
-fn save_log_to_file(log_messages: &[String]) -> std::io::Result<String> {
-    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
-    let filename = format!("kazeta_log_{}.log", timestamp);
-
-    // In a real application, you'd save this to a logs directory.
-    // For now, it will save in the same directory as the executable.
-    fs::write(&filename, log_messages.join("\n"))?;
-
-    println!("Log saved to {}", filename);
-    Ok(filename)
-}
 
 fn pixel_pos(v: f32, scale_factor: f32) -> f32 {
     //PADDING + v*TILE_SIZE + v*PADDING
@@ -824,27 +509,6 @@ fn create_error_dialog(message: String) -> Dialog {
             }
         ],
         selection: 0,
-    }
-}
-
-fn start_log_reader(process: &mut Child, logs: Arc<Mutex<Vec<String>>>) {
-    // Take ownership of the output pipes
-    if let (Some(stdout), Some(stderr)) = (process.stdout.take(), process.stderr.take()) {
-        let logs_clone_stdout = logs.clone();
-        thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().filter_map(|l| l.ok()) {
-                logs_clone_stdout.lock().unwrap().push(line);
-            }
-        });
-
-        let logs_clone_stderr = logs.clone();
-        thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().filter_map(|l| l.ok()) {
-                logs_clone_stderr.lock().unwrap().push(line);
-            }
-        });
     }
 }
 
@@ -1805,62 +1469,6 @@ async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture
 async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_cache: &mut HashMap<String, Texture2D>, icon_queue: &mut Vec<(String, String)>) -> bool {
     let target_memories = load_memories(target_media, icon_cache, icon_queue).await;
     target_memories.iter().any(|m| m.id == memory.id)
-}
-
-// ===================================
-// ENUMS
-// ===================================
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ShakeTarget {
-    None,
-    LeftArrow,
-    RightArrow,
-    Dialog,
-    PlayOption,
-    CopyLogOption,
-}
-
-// SPLASH SCREEN
-#[derive(Clone, Debug, PartialEq)]
-enum SplashState {
-    FadingIn,
-    Showing,
-    FadingOut,
-    Done,
-}
-
-// SCREENS
-#[derive(Clone, Debug, PartialEq)]
-enum Screen {
-    MainMenu,
-    SaveData,
-    FadingOut,
-    VideoSettings,
-    AudioSettings,
-    GuiSettings,
-    AssetSettings,
-    ConfirmReset,
-    ResetComplete,
-    Debug,
-    GameSelection,
-    About,
-}
-
-// UI Focus for Save Data Screen
-#[derive(Clone, Debug, PartialEq)]
-enum UIFocus {
-    Grid,
-    StorageLeft,
-    StorageRight,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum DialogState {
-    None,
-    Opening,
-    Open,
-    Closing,
 }
 
 // ===================================

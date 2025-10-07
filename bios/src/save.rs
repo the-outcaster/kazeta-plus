@@ -14,6 +14,8 @@ use chrono::DateTime;
 use std::fmt;
 use std::process::Stdio;
 
+use crate::types::StorageMedia;
+
 // ===================================
 // CONSTANTS
 // ===================================
@@ -41,6 +43,21 @@ pub struct CartInfo {
     pub runtime: Option<String>, // runtime is optional
 }
 
+#[derive(Clone, Debug)]
+pub struct StorageMediaState {
+
+    // all storage media, including disabled media
+    pub all_media: Vec<StorageMedia>,
+
+    // media that can actually be used
+    pub media: Vec<StorageMedia>,
+
+    // the index of selection in 'media'
+    pub selected: usize,
+
+    pub needs_memory_refresh: bool,
+}
+
 // ===================================
 // ENUMS
 // ===================================
@@ -56,6 +73,64 @@ pub enum SaveError {
 // ===================================
 // IMPLEMENTATIONS
 // ===================================
+
+impl StorageMediaState {
+    pub fn new() -> Self {
+        StorageMediaState {
+            all_media: Vec::new(),
+            media: Vec::new(),
+            selected: 0,
+            needs_memory_refresh: false,
+        }
+    }
+
+    pub fn update_media(&mut self) {
+        let mut all_new_media = Vec::new();
+
+        if let Ok(devices) = list_devices() {
+            for (id, free) in devices {
+                all_new_media.push(StorageMedia {
+                    id,
+                    free,
+                });
+            }
+        }
+
+        // Done if media list has not changed
+        if self.all_media.len() == all_new_media.len() &&
+            !self.all_media.iter().zip(all_new_media.iter()).any(|(a, b)| a.id != b.id) {
+
+                //  update free space
+                self.all_media = all_new_media;
+                for media in &mut self.media {
+                    if let Some(pos) = self.all_media.iter().position(|m| m.id == media.id) {
+                        media.free = self.all_media.get(pos).unwrap().free
+                    }
+                }
+
+                return;
+            }
+
+            let new_media: Vec<StorageMedia> = all_new_media
+            .clone()
+            .into_iter()
+            .filter(|m| has_save_dir(&m.id) && !is_cart(&m.id))
+            .collect();
+
+            // Try to keep the same device selected if it still exists
+            let mut new_pos = 0;
+            if let Some(old_selected_media) = self.media.get(self.selected) {
+                if let Some(pos) = new_media.iter().position(|m| m.id == old_selected_media.id) {
+                    new_pos = pos;
+                }
+            }
+
+            self.all_media = all_new_media;
+            self.media = new_media;
+            self.selected = new_pos;
+            self.needs_memory_refresh = true;
+    }
+}
 
 // Implement Display to make the error printable
 impl fmt::Display for SaveError {
