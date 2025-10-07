@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::HashMap;
-use gilrs::{Gilrs, Button, Axis};
+use gilrs::Gilrs;
 use std::panic;
 use futures;
 use std::sync::atomic::{AtomicU16, Ordering, AtomicBool};
@@ -14,10 +14,9 @@ use std::process;
 use std::process::Child;
 
 // extra stuff I'm using
-use std::path::Path;
 use std::path::PathBuf; // for loading assets
-use std::io::{BufReader, BufRead}; // logger
-use std::process::Command; // controlling master volume and fetching user's hardware info
+use std::io::BufReader; // logger
+ // controlling master volume and fetching user's hardware info
 use std::env; // backtracing
 use ::rand::Rng; // for selecting a random message on startup
 use chrono::Local; // for getting clock
