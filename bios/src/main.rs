@@ -2,7 +2,7 @@ use macroquad::{audio, prelude::*};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use gilrs::{Gilrs, Button, Axis};
 use std::panic;
 use futures;
@@ -15,7 +15,6 @@ use std::process::Child;
 use std::path::Path;
 use std::path::PathBuf; // for loading assets
 use std::io::{BufReader, BufRead}; // logger
-use std::collections::HashSet; // handle duplicate names if a sound pack exists in multiple locations
 use std::process::Command; // controlling master volume and fetching user's hardware info
 use std::env; // backtracing
 use serde::{Deserialize, Serialize}; // for checking config.json
@@ -26,7 +25,21 @@ use macroquad::audio::load_sound; // for loading custom SFX
 use crate::audio::Sound;
 use regex::Regex; // fetching audio sinks
 
+// Import our new modules
+use crate::config::{Config, load_config, save_config, delete_config_file, get_user_data_dir};
+use crate::system::*; // Wildcard to get all system functions
+use crate::ui::settings;
+use crate::utils::*; // Wildcard to get all utility functions
+use crate::settings::VIDEO_SETTINGS;
+use crate::settings::render_settings_page;
+
 mod save;
+
+// additional files I've created
+mod config;
+mod system;
+mod ui;
+mod utils;
 
 /*
 // ===================================
@@ -36,6 +49,9 @@ mod save;
 - gamepad tester
 - add system debugger in the event the game crashed
 - fix D-pad reversal with some games (Godot-based games in particular)
+- OSK
+- per-game keyboard to gamepad mapping
+- Wi-Fi
 
 Hard
 - DVD functionality?
@@ -151,78 +167,6 @@ const BENDER_LOADING_MESSAGES: &[&str] = &[
 ];
 */
 
-// SETTINGS
-
-const VIDEO_SETTINGS: &[&str] = &[
-    "RESET SETTINGS",
-    "RESOLUTION",
-    "USE FULLSCREEN",
-    "TIME ZONE",
-    "BRIGHTNESS",
-    "AUDIO SETTINGS",
-];
-
-const AUDIO_SETTINGS: &[&str] = &[
-    "MASTER VOLUME",
-    "BGM VOLUME",
-    "SFX VOLUME",
-    "AUDIO OUTPUT",
-    "VIDEO SETTINGS",
-    "GUI CUSTOMIZATION",
-];
-
-const GUI_CUSTOMIZATION_SETTINGS: &[&str] = &[
-    "SHOW SPLASH SCREEN",
-    "FONT COLOR",
-    "CURSOR COLOR",
-    "BACKGROUND SCROLLING",
-    "COLOR GRADIENT SHIFTING",
-    "AUDIO SETTINGS",
-    "CUSTOM ASSETS SETTINGS",
-];
-
-const CUSTOM_ASSET_SETTINGS: &[&str] = &[
-    "BACKGROUND MUSIC",
-    "SOUND PACK",
-    "LOGO",
-    "BACKGROUND",
-    "FONT TYPE",
-    "GUI CUSTOMIZATION SETTINGS",
-];
-
-// VARIABLES FOR SETTINGS
-
-const FONT_COLORS: &[&str] = &[
-    "WHITE",
-    "PINK",
-    "RED",
-    "ORANGE",
-    "YELLOW",
-    "GREEN",
-    "BLUE",
-    "PURPLE",
-];
-
-const RESOLUTIONS: &[&str] = &[
-    "640x360",
-    "1280x720",
-    "1280x800", // Steam Deck
-    "1920x1080",
-    "1920x1200", // DeckHD
-    "2560x1440",
-    "3840x2160",
-];
-
-const SCROLL_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-const COLOR_SHIFT_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-
-const TIMEZONES: [&str; 25] = [
-    "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8", "UTC-7", "UTC-6",
-    "UTC-5", "UTC-4", "UTC-3", "UTC-2", "UTC-1", "UTC", "UTC+1",
-    "UTC+2", "UTC+3", "UTC+4", "UTC+5", "UTC+6", "UTC+7", "UTC+8",
-    "UTC+9", "UTC+10", "UTC+11", "UTC+12",
-];
-
 // ===================================
 // MACROS
 // ===================================
@@ -302,34 +246,6 @@ macro_rules! load_audio_category {
 // ===================================
 // STRUCTS
 // ===================================
-
-// This struct defines the structure of your config.json file
-#[derive(Serialize, Deserialize)]
-struct Config {
-    // video options
-    resolution: String,
-    fullscreen: bool,
-    timezone: String,
-
-    // audio options
-    bgm_volume: f32,
-    sfx_volume: f32,
-    audio_output: String,
-
-    // GUI customization options
-    show_splash_screen: bool,
-    font_color: String,
-    cursor_color: String,
-    background_scroll_speed: String,
-    color_shift_speed: String,
-
-    // custom asset options
-    bgm_track: Option<String>,
-    sfx_pack: String,
-    logo_selection: String,
-    background_selection: String,
-    font_selection: String,
-}
 
 #[derive(Clone, Debug)]
 struct AudioSink {
@@ -443,37 +359,6 @@ struct StorageMediaState {
 // ===================================
 // IMPL
 // ===================================
-
-// This provides a default state for the config
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            // video settings
-            resolution: "640x360".to_string(),
-            fullscreen: false,
-            timezone: "UTC".to_string(),
-
-            // audio settings
-            bgm_volume: 0.7,
-            sfx_volume: 0.7,
-            audio_output: "Auto".to_string(),
-
-            // GUI settings
-            show_splash_screen: true, // Splash screen is ON by default
-            font_color: "WHITE".to_string(),
-            cursor_color: "WHITE".to_string(),
-            background_scroll_speed: "NORMAL".to_string(),
-            color_shift_speed: "NORMAL".to_string(),
-
-            // custom assets
-            bgm_track: None,
-            sfx_pack: "Default".to_string(),
-            logo_selection: "Kazeta+ (Default)".to_string(),
-            background_selection: "Default".to_string(),
-            font_selection: "Default".to_string(),
-        }
-    }
-}
 
 impl SoundEffects {
     /// Loads a sound pack by name, falling back to default sounds if a file is missing.
@@ -916,78 +801,11 @@ fn prepare_for_launch(
 }
 */
 
-// BRIGHTNESS CONTROL
-// Gets the current brightness as a value between 0.0 and 1.0
-fn get_current_brightness() -> Option<f32> {
-    let Ok(max_out) = Command::new("brightnessctl").arg("max").output() else { return None };
-    let Ok(get_out) = Command::new("brightnessctl").arg("get").output() else { return None };
-
-    let max_str = String::from_utf8_lossy(&max_out.stdout);
-    let get_str = String::from_utf8_lossy(&get_out.stdout);
-
-    let max_val = max_str.trim().parse::<f32>().ok()?;
-    let get_val = get_str.trim().parse::<f32>().ok()?;
-
-    if max_val > 0.0 {
-        Some(get_val / max_val)
-    } else {
-        None
-    }
-}
-
-// Sets the brightness, taking a value between 0.0 and 1.0
-fn set_brightness(level: f32) {
-    // Clamp the value between 0.0 and 1.0
-    let clamped_level = level.clamp(0.0, 1.0);
-    // brightnessctl can take a percentage directly
-    let percent_str = format!("{:.0}%", clamped_level * 100.0);
-
-    // This command usually doesn't need sudo if the user is in the 'video' group
-    let _ = Command::new("brightnessctl").arg("set").arg(percent_str).status();
-}
-
 // Helper to read the first line from a file containing a specific key
 fn read_line_from_file(path: &str, key: &str) -> Option<String> {
     fs::read_to_string(path).ok()?.lines()
     .find(|line| line.starts_with(key))
     .map(|line| line.replace(key, "").trim().to_string())
-}
-
-// get system info
-fn get_system_info() -> SystemInfo {
-    // --- OS Name ---
-    let os_name = read_line_from_file("/etc/os-release", "PRETTY_NAME=")
-    .map(|name| name.replace("\"", "")) // Remove quotes
-    .unwrap_or_else(|| "Kazeta+ OS".to_string());
-
-    // --- Kernel Version ---
-    let kernel = Command::new("uname").arg("-r").output()
-    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    .unwrap_or_else(|_| "N/A".to_string());
-
-    // --- CPU Model ---
-    let cpu = read_line_from_file("/proc/cpuinfo", "model name")
-    .map(|name| name.replace(": ", ""))
-    .unwrap_or_else(|| "N/A".to_string());
-
-    // --- GPU Model ---
-    let gpu = Command::new("sh").arg("-c").arg("lspci | grep -i 'vga\\|display'")
-    .output()
-    .ok() // Convert Result to Option, so we can chain .and_then()
-    .and_then(|o| String::from_utf8_lossy(&o.stdout)
-    .lines()
-    .next() // Get the first line if any
-    .and_then(|line| line.split(": ").nth(2)) // Try to split and get the 3rd part
-    .map(|s| s.trim().to_string())) // Trim and convert to String
-    .unwrap_or_else(|| "N/A".to_string()); // If any step failed, default to "N/A"
-
-    // --- Total RAM ---
-    let ram_total = read_line_from_file("/proc/meminfo", "MemTotal:")
-    .and_then(|val| val.replace("kB", "").trim().parse::<f32>().ok())
-    .map(|kb| format!("{:.1} GB", kb / 1024.0 / 1024.0)) // Convert from KB to GB
-    .unwrap_or_else(|| "N/A".to_string());
-
-    SystemInfo { os_name, kernel, cpu, gpu, ram_total }
 }
 
 /// Calls a privileged helper script to copy session logs to the SD card.
@@ -1097,125 +915,6 @@ fn trigger_game_launch(
     trigger_session_restart(current_bgm, music_cache)
 }
 
-fn get_available_sinks() -> Vec<AudioSink> {
-    println!("[Debug] Running get_available_sinks...");
-    let mut sinks = Vec::new();
-
-    let Ok(output) = Command::new("wpctl").arg("status").output() else {
-        println!("[Debug] Failed to run 'wpctl status' command.");
-        return sinks;
-    };
-    println!("[Debug] 'wpctl status' command finished successfully.");
-
-    let output_str = String::from_utf8_lossy(&output.stdout);
-
-    let re = Regex::new(r"([*]?)\s*(\d+)\.\s+(.+?)\s+\[vol:").unwrap();
-    let mut in_sinks_section = false;
-
-    for line in output_str.lines() {
-        if line.contains("Sinks:") {
-            in_sinks_section = true;
-            continue;
-        }
-
-        if in_sinks_section {
-            // --- THIS IS THE FIX ---
-            // If we hit the header of the next section, we're done with sinks.
-            if line.contains("Sources:") || line.contains("Filters:") {
-                break;
-            }
-
-            if let Some(caps) = re.captures(line) {
-                if let (Some(id_str), Some(name_str)) = (caps.get(2), caps.get(3)) {
-                    if let Ok(id) = id_str.as_str().parse::<u32>() {
-                        let cleaned_name = name_str.as_str()
-                        .replace("Analog Stereo", "")
-                        .replace("Digital Stereo (HDMI 2)", "HDMI")
-                        .trim()
-                        .to_string();
-
-                        sinks.push(AudioSink {
-                            id,
-                            name: cleaned_name,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    println!("[Debug] Found sinks: {:#?}", sinks);
-    sinks
-}
-
-/// Gets the current time and formats it using the UTC offset from the config.
-fn get_current_local_time_string(config: &Config) -> String {
-    // 1. Parse the offset string from the config (e.g., "UTC-4")
-    let offset_str = config.timezone.replace("UTC", "");
-    let offset_hours: i32 = if offset_str.is_empty() {
-        0
-    } else {
-        offset_str.parse().unwrap_or(0)
-    };
-
-    // 2. Create a FixedOffset in seconds (1 hour = 3600 seconds)
-    let fixed_offset = FixedOffset::east_opt(offset_hours * 3600).unwrap_or(FixedOffset::east_opt(0).unwrap());
-
-    // 3. Get the current time in UTC
-    let utc_now = Utc::now();
-
-    // 4. Convert the UTC time to the desired offset
-    let local_now = utc_now.with_timezone(&fixed_offset);
-
-    // 5. Format for display (e.g., "05:08 PM")
-    local_now.format("%-I:%M %p").to_string()
-}
-
-/// Returns the path to the user's data directory for Kazeta+.
-fn get_user_data_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|path| path.join(".local/share/kazeta-plus"))
-}
-
-// CONFIG.JSON SETTINGS
-
-fn load_config() -> Config {
-    if let Some(path) = get_user_data_dir() {
-        let config_path = path.join("config.json");
-        if let Ok(file_contents) = fs::read_to_string(&config_path) {
-            if let Ok(config) = serde_json::from_str(&file_contents) {
-                return config;
-            }
-        }
-    }
-    // If anything fails, create and save a default config
-    let default_config = Config::default();
-    save_config(&default_config);
-    default_config
-}
-
-fn save_config(config: &Config) {
-    if let Some(path) = get_user_data_dir() {
-        // Create the directory if it doesn't exist
-        if fs::create_dir_all(&path).is_ok() {
-            let config_path = path.join("config.json");
-            if let Ok(json) = serde_json::to_string_pretty(config) {
-                let _ = fs::write(&config_path, json);
-            }
-        }
-    }
-}
-
-fn delete_config_file() -> std::io::Result<()> {
-    if let Some(mut path) = home::home_dir() {
-        path.push(".local/share/kazeta-plus/config.json");
-        if path.exists() {
-            println!("[Info] Deleting config file at: {}", path.display());
-            std::fs::remove_file(path)?;
-        }
-    }
-    Ok(())
-}
-
 fn save_log_to_file(log_messages: &[String]) -> std::io::Result<String> {
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
     let filename = format!("kazeta_log_{}.log", timestamp);
@@ -1226,83 +925,6 @@ fn save_log_to_file(log_messages: &[String]) -> std::io::Result<String> {
 
     println!("Log saved to {}", filename);
     Ok(filename)
-}
-
-/// Gets the current system volume using wpctl.
-fn get_system_volume() -> Option<f32> {
-    let output = Command::new("wpctl").arg("get-volume").arg("@DEFAULT_AUDIO_SINK@").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let output_str = String::from_utf8_lossy(&output.stdout);
-    // The output is "Volume: 0.50", so we split by ": " and parse the second part.
-    output_str.split(": ").nth(1)?.trim().parse::<f32>().ok()
-}
-
-/// Adjusts the system volume up or down.
-fn adjust_system_volume(adjustment: &str) {
-    // We use "-l 1.0" to limit the volume to 100% and prevent distortion.
-    let _ = Command::new("wpctl")
-    .arg("set-volume")
-    .arg("-l")
-    .arg("1.0")
-    .arg("@DEFAULT_AUDIO_SINK@")
-    .arg(adjustment)
-    .status(); // .status() runs the command and waits for it to finish
-}
-
-/// Scans for a battery device and gets its capacity and status.
-fn get_battery_info() -> Option<BatteryInfo> {
-    const POWER_SUPPLY_PATH: &str = "/sys/class/power_supply";
-
-    let entries = fs::read_dir(POWER_SUPPLY_PATH).ok()?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() { continue; }
-
-        let type_path = path.join("type");
-        if let Ok(device_type) = fs::read_to_string(type_path) {
-            if device_type.trim() == "Battery" {
-                // This is a battery. Let's get both capacity and status.
-                let capacity_path = path.join("capacity");
-                let status_path = path.join("status");
-
-                if let (Ok(percentage), Ok(status)) =
-                    (fs::read_to_string(capacity_path), fs::read_to_string(status_path))
-                    {
-                        return Some(BatteryInfo {
-                            percentage: percentage.trim().to_string(),
-                            status: status.trim().to_string(),
-                        });
-                    }
-            }
-        }
-    }
-    None
-}
-
-/// Removes the file extension from a filename string slice.
-fn trim_extension(filename: &str) -> &str {
-    if let Some(dot_index) = filename.rfind('.') {
-        &filename[..dot_index]
-    } else {
-        filename
-    }
-}
-
-fn string_to_color(color_str: &str) -> Color {
-    match color_str {
-        "PINK" => PINK,
-        "RED" => RED,
-        "ORANGE" => ORANGE,
-        "YELLOW" => YELLOW,
-        "GREEN" => GREEN,
-        "BLUE" => BLUE,
-        "PURPLE" => VIOLET, // USING VIOLET AS A CLOSE APPROXIMATION
-        _ => WHITE, // Default to WHITE
-    }
 }
 
 // A new function specifically for drawing text that respects the config color
@@ -1351,27 +973,6 @@ fn text_disabled(font_cache: &HashMap<String, Font>, config: &Config, text : &st
         ..Default::default()
     });
 }
-
-/// Parses a resolution string and requests a window resize.
-fn apply_resolution(resolution_str: &str) {
-    if let Some((w_str, h_str)) = resolution_str.split_once('x') {
-        // Parse to f32 for the resize function
-        if let (Ok(w), Ok(h)) = (w_str.parse::<f32>(), h_str.parse::<f32>()) {
-            // Use the correct function name
-            request_new_screen_size(w, h);
-        }
-    }
-}
-
-/*
-/// Takes a relative path and returns the absolute path for logging.
-/// If the path can't be resolved, it returns the original relative path.
-fn get_log_path(relative_path: &str) -> String {
-    std::fs::canonicalize(relative_path)
-    .map(|path| path.display().to_string())
-    .unwrap_or_else(|_| relative_path.to_string())
-}
-*/
 
 // Scans the 'sfx/' directory for sound pack folders.
 fn find_sound_packs() -> Vec<String> {
@@ -1943,95 +1544,6 @@ fn render_main_menu(
 
         // Draw the message text
         text_with_config_color(font_cache, config, message, x, y, font_size);
-    }
-}
-
-// SETTINGS
-fn render_settings_page(
-    page_number: usize,
-    options: &[&str],
-    logo_cache: &HashMap<String, Texture2D>,
-    background_cache: &HashMap<String, Texture2D>,
-    font_cache: &HashMap<String, Font>,
-    config: &mut Config,
-    selection: usize,
-    animation_state: &AnimationState,
-    background_state: &mut BackgroundState,
-    battery_info: &Option<BatteryInfo>,
-    current_time_str: &str,
-    scale_factor: f32,
-    display_settings_changed: bool,
-    system_volume: f32,
-    brightness: f32,
-) {
-    // --- Create scaled layout values ---
-    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-    let menu_padding = MENU_PADDING * scale_factor;
-    let settings_start_y = SETTINGS_START_Y * scale_factor;
-    let settings_option_height = SETTINGS_OPTION_HEIGHT * scale_factor;
-    let right_margin = 50.0 * scale_factor;
-    let left_margin = 50.0 * scale_factor;
-
-    // get currently selected font at start
-    let current_font = get_current_font(font_cache, config);
-
-    render_background(background_cache, config, background_state);
-    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
-
-    //render_debug_info(config);
-
-    // Loop through and draw all settings options
-    for (i, label_text) in options.iter().enumerate() {
-        let y_pos_base = settings_start_y + (i as f32 * settings_option_height);
-
-        let value_text = get_settings_value(page_number, i, config, system_volume, brightness);
-
-        // --- UPDATED: Consistent and Dynamic Layout Calculations ---
-        let value_dims = measure_text(&value_text.to_uppercase(), Some(current_font), font_size, 1.0);
-
-        // --- Draw the highlight rectangle if this item is selected ---
-        if i == selection {
-            let cursor_color = animation_state.get_cursor_color(config);
-            let cursor_scale = animation_state.get_cursor_scale();
-            //let value_dims = measure_text(&value_text.to_uppercase(), Some(current_font), FONT_SIZE as u16, 1.0);
-
-            let base_width = value_dims.width + (menu_padding * 2.0);
-            let base_height = value_dims.height + (menu_padding * 2.0);
-            let scaled_width = base_width * cursor_scale;
-            let scaled_height = base_height * cursor_scale;
-            let offset_x = (scaled_width - base_width) / 2.0;
-            let offset_y = (scaled_height - base_height) / 2.0;
-
-            let value_x = screen_width() - value_dims.width - right_margin;
-            //let rect_x = value_x - MENU_PADDING - offset_x;
-            let rect_x = value_x - menu_padding;
-            //let rect_y = y_pos_base - 7.0 - offset_y;
-            let rect_y = y_pos_base + (settings_option_height / 2.0) - (base_height / 2.0);
-            //draw_rectangle_lines(rect_x, rect_y, scaled_width, scaled_height / 1.5, 4.0, cursor_color);
-            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
-        }
-
-        // --- Draw the text ---
-        let value_x = screen_width() - value_dims.width - right_margin;
-        let text_y = y_pos_base + (settings_option_height / 2.0) + (value_dims.offset_y * 0.5);
-
-        text_with_config_color(font_cache, config, label_text, left_margin, text_y, font_size);
-        text_with_config_color(font_cache, config, &value_text, value_x, text_y, font_size);
-
-        if display_settings_changed {
-            let message = "RESTART REQUIRED TO APPLY CHANGES";
-            let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-            let current_font = get_current_font(font_cache, config);
-            let dims = measure_text(message, Some(current_font), font_size, 1.0);
-
-            let x = screen_width() / 2.0 - dims.width / 2.0;
-            let y = screen_height() - (40.0 * scale_factor); // Position near the bottom
-
-            // Draw a semi-transparent background for the message
-            draw_rectangle(x - (5.0 * scale_factor), y - dims.height, dims.width + (10.0 * scale_factor), dims.height + (5.0 * scale_factor), Color::new(0.0, 0.0, 0.0, 0.7));
-
-            text_with_config_color(font_cache, config, message, x, y, font_size);
-        }
     }
 }
 
@@ -2750,57 +2262,6 @@ fn create_error_dialog(message: String) -> Dialog {
             }
         ],
         selection: 0,
-    }
-}
-
-// Text for the settings on the RIGHT side
-fn get_settings_value(page: usize, index: usize, config: &Config, system_volume: f32, brightness: f32) -> String {
-    match page {
-        // VIDEO SETTINGS
-        1 => match index {
-            0 => "CONFIRM".to_string(), // RESET SETTINGS
-            1 => config.resolution.clone(), // RESOLUTION
-            2 => if config.fullscreen { "ON" } else { "OFF" }.to_string(), // FULLSCREEN TOGGLE
-            3 => config.timezone.clone().to_uppercase(), // TIME ZONE
-            4 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
-            5 => "->".to_string(),
-            _ => "".to_string(),
-        },
-        // AUDIO SETTINGS
-        2 => match index {
-            0 => format!("{:.0}%", system_volume * 100.0), // MASTER VOLUME
-            1 => format!("{:.0}%", config.bgm_volume * 100.0), // BGM VOLUME
-            2 => format!("{:.0}%", config.sfx_volume * 100.0), // SFX VOLUME
-            3 => config.audio_output.clone().to_uppercase(), // AUDIO OUTPUT
-            4 => "<-".to_string(),
-            5 => "->".to_string(),
-            _ => "".to_string(),
-        },
-        // GUI CUSTOMIZATION
-        3 => match index {
-            0 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
-            1 => config.font_color.clone(), // FONT COLOR
-            2 => config.cursor_color.clone(), // CURSOR COLOR
-            3 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
-            4 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
-            5 => "<-".to_string(),
-            6 => "->".to_string(),
-            _ => "".to_string(),
-        },
-        // CUSTOM ASSETS
-        4 => match index {
-            0 => { // BGM SELECTION
-                let track = config.bgm_track.clone().unwrap_or("OFF".to_string());
-                trim_extension(&track).replace('_', " ").to_string().to_uppercase()
-            },
-            1 => config.sfx_pack.clone().replace('_', " ").to_uppercase(), // SFX PACK SELECTION
-            2 => trim_extension(&config.logo_selection).replace('_', " ").to_string().to_uppercase(), // LOGO SELECTION
-            3 => trim_extension(&config.background_selection).replace('_', " ").to_string().to_uppercase(), // BACKGROUND SELECTION
-            4 => trim_extension(&config.font_selection).replace('_', " ").to_string().to_uppercase(), // FONT TYPE
-            5 => "<-".to_string(),
-            _ => "".to_string(),
-        },
-        _ => "".to_string(), // Default case for unknown pages
     }
 }
 
@@ -3718,426 +3179,28 @@ async fn main() {
                 }
             },
             Screen::VideoSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
-                // --- Determine current page info ---
-                let (page_number, options): (usize, &[&str]) = match current_screen {
-                    Screen::VideoSettings => (1, &VIDEO_SETTINGS),
-                    Screen::AudioSettings => (2, &AUDIO_SETTINGS),
-                    Screen::GuiSettings => (3, &GUI_CUSTOMIZATION_SETTINGS),
-                    Screen::AssetSettings => (4, &CUSTOM_ASSET_SETTINGS),
-                    _ => unreachable!(),
-                };
-
-                // --- Handle Common Input (Up/Down/Back) ---
-                if input_state.up {
-                    settings_menu_selection = if settings_menu_selection == 0 { options.len() - 1 } else { settings_menu_selection - 1 };
-                    sound_effects.play_cursor_move(&config);
-                }
-                if input_state.down {
-                    settings_menu_selection = (settings_menu_selection + 1) % options.len();
-                    sound_effects.play_cursor_move(&config);
-                }
-                if input_state.back {
-                    current_screen = Screen::MainMenu;
-                    sound_effects.play_back(&config);
-                }
-
-                // page switching
-                if input_state.next {
-                    sound_effects.play_select(&config);
-                    settings_menu_selection = 0; // Reset selection for the new page
-                    match current_screen {
-                        Screen::VideoSettings => current_screen = Screen::AudioSettings,
-                        Screen::AudioSettings => current_screen = Screen::GuiSettings,
-                        Screen::GuiSettings => current_screen = Screen::AssetSettings,
-                        Screen::AssetSettings => current_screen = Screen::VideoSettings,
-                        _ => {} // This case won't be reached
-                    }
-                }
-
-                if input_state.prev {
-                    sound_effects.play_select(&config);
-                    settings_menu_selection = 0; // Reset selection for the new page
-                    match current_screen {
-                        Screen::VideoSettings => current_screen = Screen::AssetSettings,
-                        Screen::AudioSettings => current_screen = Screen::VideoSettings,
-                        Screen::GuiSettings => current_screen = Screen::AudioSettings,
-                        Screen::AssetSettings => current_screen = Screen::GuiSettings,
-                        _ => {} // This case won't be reached
-                    }
-                }
-
-                // --- Render the Page ---
-                render_settings_page(
-                    page_number, options, &logo_cache, &background_cache, &font_cache,
-                    &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                    &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
+                ui::settings::update(
+                    &mut current_screen, &input_state, &mut config, &mut settings_menu_selection,
+                    &sound_effects, &mut confirm_selection, &mut display_settings_changed,
+                    &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
+                    &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
+                    &background_choices, &font_choices
                 );
 
-                // --- Handle Page-Specific Actions ---
-                match page_number {
-                    // VIDEO OPTIONS
-                    1 => match settings_menu_selection {
-                        0 => { // RESET SETTINGS
-                            if input_state.select {
-                                sound_effects.play_select(&config);
-                                confirm_selection = 1; // Default to "NO"
-                                current_screen = Screen::ConfirmReset;
-                            }
-                        },
-                        1 => { // RESOLUTION
-                            if input_state.left || input_state.right {
-                                let current_index = RESOLUTIONS.iter().position(|&r| r == config.resolution).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % RESOLUTIONS.len()
-                                } else {
-                                    (current_index + RESOLUTIONS.len() - 1) % RESOLUTIONS.len()
-                                };
-
-                                config.resolution = RESOLUTIONS[new_index].to_string();
-                                save_config(&config);
-                                apply_resolution(&config.resolution); // Apply the change immediately
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        2 => { // FULLSCREEN
-                            if input_state.left || input_state.right {
-                                config.fullscreen = !config.fullscreen;
-                                //set_fullscreen(config.fullscreen); // Apply the change immediately
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                                display_settings_changed = true;
-                            }
-                        },
-                        3 => { // TIME ZONE
-                            let mut change_occurred = false;
-
-                            // Find the current index of the timezone in our array
-                            if let Some(current_index) = TIMEZONES.iter().position(|&tz| tz == config.timezone) {
-                                if input_state.left {
-                                    // Decrement and wrap around if we go below zero
-                                    let new_index = (current_index + TIMEZONES.len() - 1) % TIMEZONES.len();
-                                    config.timezone = TIMEZONES[new_index].to_string();
-                                    change_occurred = true;
-                                }
-                                if input_state.right {
-                                    // Increment and wrap around using the modulo operator
-                                    let new_index = (current_index + 1) % TIMEZONES.len();
-                                    config.timezone = TIMEZONES[new_index].to_string();
-                                    change_occurred = true;
-                                }
-                            }
-
-                            if change_occurred {
-                                sound_effects.play_cursor_move(&config);
-                                save_config(&config);
-                            }
-                        },
-                        4 => { // MASTER VOLUME
-                            if input_state.left {
-                                set_brightness(brightness - 0.1); // Decrease by 10%
-                                brightness = get_current_brightness().unwrap_or(brightness); // Refresh the value
-                                sound_effects.play_cursor_move(&config);
-                            }
-                            if input_state.right {
-                                set_brightness(brightness + 0.1); // Increase by 10%
-                                brightness = get_current_brightness().unwrap_or(brightness); // Refresh the value
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        5 => { // GO TO AUDIO SETTINGS
-                            if input_state.select {
-                                current_screen = Screen::AudioSettings;
-                                settings_menu_selection = 0;
-                                sound_effects.play_select(&config);
-                            }
-                        },
-                        _ => {}
-                    },
-
-                    // AUDIO SETTINGS
-                    2 => match settings_menu_selection {
-                        0 => { // MASTER VOLUME
-                            if input_state.left {
-                                adjust_system_volume("10%-"); // Decrease by 10%
-                                system_volume = get_system_volume().unwrap_or(system_volume); // Refresh the value
-                                sound_effects.play_cursor_move(&config);
-                            }
-                            if input_state.right {
-                                adjust_system_volume("10%+"); // Increase by 10%
-                                system_volume = get_system_volume().unwrap_or(system_volume); // Refresh the value
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        1 => { // BGM VOLUME
-                            if input_state.left || input_state.right {
-                                if input_state.left {
-                                    config.bgm_volume = (config.bgm_volume - 0.1).max(0.0);
-                                }
-                                if input_state.right {
-                                    config.bgm_volume = (config.bgm_volume + 0.1).min(1.0);
-                                }
-
-                                // Change the volume of the currently playing sound
-                                if let Some(sound) = &current_bgm {
-                                    audio::set_sound_volume(sound, config.bgm_volume);
-                                }
-
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        2 => { // SFX Volume
-                            if input_state.left || input_state.right {
-                                if input_state.left {
-                                    config.sfx_volume = (config.sfx_volume - 0.1).max(0.0);
-                                }
-                                if input_state.right {
-                                    config.sfx_volume = (config.sfx_volume + 0.1).min(1.0);
-                                }
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config); // Test the new volume
-                            }
-                        },
-                        3 => { // AUDIO OUTPUT
-                            // Only run this logic if we actually found sinks
-                            if !available_sinks.is_empty() {
-                                // Find the index of the current sink in our discovered list
-                                let current_index = available_sinks.iter().position(|s| s.name == config.audio_output).unwrap_or(0);
-
-                                let mut new_index = current_index;
-                                if input_state.left {
-                                    new_index = (current_index + available_sinks.len() - 1) % available_sinks.len();
-                                }
-                                if input_state.right {
-                                    new_index = (current_index + 1) % available_sinks.len();
-                                }
-
-                                if new_index != current_index {
-                                    let new_sink = &available_sinks[new_index];
-                                    config.audio_output = new_sink.name.clone();
-
-                                    // Apply the change immediately
-                                    let _ = Command::new("wpctl").arg("set-default").arg(new_sink.id.to_string()).status();
-
-                                    // Create a sentinel file to make the choice persistent
-                                    let state_dir = std::path::Path::new("/var/kazeta/state");
-                                    if std::fs::create_dir_all(state_dir).is_ok() {
-                                        let _ = std::fs::File::create(state_dir.join(".AUDIO_PREFERENCE_SET"));
-                                    }
-
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                            }
-                        },
-                        4 => { // GO TO VIDEO SETTINGS
-                            if input_state.select {
-                                current_screen = Screen::VideoSettings;
-                                settings_menu_selection = 0;
-                                sound_effects.play_select(&config);
-                            }
-                        },
-                        5 => { // GO TO GUI CUSTOMIZATION
-                            if input_state.select {
-                                current_screen = Screen::GuiSettings;
-                                settings_menu_selection = 0;
-                                sound_effects.play_select(&config);
-                            }
-                        },
-                        _ => {}
-                    },
-
-                    // GUI CUSTOMIZATION OPTIONS
-                    3 => match settings_menu_selection {
-                        0 => { // SPLASH SCREEN
-                            if input_state.left || input_state.right {
-                                config.show_splash_screen = !config.show_splash_screen;
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        1 => { // FONT COLOR
-                            if input_state.left || input_state.right {
-                                // Find current color's index in our list
-                                let current_index = FONT_COLORS.iter().position(|&c| c == config.font_color).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % FONT_COLORS.len()
-                                } else {
-                                    (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
-                                };
-                                config.font_color = FONT_COLORS[new_index].to_string();
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        }
-                        2 => { // CURSOR COLOR
-                            if input_state.left || input_state.right {
-                                // We can reuse the FONT_COLORS constant for this
-                                let current_index = FONT_COLORS.iter().position(|&c| c == config.cursor_color).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % FONT_COLORS.len()
-                                } else {
-                                    (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
-                                };
-
-                                config.cursor_color = FONT_COLORS[new_index].to_string();
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        3 => { // BACKGROUND SCROLLING
-                            if input_state.left || input_state.right {
-                                let current_index = SCROLL_SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % SCROLL_SPEEDS.len()
-                                } else {
-                                    (current_index + SCROLL_SPEEDS.len() - 1) % SCROLL_SPEEDS.len()
-                                };
-
-                                config.background_scroll_speed = SCROLL_SPEEDS[new_index].to_string();
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        4 => { // COLOR GRADIENT SHIFTING
-                            if input_state.left || input_state.right {
-                                let current_index = COLOR_SHIFT_SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % COLOR_SHIFT_SPEEDS.len()
-                                } else {
-                                    (current_index + COLOR_SHIFT_SPEEDS.len() - 1) % COLOR_SHIFT_SPEEDS.len()
-                                };
-
-                                config.color_shift_speed = COLOR_SHIFT_SPEEDS[new_index].to_string();
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        5 => { // GO TO AUDIO SETTINGS
-                            if input_state.select {
-                                current_screen = Screen::AudioSettings;
-                                settings_menu_selection = 0;
-                                sound_effects.play_select(&config);
-                            }
-                        },
-                        6 => { // GO TO CUSTOM ASSETS
-                            if input_state.select {
-                                current_screen = Screen::AssetSettings;
-                                settings_menu_selection = 0;
-                                sound_effects.play_select(&config);
-                            }
-                        },
-                        _ => {}
-                    },
-                    // CUSTOM ASSETS
-                    4 => match settings_menu_selection {
-                        0 => { // BGM SELECTION
-                            if input_state.left || input_state.right {
-                                // Find the current track's position in our list of choices
-                                let current_index = bgm_choices.iter().position(|t| *t == config.bgm_track.clone().unwrap_or("OFF".to_string())).unwrap_or(0);
-                                let mut new_index = current_index;
-
-                                if input_state.left {
-                                    new_index = if current_index == 0 { bgm_choices.len() - 1 } else { current_index - 1 };
-                                }
-                                if input_state.right {
-                                    new_index = (current_index + 1) % bgm_choices.len();
-                                }
-
-                                let new_track = &bgm_choices[new_index];
-                                play_new_bgm(new_track, config.bgm_volume, &music_cache, &mut current_bgm);
-
-                                // Update the config with the new choice
-                                if new_track == "OFF" {
-                                    config.bgm_track = None;
-                                } else {
-                                    config.bgm_track = Some(new_track.clone());
-                                }
-
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        1 => { // SOUND PACKS
-                            if input_state.left || input_state.right {
-                                let sound_packs = find_sound_packs();
-                                let current_index = sound_packs.iter().position(|name| name == &config.sfx_pack).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % sound_packs.len()
-                                } else {
-                                    (current_index + sound_packs.len() - 1) % sound_packs.len()
-                                };
-
-                                config.sfx_pack = sound_packs[new_index].clone();
-                                save_config(&config);
-
-                                // Signal to the main loop that we need to reload this pack
-                                sfx_pack_to_reload = Some(config.sfx_pack.clone());
-                            }
-                        },
-                        2 => { // LOGO selection
-                            if input_state.left || input_state.right {
-                                // Find the current logo's position in our list of choices
-                                let current_index = logo_choices.iter().position(|l| *l == config.logo_selection).unwrap_or(0);
-                                let mut new_index = current_index;
-
-                                if input_state.left {
-                                    new_index = if current_index == 0 { logo_choices.len() - 1 } else { current_index - 1 };
-                                }
-                                if input_state.right {
-                                    new_index = (current_index + 1) % logo_choices.len();
-                                }
-
-                                // Update the config with the new choice
-                                config.logo_selection = logo_choices[new_index].clone();
-
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        3 => { // BACKGROUND SELECTION
-                            if input_state.left || input_state.right {
-                                // Find the current background's position in our list of choices
-                                let current_index = background_choices.iter().position(|b| *b == config.background_selection).unwrap_or(0);
-                                let mut new_index = current_index;
-
-                                if input_state.left {
-                                    new_index = if current_index == 0 { background_choices.len() - 1 } else { current_index - 1 };
-                                }
-                                if input_state.right {
-                                    new_index = (current_index + 1) % background_choices.len();
-                                }
-
-                                // Update the config with the new choice
-                                config.background_selection = background_choices[new_index].clone();
-
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        4 => { // FONT TYPE
-                            if input_state.left || input_state.right {
-                                let current_index = font_choices.iter().position(|name| name == &config.font_selection).unwrap_or(0);
-                                let new_index = if input_state.right {
-                                    (current_index + 1) % font_choices.len()
-                                } else {
-                                    (current_index + font_choices.len() - 1) % font_choices.len()
-                                };
-
-                                config.font_selection = font_choices[new_index].clone();
-                                save_config(&config);
-                                sound_effects.play_cursor_move(&config);
-                            }
-                        },
-                        5 => { // GO TO GUI CUSTOMIZATION SETTINGS
-                            if input_state.select {
-                                current_screen = Screen::GuiSettings;
-                                settings_menu_selection = 0;
-                                sound_effects.play_select(&config);
-                            }
-                        },
-                        _ => {}
-                    },
-                    _ => {}
+                // The render call is now separate from the logic
+                let (page_number, options) = match current_screen {
+                    Screen::VideoSettings => (1, ui::settings::VIDEO_SETTINGS),
+                    Screen::AudioSettings => (2, ui::settings::AUDIO_SETTINGS),
+                    Screen::GuiSettings => (3, ui::settings::GUI_CUSTOMIZATION_SETTINGS),
+                    Screen::AssetSettings => (4, ui::settings::CUSTOM_ASSET_SETTINGS),
+                    _ => (0, &[] as &[&str]), // Default case
+                };
+                if page_number > 0 {
+                    ui::settings::render_settings_page(
+                        page_number, options, &logo_cache, &background_cache, &font_cache,
+                        &mut config, settings_menu_selection, &animation_state, &mut background_state,
+                        &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
+                    );
                 }
             },
             Screen::GameSelection => {
