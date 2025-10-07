@@ -1,12 +1,7 @@
 use macroquad::prelude::*;
-use std::collections::HashMap;
-use std::process::Command; // For the Command in AUDIO OUTPUT logic
+ // For the Command in AUDIO OUTPUT logic
 
 // Import types and functions from your other modules
-use crate::Regex;
-use crate::config::{Config, save_config};
-use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
-use crate::{AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen, SoundEffects, FONT_SIZE, MENU_PADDING, SETTINGS_START_Y, SETTINGS_OPTION_HEIGHT};
 
 /// Removes the file extension from a filename string slice.
 pub fn trim_extension(filename: &str) -> &str {

@@ -17,18 +17,19 @@ use std::path::PathBuf; // for loading assets
 use std::io::{BufReader, BufRead}; // logger
 use std::process::Command; // controlling master volume and fetching user's hardware info
 use std::env; // backtracing
-use serde::{Deserialize, Serialize}; // for checking config.json
+ // for checking config.json
 use ::rand::Rng; // for selecting a random message on startup
 use chrono::Local; // for getting clock
-use chrono::{Utc, FixedOffset};
 use macroquad::audio::load_sound; // for loading custom SFX
 use crate::audio::Sound;
 use regex::Regex; // fetching audio sinks
 
 // Import our new modules
-use crate::config::{Config, load_config, save_config, delete_config_file, get_user_data_dir};
+use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::settings;
+use crate::ui::about;
+use crate::about::render_about_screen;
 use crate::utils::*; // Wildcard to get all utility functions
 use crate::settings::VIDEO_SETTINGS;
 use crate::settings::render_settings_page;
@@ -1190,61 +1191,6 @@ fn calculate_icon_transition_positions(selected_memory: usize, scale_factor: f32
 ////////////////////////
 // SCREEN RENDERING
 ////////////////////////
-
-// ABOUT
-fn render_about_screen(
-    system_info: &SystemInfo,
-    font_cache: &HashMap<String, Font>,
-    config: &Config,
-    scale_factor: f32,
-) {
-    let current_font = get_current_font(font_cache, config);
-    // Create one smaller font size for all text on this screen
-    let about_font_size = (FONT_SIZE as f32 * scale_factor * 0.8) as u16; // 85% of base size
-    let line_height = 25.0 * scale_factor; // Adjusted line height for smaller text
-
-    let start_x_labels = 50.0 * scale_factor;
-    let start_x_values = 120.0 * scale_factor; // Nudged this over slightly for long CPU/GPU names
-    let mut current_y = 100.0 * scale_factor;
-
-    // --- Hardware Info ---
-    let info = vec![
-        ("OS:", &system_info.os_name),
-        ("KERNEL:", &system_info.kernel),
-        ("CPU:", &system_info.cpu),
-        ("GPU:", &system_info.gpu),
-        ("MEMORY:", &system_info.ram_total),
-    ];
-
-    for (label, value) in info {
-        // Use the new smaller font size here
-        text_with_config_color(font_cache, config, label, start_x_labels, current_y, about_font_size);
-        text_with_config_color(font_cache, config, value, start_x_values, current_y, about_font_size);
-        current_y += line_height;
-    }
-
-    // --- Credits ---
-    current_y = screen_height() - (100.0 * scale_factor);
-
-    let credits1 = "Original Kazeta concept by Alkazar.";
-    let credits2 = "Kazeta+ forked and developed by Linux Gaming Central.";
-    let credits3 = "Kazeta website: kazeta.org";
-    let credits4 = "Linux Gaming Central website: linuxgamingcentral.org";
-
-    let credit_lines = vec![credits1, credits2, credits3, credits4];
-
-    for line in credit_lines {
-        let dims = measure_text(line, Some(current_font), about_font_size, 1.0);
-        // And use the new smaller font size here as well
-        text_with_config_color(
-            font_cache, config, line,
-            screen_width() / 2.0 - dims.width / 2.0,
-                               current_y,
-                               about_font_size
-        );
-        current_y += line_height;
-    }
-}
 
 // BACKGROUND
 fn render_background(
