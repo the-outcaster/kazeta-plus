@@ -24,7 +24,6 @@ use regex::Regex; // fetching audio sinks
 
 // Import our new modules
 mod audio;
-mod components;
 mod config;
 mod input;
 mod save;
@@ -34,12 +33,11 @@ mod ui;
 mod utils;
 
 use crate::audio::{SoundEffects, play_new_bgm};
-use crate::components::{get_current_font, text_with_config_color, text_disabled};
 use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
-use crate::ui::settings;
+use crate::ui::*;
 use crate::utils::*; // Wildcard to get all utility functions
 use crate::save::StorageMediaState;
 use crate::settings::VIDEO_SETTINGS;
