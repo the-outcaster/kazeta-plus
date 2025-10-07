@@ -1,4 +1,5 @@
-use macroquad::{audio, prelude::*};
+//use macroquad::{audio, prelude::*};
+use macroquad::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
@@ -17,30 +18,33 @@ use std::path::PathBuf; // for loading assets
 use std::io::{BufReader, BufRead}; // logger
 use std::process::Command; // controlling master volume and fetching user's hardware info
 use std::env; // backtracing
- // for checking config.json
 use ::rand::Rng; // for selecting a random message on startup
 use chrono::Local; // for getting clock
-use macroquad::audio::load_sound; // for loading custom SFX
-use crate::audio::Sound;
 use regex::Regex; // fetching audio sinks
 
 // Import our new modules
+use crate::{self, Sound, PlaySoundParams, load_sound, load_sound_from_bytes, set_sound_volume, stop_sound};
+use crate::assets::find_asset_files;
+//use crate::audio::{SoundEffects, play_new_bgm};
+use crate::components::{get_current_font, text_with_config_color, text_disabled};
 use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::settings;
-use crate::ui::about;
-use crate::about::render_about_screen;
 use crate::utils::*; // Wildcard to get all utility functions
 use crate::settings::VIDEO_SETTINGS;
 use crate::settings::render_settings_page;
 
-mod save;
-
-// additional files I've created
+mod assets;
+mod audio;
+mod components;
 mod config;
+mod save;
 mod system;
+mod types;
 mod ui;
 mod utils;
+
+pub use types::*;
 
 /*
 // ===================================
@@ -227,7 +231,7 @@ macro_rules! load_audio_category {
                     Ok(bytes) => {
                         println!("[DEBUG] Read {} bytes from {}", bytes.len(), file_name);
                         // Now, load the sound from the bytes
-                        match audio::load_sound_from_bytes(&bytes).await {
+                        match load_sound_from_bytes(&bytes).await {
                             Ok(asset) => {
                                 println!("[OK] Loaded {}: {}", $type_name.to_lowercase(), file_name);
                                 $cache.insert(file_name.to_string(), asset);
@@ -248,84 +252,11 @@ macro_rules! load_audio_category {
 // STRUCTS
 // ===================================
 
-#[derive(Clone, Debug)]
-struct AudioSink {
-    id: u32,
-    name: String,
-}
-
-#[derive(Debug, Clone)]
-struct SystemInfo {
-    os_name: String,
-    kernel: String,
-    cpu: String,
-    gpu: String,
-    ram_total: String,
-}
-
-struct BatteryInfo {
-    percentage: String,
-    status: String,
-}
-
-// color shifting background
-struct BackgroundState {
-    bgx: f32,
-    bg_color: Color,
-    target: usize,
-    tg_color: Color,
-}
-
-struct SoundEffects {
-    //splash: audio::Sound, // add splash sound effect
-    cursor_move: audio::Sound,
-    select: audio::Sound,
-    reject: audio::Sound,
-    back: audio::Sound,
-}
-
-#[derive(Clone, Debug)]
-struct Memory {
-    id: String,
-    name: Option<String>,
-    drive_name: String, // Store which drive this save is on
-}
-
-#[derive(Clone, Debug)]
-struct StorageMedia {
-    id: String,
-    free: u32,
-}
-
-struct DialogOption {
-    text: String,
-    value: String,
-    disabled: bool,
-}
-
-struct Dialog {
-    id: String,
-    desc: Option<String>,
-    options: Vec<DialogOption>,
-    selection: usize,
-}
-
 struct CopyOperationState {
     progress: u16,
     running: bool,
     should_clear_dialogs: bool,
     error_message: Option<String>,
-}
-
-struct AnimationState {
-    shake_time: f32,  // Current shake animation time
-    shake_target: ShakeTarget, // Which element is currently shaking
-    cursor_animation_time: f32, // Time counter for cursor animations
-    cursor_transition_time: f32, // Time counter for cursor transition animation
-    dialog_transition_time: f32, // Time counter for dialog transition animation
-    dialog_transition_progress: f32, // Progress of dialog transition (0.0 to 1.0)
-    dialog_transition_start_pos: Vec2, // Starting position for icon transition
-    dialog_transition_end_pos: Vec2, // Ending position for icon transition
 }
 
 struct InputState {
@@ -360,214 +291,6 @@ struct StorageMediaState {
 // ===================================
 // IMPL
 // ===================================
-
-impl SoundEffects {
-    /// Loads a sound pack by name, falling back to default sounds if a file is missing.
-    async fn load(pack_name: &str) -> Self {
-        // Load the default built-in sounds
-        let default_move = audio::load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
-        let default_select = audio::load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
-        let default_reject = audio::load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
-        let default_back = audio::load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
-
-        if pack_name == "Default" {
-            return SoundEffects {
-                cursor_move: default_move,
-                select: default_select,
-                reject: default_reject,
-                back: default_back,
-            };
-        }
-
-        // --- NEW, SIMPLIFIED LOGIC ---
-        let system_pack_path = format!("../sfx/{}", pack_name);
-        let user_pack_path = get_user_data_dir().map(|d| d.join("sfx").join(pack_name));
-
-        // Define a regular async function to load a single sound
-        async fn load_one_sfx(
-            name: &str,
-            user_path_base: &Option<PathBuf>,
-            system_path_base: &str,
-            fallback: &audio::Sound,
-        ) -> audio::Sound {
-            // 1. Try user path first
-            if let Some(base) = user_path_base {
-                if let Ok(sound) = load_sound(&base.join(name).to_string_lossy()).await {
-                    return sound;
-                }
-            }
-            // 2. Fallback to system path
-            if let Ok(sound) = load_sound(&std::path::Path::new(system_path_base).join(name).to_string_lossy()).await {
-                return sound;
-            }
-            // 3. Fallback to the default sound
-            fallback.clone()
-        }
-
-        // Call the async function for each sound effect
-        let (cursor_move, select, reject, back) = futures::join!(
-            load_one_sfx("move.wav", &user_pack_path, &system_pack_path, &default_move),
-            load_one_sfx("select.wav", &user_pack_path, &system_pack_path, &default_select),
-            load_one_sfx("reject.wav", &user_pack_path, &system_pack_path, &default_reject),
-            load_one_sfx("back.wav", &user_pack_path, &system_pack_path, &default_back)
-        );
-
-        SoundEffects { cursor_move, select, reject, back }
-    }
-
-    // All play_* functions now take the config to get the volume
-    fn play_cursor_move(&self, config: &Config) {
-        audio::play_sound(&self.cursor_move, audio::PlaySoundParams {
-            looped: false,
-            volume: config.sfx_volume,
-        });
-    }
-
-    fn play_select(&self, config: &Config) {
-        audio::play_sound(&self.select, audio::PlaySoundParams {
-            looped: false,
-            volume: config.sfx_volume,
-        });
-    }
-
-    fn play_reject(&self, config: &Config) {
-        audio::play_sound(&self.reject, audio::PlaySoundParams {
-            looped: false,
-            volume: config.sfx_volume,
-        });
-    }
-
-    fn play_back(&self, config: &Config) {
-        audio::play_sound(&self.back, audio::PlaySoundParams {
-            looped: false,
-            volume: config.sfx_volume,
-        });
-    }
-}
-
-impl AnimationState {
-    const SHAKE_DURATION: f32 = 0.2;    // Duration of shake animation in seconds
-    const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
-    const CURSOR_ANIMATION_SPEED: f32 = 10.0; // Speed of cursor color animation
-    const CURSOR_TRANSITION_DURATION: f32 = 0.15; // Duration of cursor transition animation
-    const DIALOG_TRANSITION_DURATION: f32 = 0.4; // Duration of dialog transition animation
-
-    fn new() -> Self {
-        AnimationState {
-            shake_time: 0.0,
-            shake_target: ShakeTarget::None,
-            cursor_animation_time: 0.0,
-            cursor_transition_time: 0.0,
-            dialog_transition_time: 0.0,
-            dialog_transition_progress: 0.0,
-            dialog_transition_start_pos: Vec2::ZERO,
-            dialog_transition_end_pos: Vec2::ZERO,
-        }
-    }
-
-    fn calculate_shake_offset(&self, target: ShakeTarget) -> f32 {
-        if self.shake_target == target && self.shake_time > 0.0 {
-            (self.shake_time / Self::SHAKE_DURATION * std::f32::consts::PI * 8.0).sin() * Self::SHAKE_INTENSITY
-        } else {
-            0.0
-        }
-    }
-
-    fn update_shake(&mut self, delta_time: f32) {
-        // Update shake animation
-        if self.shake_time > 0.0 {
-            self.shake_time = (self.shake_time - delta_time).max(0.0);
-            if self.shake_time <= 0.0 {
-                self.shake_target = ShakeTarget::None;
-            }
-        }
-    }
-
-    fn update_cursor_animation(&mut self, delta_time: f32) {
-        // Update cursor animation
-        self.cursor_animation_time = (self.cursor_animation_time + delta_time * Self::CURSOR_ANIMATION_SPEED) % (2.0 * std::f32::consts::PI);
-        // Update cursor transition
-        if self.cursor_transition_time > 0.0 {
-            self.cursor_transition_time = (self.cursor_transition_time - delta_time).max(0.0);
-        }
-    }
-
-    fn trigger_shake(&mut self, is_left: bool) {
-        if is_left {
-            self.shake_target = ShakeTarget::LeftArrow;
-            self.shake_time = Self::SHAKE_DURATION;
-        } else {
-            self.shake_target = ShakeTarget::RightArrow;
-            self.shake_time = Self::SHAKE_DURATION;
-        }
-    }
-
-    fn trigger_dialog_shake(&mut self) {
-        self.shake_target = ShakeTarget::Dialog;
-        self.shake_time = Self::SHAKE_DURATION;
-    }
-
-    fn trigger_play_option_shake(&mut self) {
-        self.shake_target = ShakeTarget::PlayOption;
-        self.shake_time = Self::SHAKE_DURATION;
-    }
-
-    fn trigger_copy_log_option_shake(&mut self) {
-        self.shake_target = ShakeTarget::CopyLogOption;
-        self.shake_time = Self::SHAKE_DURATION;
-    }
-
-    fn trigger_transition(&mut self) {
-        self.cursor_transition_time = Self::CURSOR_TRANSITION_DURATION;
-    }
-
-    fn get_cursor_color(&self, config: &Config) -> Color { // Add config parameter
-        // Get the base color from the config using our existing helper function
-        let base_color = string_to_color(&config.cursor_color);
-
-        // Calculate the pulsating brightness/alpha value (same as before)
-        let c = (self.cursor_animation_time.sin() * 0.5 + 0.5).max(0.3);
-
-        // Return the base color with the pulsating alpha
-        Color {
-            r: base_color.r,
-            g: base_color.g,
-            b: base_color.b,
-            a: c,
-        }
-    }
-
-    fn get_cursor_scale(&self) -> f32 {
-        if self.cursor_transition_time > 0.0 {
-            let t = self.cursor_transition_time / Self::CURSOR_TRANSITION_DURATION;
-            // Start at 1.5x size and smoothly transition to 1.0x
-            1.0 + 0.5 * t
-        } else {
-            1.0
-        }
-    }
-
-    fn update_dialog_transition(&mut self, delta_time: f32) {
-        if self.dialog_transition_time > 0.0 {
-            self.dialog_transition_time = (self.dialog_transition_time - delta_time).max(0.0);
-            self.dialog_transition_progress = 1.0 - (self.dialog_transition_time / Self::DIALOG_TRANSITION_DURATION);
-        }
-    }
-
-    fn trigger_dialog_transition(&mut self, start_pos: Vec2, end_pos: Vec2) {
-        self.dialog_transition_time = Self::DIALOG_TRANSITION_DURATION;
-        self.dialog_transition_progress = 0.0;
-        self.dialog_transition_start_pos = start_pos;
-        self.dialog_transition_end_pos = end_pos;
-    }
-
-    fn get_dialog_transition_pos(&self) -> Vec2 {
-        let t = self.dialog_transition_progress;
-        // Use smooth easing function
-        let t = t * t * (3.0 - 2.0 * t);
-        self.dialog_transition_start_pos.lerp(self.dialog_transition_end_pos, t)
-    }
-}
 
 impl InputState {
     const ANALOG_DEADZONE: f32 = 0.5;  // Increased deadzone for less sensitivity
@@ -736,72 +459,6 @@ fn window_conf() -> Conf {
 // FUNCTIONS
 // ===================================
 
-// FOR DESKTOP USE
-/*
-fn prepare_for_launch(
-    cart_info: &save::CartInfo,
-    kzi_path: &std::path::Path,
-    ) -> (Screen, Option<f64>) {
-    // --- 1. Define all paths from the script ---
-    let game_root = kzi_path.parent().unwrap(); // This is the "lowerdir"
-    let save_root = get_save_dir_from_drive_name("internal"); // Saves are always on internal
-    let upperdir = std::path::Path::new(&save_root).join(&cart_info.id);
-
-    let kazeta_run_dir = dirs::home_dir().unwrap().join(".local/share/kazeta/run");
-    let workdir = kazeta_run_dir.join("work");
-    let targetdir = kazeta_run_dir.join("cart");
-    let runtimedir = kazeta_run_dir.join("runtime");
-
-    // --- 2. Find the runtime executable ---
-    let runtime_path = save::find_runtime_executable(game_root, cart_info.runtime.as_deref().unwrap_or("none"));
-    if runtime_path.is_none() && cart_info.runtime.as_deref().unwrap_or("none") != "none" {
-        // Handle case where a runtime is specified but not found
-        // For now, we'll let it fail, but you could show a dialog here
-        }
-
-        // --- 3. Build the sequence of commands ---
-
-        // Command to mount the overlayfs and runtime
-        let mount_command = format!(
-            "pkexec kazeta-mount '{}' '{}' '{}' '{}' '{}' '{}'",
-    game_root.display(),
-    upperdir.display(),
-    workdir.display(),
-    targetdir.display(),
-    runtime_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
-    runtimedir.display()
-    );
-
-    // Command to run the game itself from within the new directory
-    let game_command = format!("cd '{}' && {}", targetdir.display(), &cart_info.exec);
-
-    // Command to clean up and unmount everything afterward
-    let unmount_command = format!(
-        "pkexec kazeta-mount --unmount '{}' '{}'",
-    targetdir.display(),
-    runtimedir.display()
-    );
-
-    // Combine them all into a single command for the OS to run
-    let full_command = format!("{} && {} && {}", mount_command, game_command, unmount_command);
-    println!("[Debug] Full launch command: {}", full_command);
-
-
-    // --- 4. Write to the launch file (this logic is the same) ---
-    let state_dir = std::path::Path::new("/var/kazeta/state");
-    if state_dir.exists() {
-        let launch_cmd_path = state_dir.join(".LAUNCH_CMD");
-        let _ = fs::write(launch_cmd_path, full_command);
-
-        let sentinel_path = state_dir.join(".RESTART_SESSION_SENTINEL");
-        let _ = fs::File::create(sentinel_path);
-        }
-
-        // --- 5. Return the state to begin the fade-out ---
-        (Screen::FadingOut, Some(get_time()))
-}
-*/
-
 // Helper to read the first line from a file containing a specific key
 fn read_line_from_file(path: &str, key: &str) -> Option<String> {
     fs::read_to_string(path).ok()?.lines()
@@ -926,137 +583,6 @@ fn save_log_to_file(log_messages: &[String]) -> std::io::Result<String> {
 
     println!("Log saved to {}", filename);
     Ok(filename)
-}
-
-// A new function specifically for drawing text that respects the config color
-fn text_with_config_color(font_cache: &HashMap<String, Font>, config: &Config, text: &str, x: f32, y: f32, font_size: u16) {
-    let font = get_current_font(font_cache, config);
-
-    // Shadow should scale with font size
-    let shadow_offset = 1.0 * (font_size as f32 / FONT_SIZE as f32);
-
-    // Shadow
-    draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
-        font: Some(font),
-        font_size,
-        color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 },
-        ..Default::default()
-    });
-
-    // Main Text (using the color from config)
-    draw_text_ex(text, x, y, TextParams {
-        font: Some(font),
-        font_size,
-        color: string_to_color(&config.font_color),
-        ..Default::default()
-    });
-}
-
-fn text_disabled(font_cache: &HashMap<String, Font>, config: &Config, text : &str, x : f32, y: f32, font_size: u16) {
-    let font = get_current_font(font_cache, config);
-    let shadow_offset = 1.0 * (font_size as f32 / FONT_SIZE as f32);
-
-    // SHADOW
-    draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
-        font: Some(font),
-        //font_size: font_size,
-        font_size,
-        color: Color {r:0.0, g:0.0, b:0.0, a:1.0},
-        ..Default::default()
-    });
-
-    // MAIN TEXT
-    draw_text_ex(text, x, y, TextParams {
-        font: Some(font),
-        //font_size: font_size,
-        font_size,
-        color: Color {r:0.4, g:0.4, b:0.4, a:1.0},
-        ..Default::default()
-    });
-}
-
-// Scans the 'sfx/' directory for sound pack folders.
-fn find_sound_packs() -> Vec<String> {
-    let mut packs = HashSet::new();
-    packs.insert("Default".to_string()); // "Default" is always an option
-
-    // 1. Scan the system directory relative to the BIOS
-    let system_sfx_dir = std::path::Path::new("../sfx");
-    if let Ok(entries) = fs::read_dir(system_sfx_dir) {
-        for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                packs.insert(entry.file_name().to_string_lossy().into_owned());
-            }
-        }
-    }
-
-    // 2. Scan the user's data directory
-    if let Some(user_sfx_dir) = get_user_data_dir().map(|d| d.join("sfx")) {
-        if let Ok(entries) = fs::read_dir(user_sfx_dir) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    packs.insert(entry.file_name().to_string_lossy().into_owned());
-                }
-            }
-        }
-    }
-
-    // 3. Convert the set back to a sorted list for the UI
-    let mut sorted_packs: Vec<String> = packs.into_iter().collect();
-    sorted_packs.sort();
-    sorted_packs
-}
-
-/// Scans a directory and returns a sorted list of paths for files with given extensions.
-fn find_asset_files(dir_path: &str, extensions: &[&str]) -> Vec<PathBuf> {
-    if let Ok(entries) = fs::read_dir(dir_path) {
-        let mut files: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|path| {
-            path.is_file() &&
-            path.extension()
-            .and_then(|s| s.to_str())
-            .map_or(false, |ext| extensions.contains(&ext))
-        })
-        .collect();
-        files.sort();
-        return files;
-    }
-    vec![]
-}
-
-/// Looks up the currently selected font in the cache.
-/// Falls back to the "Default" font if the selection is not found.
-fn get_current_font<'a>(
-    font_cache: &'a HashMap<String, Font>,
-    config: &Config,
-) -> &'a Font {
-    font_cache
-    .get(&config.font_selection)
-    .unwrap_or_else(|| &font_cache["Default"])
-}
-
-fn play_new_bgm(
-    track_name: &str,
-    volume: f32,
-    music_cache: &HashMap<String, audio::Sound>,
-    current_bgm: &mut Option<audio::Sound>,
-) {
-    // Stop any music that is currently playing
-    if let Some(sound) = current_bgm.take() {
-        audio::stop_sound(&sound);
-    }
-
-    // If the track_name is not "OFF", find it in the cache and play it
-    if track_name != "OFF" {
-        if let Some(sound_to_play) = music_cache.get(track_name) {
-            // Sound handles are cheap to clone
-            let sound_handle = sound_to_play.clone();
-            audio::play_sound(&sound_handle, audio::PlaySoundParams { looped: true, volume });
-            *current_bgm = Some(sound_handle);
-        }
-    }
 }
 
 fn pixel_pos(v: f32, scale_factor: f32) -> f32 {
@@ -1186,6 +712,138 @@ fn calculate_icon_transition_positions(selected_memory: usize, scale_factor: f32
     );
     let dialog_pos = Vec2::new(padding, padding);
     (grid_pos, dialog_pos)
+}
+
+fn create_confirm_delete_dialog() -> Dialog {
+    Dialog {
+        id: "confirm_delete".to_string(),
+        desc: Some("PERMANENTLY DELETE THIS SAVE DATA?".to_string()),
+        options: vec![
+            DialogOption {
+                text: "DELETE".to_string(),
+                value: "DELETE".to_string(),
+                disabled: false,
+            },
+            DialogOption {
+                text: "CANCEL".to_string(),
+                value: "CANCEL".to_string(),
+                disabled: false,
+            }
+        ],
+        selection: 1,
+    }
+}
+
+fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
+    let mut options = Vec::new();
+    if let Ok(state) = storage_state.lock() {
+        for drive in state.media.iter() {
+            if drive.id == state.media[state.selected].id {
+                continue;
+            }
+            options.push(DialogOption {
+                text: format!("{} ({} MB Free)", drive.id.clone(), drive.free),
+                         value: drive.id.clone(),
+                         disabled: false,
+            });
+        }
+    }
+    options.push(DialogOption {
+        text: "CANCEL".to_string(),
+                 value: "CANCEL".to_string(),
+                 disabled: false,
+    });
+
+    Dialog {
+        id: "copy_storage_select".to_string(),
+        desc: Some("WHERE TO COPY THIS SAVE DATA?".to_string()),
+        options,
+        selection: 0,
+    }
+}
+
+fn create_main_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
+    let has_external_devices = if let Ok(state) = storage_state.lock() {
+        state.media.len() > 1
+    } else {
+        false
+    };
+
+    let options = vec![
+        DialogOption {
+            text: "COPY".to_string(),
+            value: "COPY".to_string(),
+            disabled: !has_external_devices,
+        },
+        DialogOption {
+            text: "DELETE".to_string(),
+            value: "DELETE".to_string(),
+            disabled: false,
+        },
+        DialogOption {
+            text: "CANCEL".to_string(),
+            value: "CANCEL".to_string(),
+            disabled: false,
+        },
+    ];
+
+    Dialog {
+        id: "main".to_string(),
+        desc: None,
+        options,
+        selection: 0,
+    }
+}
+
+fn create_save_exists_dialog() -> Dialog {
+    Dialog {
+        id: "save_exists".to_string(),
+        desc: Some("THIS SAVE DATA ALREADY EXISTS AT THE SELECTED DESTINATION".to_string()),
+        options: vec![
+            DialogOption {
+                text: "OK".to_string(),
+                value: "OK".to_string(),
+                disabled: false,
+            }
+        ],
+        selection: 0,
+    }
+}
+
+fn create_error_dialog(message: String) -> Dialog {
+    Dialog {
+        id: "error".to_string(),
+        desc: Some(message),
+        options: vec![
+            DialogOption {
+                text: "OK".to_string(),
+                value: "OK".to_string(),
+                disabled: false,
+            }
+        ],
+        selection: 0,
+    }
+}
+
+fn start_log_reader(process: &mut Child, logs: Arc<Mutex<Vec<String>>>) {
+    // Take ownership of the output pipes
+    if let (Some(stdout), Some(stderr)) = (process.stdout.take(), process.stderr.take()) {
+        let logs_clone_stdout = logs.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().filter_map(|l| l.ok()) {
+                logs_clone_stdout.lock().unwrap().push(line);
+            }
+        });
+
+        let logs_clone_stderr = logs.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().filter_map(|l| l.ok()) {
+                logs_clone_stderr.lock().unwrap().push(line);
+            }
+        });
+    }
 }
 
 ////////////////////////
@@ -1359,6 +1017,7 @@ fn render_ui_overlay(
     }
 }
 
+/*
 // MAIN MENU
 fn render_main_menu(
     menu_options: &[&str],
@@ -1386,112 +1045,8 @@ fn render_main_menu(
 
     render_background(background_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
-
-    // --- Draw menu options (centered) ---
-    for (i, option) in menu_options.iter().enumerate() {
-        let text_dims = measure_text(&option.to_uppercase(), Some(current_font), font_size, 1.0);
-        let y_pos = menu_start_y + (i as f32 * menu_option_height);
-
-        // Base X position for centered text
-        let mut x_pos = (screen_width() - text_dims.width) / 2.0;
-
-        // Apply shake effect to both text and highlight if "Play" is disabled and selected
-        if i == 1 && !play_option_enabled && i == selected_option {
-            x_pos += animation_state.calculate_shake_offset(ShakeTarget::PlayOption) * scale_factor;
-        }
-
-        // Apply shake effect to both text and highlight if "Copy Logs" is disabled and selected
-        if i == 2 && !copy_logs_option_enabled && i == selected_option {
-            x_pos += animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption) * scale_factor;
-        }
-
-        // --- Draw selected option highlight ---
-        if i == selected_option {
-            let cursor_color = animation_state.get_cursor_color(config);
-            let cursor_scale = animation_state.get_cursor_scale();
-
-            let highlight_padding = MENU_PADDING * 1.5 * scale_factor; // Make padding a bit bigger
-            let base_width = text_dims.width + (highlight_padding * 2.0);
-            let base_height = text_dims.height + (highlight_padding * 2.0);
-
-            let scaled_width = base_width * cursor_scale;
-            let scaled_height = base_height * cursor_scale;
-            let offset_x = (scaled_width - base_width) / 2.0;
-            let offset_y = (scaled_height - base_height) / 2.0;
-
-            let rect_x = (screen_width() - base_width) / 2.0;
-            let rect_y = y_pos - (base_height / 2.0) + (text_dims.height / 2.0) - (menu_padding / 2.0);
-
-            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
-        }
-
-        let text_y_pos = y_pos + menu_padding;
-
-        /*
-        // Apply shake effect to disabled play option when selected
-        if i == 1 && !play_option_enabled {
-            let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
-            x_pos += shake_offset;
-            //current_text_x += shake_offset;
-        }
-
-        if i == 1 && !play_option_enabled {
-            //text_disabled(font_cache, config, option, current_text_x, text_y, font_size);
-            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
-        } else {
-            //text_with_config_color(font_cache, config, option, current_text_x, text_y, font_size);
-            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
-        }
-
-        // Apply shake effect to disabled copy log option when selected
-        if i == 2 && !copy_logs_option_enabled {
-            let shake_offset = animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption);
-            x_pos += shake_offset;
-            //current_text_x += shake_offset;
-        }
-
-        // disable text if we don't have an SD card inserted
-        if i == 2 && !copy_logs_option_enabled {
-            //text_disabled(font_cache, config, option, current_text_x, text_y, font_size);
-            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
-        } else {
-            //text_with_config_color(font_cache, config, option, current_text_x, text_y, font_size);
-            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
-        }
-        */
-        // CONSOLIDATED: A single if/else if/else block to render text correctly
-        if i == 1 && !play_option_enabled {
-            // Case 1: "PLAY" is disabled
-            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
-        } else if i == 2 && !copy_logs_option_enabled {
-            // Case 2: "COPY SESSION LOGS" is disabled (FIX: check for index 2)
-            text_disabled(font_cache, config, option, x_pos, text_y_pos, font_size);
-        } else {
-            // Case 3: All other options, or if the above are enabled
-            text_with_config_color(font_cache, config, option, x_pos, text_y_pos, font_size);
-        }
-    }
-    // --- Draw the flash message if it exists ---
-    if let Some(message) = flash_message {
-        let font_size = (14.0 * scale_factor) as u16;
-        let dims = measure_text(message, Some(current_font), font_size, 1.0);
-
-        let x = screen_width() / 2.0 - dims.width / 2.0; // Center horizontally
-        let y = screen_height() - (20.0 * scale_factor); // Position near the bottom
-
-        // Draw a semi-transparent background for better readability
-        draw_rectangle(
-            x - (5.0 * scale_factor),
-            y - dims.height,
-            dims.width + (10.0 * scale_factor),
-            dims.height + (5.0 * scale_factor),
-            Color::new(0.0, 0.0, 0.0, 0.7)
-        );
-
-        // Draw the message text
-        text_with_config_color(font_cache, config, message, x, y, font_size);
-    }
 }
+*/
 
 // GAME SELECTION
 fn render_game_selection_menu(
@@ -2100,138 +1655,6 @@ fn render_dialog(
     }
 }
 
-fn create_confirm_delete_dialog() -> Dialog {
-    Dialog {
-        id: "confirm_delete".to_string(),
-        desc: Some("PERMANENTLY DELETE THIS SAVE DATA?".to_string()),
-        options: vec![
-            DialogOption {
-                text: "DELETE".to_string(),
-                value: "DELETE".to_string(),
-                disabled: false,
-            },
-            DialogOption {
-                text: "CANCEL".to_string(),
-                value: "CANCEL".to_string(),
-                disabled: false,
-            }
-        ],
-        selection: 1,
-    }
-}
-
-fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
-    let mut options = Vec::new();
-    if let Ok(state) = storage_state.lock() {
-        for drive in state.media.iter() {
-            if drive.id == state.media[state.selected].id {
-                continue;
-            }
-            options.push(DialogOption {
-                text: format!("{} ({} MB Free)", drive.id.clone(), drive.free),
-                         value: drive.id.clone(),
-                         disabled: false,
-            });
-        }
-    }
-    options.push(DialogOption {
-        text: "CANCEL".to_string(),
-                 value: "CANCEL".to_string(),
-                 disabled: false,
-    });
-
-    Dialog {
-        id: "copy_storage_select".to_string(),
-        desc: Some("WHERE TO COPY THIS SAVE DATA?".to_string()),
-        options,
-        selection: 0,
-    }
-}
-
-fn create_main_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
-    let has_external_devices = if let Ok(state) = storage_state.lock() {
-        state.media.len() > 1
-    } else {
-        false
-    };
-
-    let options = vec![
-        DialogOption {
-            text: "COPY".to_string(),
-            value: "COPY".to_string(),
-            disabled: !has_external_devices,
-        },
-        DialogOption {
-            text: "DELETE".to_string(),
-            value: "DELETE".to_string(),
-            disabled: false,
-        },
-        DialogOption {
-            text: "CANCEL".to_string(),
-            value: "CANCEL".to_string(),
-            disabled: false,
-        },
-    ];
-
-    Dialog {
-        id: "main".to_string(),
-        desc: None,
-        options,
-        selection: 0,
-    }
-}
-
-fn create_save_exists_dialog() -> Dialog {
-    Dialog {
-        id: "save_exists".to_string(),
-        desc: Some("THIS SAVE DATA ALREADY EXISTS AT THE SELECTED DESTINATION".to_string()),
-        options: vec![
-            DialogOption {
-                text: "OK".to_string(),
-                value: "OK".to_string(),
-                disabled: false,
-            }
-        ],
-        selection: 0,
-    }
-}
-
-fn create_error_dialog(message: String) -> Dialog {
-    Dialog {
-        id: "error".to_string(),
-        desc: Some(message),
-        options: vec![
-            DialogOption {
-                text: "OK".to_string(),
-                value: "OK".to_string(),
-                disabled: false,
-            }
-        ],
-        selection: 0,
-    }
-}
-
-fn start_log_reader(process: &mut Child, logs: Arc<Mutex<Vec<String>>>) {
-    // Take ownership of the output pipes
-    if let (Some(stdout), Some(stderr)) = (process.stdout.take(), process.stderr.take()) {
-        let logs_clone_stdout = logs.clone();
-        thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().filter_map(|l| l.ok()) {
-                logs_clone_stdout.lock().unwrap().push(line);
-            }
-        });
-
-        let logs_clone_stderr = logs.clone();
-        thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().filter_map(|l| l.ok()) {
-                logs_clone_stderr.lock().unwrap().push(line);
-            }
-        });
-    }
-}
-
 // ===================================
 // ASYNC FUNCTIONS
 // ===================================
@@ -2246,7 +1669,7 @@ async fn load_all_assets(
 ) -> (
     HashMap<String, Texture2D>, // background cache
     HashMap<String, Texture2D>, // logo cache
-    HashMap<String, audio::Sound>, // music cache
+    HashMap<String, Sound>, // music cache
     HashMap<String, Font>, // font cache
     SoundEffects, // sfx
 ) {
@@ -2341,19 +1764,19 @@ async fn load_all_assets(
 
     // sfx
     let status = "LOADING DEFAULT SFX...".to_string();
-    let default_move = audio::load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
+    let default_move = load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    let default_select = audio::load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
+    let default_select = load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    let default_reject = audio::load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
+    let default_reject = load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    let default_back = audio::load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
+    let default_back = load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
@@ -2372,6 +1795,7 @@ async fn load_all_assets(
 
     println!("\n[INFO] All asset loading complete!");
 
+    /*
     let sound_effects = SoundEffects {
         //splash: default_splash,
         cursor_move: default_move,
@@ -2379,6 +1803,8 @@ async fn load_all_assets(
         reject: default_reject,
         back: default_back,
     };
+    */
+    sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
 
     (background_cache, logo_cache, music_cache, font_cache, sound_effects)
 }
@@ -2649,7 +2075,7 @@ async fn main() {
     .collect();
     bgm_choices.extend(track_names);
 
-    let mut current_bgm: Option<audio::Sound> = None;
+    let mut current_bgm: Option<Sound> = None;
 
     // At the end of your setup, start the BGM based on the config
     if let Some(track_name) = &config.bgm_track {
@@ -2660,15 +2086,15 @@ async fn main() {
     if config.show_splash_screen {
         // Mute the main BGM if it's already playing
         if let Some(sound) = &current_bgm {
-            audio::set_sound_volume(sound, 0.0);
+            set_sound_volume(sound, 0.0);
         }
 
         // --- Load only what the splash screen needs ---
         let splash_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
-        let splash_sfx = audio::load_sound_from_bytes(include_bytes!("../splash.wav")).await.unwrap();
+        let splash_sfx = load_sound_from_bytes(include_bytes!("../splash.wav")).await.unwrap();
 
         // Play the splash sound
-        audio::play_sound(&splash_sfx, audio::PlaySoundParams { looped: false, volume: 0.2 });
+        play_sound(&splash_sfx, PlaySoundParams { looped: false, volume: 0.2 });
 
         // --- Animation Durations ---
         const FADE_DURATION: f64 = 1.0;
@@ -2737,7 +2163,7 @@ async fn main() {
 
         // Restore BGM volume after splash screen
         if let Some(sound) = &current_bgm {
-            audio::set_sound_volume(sound, config.bgm_volume);
+            set_sound_volume(sound, config.bgm_volume);
         }
     }
 
@@ -2747,7 +2173,6 @@ async fn main() {
     let mut animation_state = AnimationState::new();
 
     // Screen state
-    const MAIN_MENU_OPTIONS: [&str; 5] = ["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "ABOUT",];
     let mut current_screen = Screen::MainMenu;
     let mut main_menu_selection: usize = 0;
     let mut settings_menu_selection: usize = 0;
@@ -2898,24 +2323,12 @@ async fn main() {
         // Handle screen-specific rendering and input
         match current_screen {
             Screen::About => {
-                if input_state.back {
-                    current_screen = Screen::MainMenu;
-                    sound_effects.play_back(&config);
-                }
+                // Tell the about module to handle its own logic
+                ui::about::update(&input_state, &mut current_screen, &sound_effects, &config);
 
-                render_background(&background_cache, &config, &mut background_state);
-                render_ui_overlay(&logo_cache, &font_cache, &config, &battery_info, &current_time_str, scale_factor);
-                render_about_screen(&system_info, &font_cache, &config, scale_factor);
-            }
-            Screen::FadingOut => {
-                // During fade, only render, don't process input
-                // Render the current background and UI elements first
-                render_main_menu(
-                    &MAIN_MENU_OPTIONS,
-                    main_menu_selection,
-                    play_option_enabled,
-                    copy_logs_option_enabled,
-                    &animation_state,
+                // Tell the about module to draw itself
+                ui::about::draw(
+                    &system_info,
                     &logo_cache,
                     &background_cache,
                     &font_cache,
@@ -2924,7 +2337,30 @@ async fn main() {
                     &battery_info,
                     &current_time_str,
                     scale_factor,
-                    flash_message.as_ref().map(|(msg, _timer)| msg.as_str()),
+                );
+            }
+            Screen::FadingOut => {
+                // During fade, only render, don't process input
+                // Render the current background and UI elements first
+                ui::main_menu::update(
+                    &mut current_screen,
+                    &mut main_menu_selection,
+                    &mut play_option_enabled,
+                    &mut copy_logs_option_enabled,
+                    &cart_connected,
+                    &input_state,
+                    &mut animation_state,
+                    &sound_effects,
+                    &config,
+                    &log_messages,
+                    &mut fade_start_time,
+                    &mut current_bgm,
+                    &music_cache,
+                    &mut game_icon_queue,
+                    &mut available_games,
+                    &mut game_selection,
+                    &mut flash_message,
+                    &mut game_process,
                 );
 
                 // Calculate fade progress
@@ -2947,14 +2383,28 @@ async fn main() {
                 }
             },
             Screen::MainMenu => {
-                // Update play option enabled status based on cart connection
-                play_option_enabled = cart_connected.load(Ordering::Relaxed);
+                ui::main_menu::update(
+                    &mut current_screen,
+                    &mut main_menu_selection,
+                    &mut play_option_enabled,
+                    &mut copy_logs_option_enabled,
+                    &cart_connected,
+                    &input_state,
+                    &mut animation_state,
+                    &sound_effects,
+                    &config,
+                    &log_messages,
+                    &mut fade_start_time,
+                    &mut current_bgm,
+                    &music_cache,
+                    &mut game_icon_queue,
+                    &mut available_games,
+                    &mut game_selection,
+                    &mut flash_message,
+                    &mut game_process,
+                );
 
-                // Update copy logs option enabled status based on cart connection
-                copy_logs_option_enabled = cart_connected.load(Ordering::Relaxed);
-
-                render_main_menu(
-                    &MAIN_MENU_OPTIONS,
+                ui::main_menu::draw(
                     main_menu_selection,
                     play_option_enabled,
                     copy_logs_option_enabled,
@@ -2967,162 +2417,8 @@ async fn main() {
                     &battery_info,
                     &current_time_str,
                     scale_factor,
-                    flash_message.as_ref().map(|(msg, _timer)| msg.as_str()),
+                    flash_message.as_ref().map(|(msg, _)| msg.as_str()),
                 );
-
-                // Handle main menu navigation
-                if input_state.up {
-                    if main_menu_selection == 0 {
-                        main_menu_selection = MAIN_MENU_OPTIONS.len() - 1;
-                    } else {
-                        main_menu_selection = (main_menu_selection - 1) % MAIN_MENU_OPTIONS.len();
-                    }
-                    animation_state.trigger_transition();
-                    sound_effects.play_cursor_move(&config);
-                }
-                if input_state.down {
-                    main_menu_selection = (main_menu_selection + 1) % MAIN_MENU_OPTIONS.len();
-                    animation_state.trigger_transition();
-                    sound_effects.play_cursor_move(&config);
-                }
-                if input_state.select {
-                    match main_menu_selection {
-                        0 => { // SAVE DATA
-                            current_screen = Screen::SaveData;
-                            input_state.ui_focus = UIFocus::Grid;
-                            sound_effects.play_select(&config);
-                        },
-                        1 => { // PLAY option
-                            if play_option_enabled {
-                                sound_effects.play_select(&config);
-                                log_messages.lock().unwrap().clear();
-
-                                match save::find_all_kzi_files() {
-                                    Ok((kzi_paths, mut debug_log)) => {
-                                        log_messages.lock().unwrap().append(&mut debug_log);
-
-                                        let mut games: Vec<(save::CartInfo, PathBuf)> = Vec::new();
-                                        let parse_errors: Vec<String> = Vec::new();
-
-                                        for path in &kzi_paths {
-                                            if let Ok(info) = save::parse_kzi_file(path) {
-                                                games.push((info, path.clone()));
-                                            }
-                                        }
-
-                                        match games.len() {
-                                            0 => { // Case: Found files, but none were valid
-                                                let mut logs = log_messages.lock().unwrap();
-                                                logs.push(format!("[Info] Found {} potential game file(s), but none could be parsed.", kzi_paths.len()));
-                                                logs.push("--- ERRORS ---".to_string());
-                                                logs.extend(parse_errors);
-                                                current_screen = Screen::Debug;
-                                            },
-                                            1 => {
-                                                // Case: Exactly one game found, go to Debug screen and launch
-                                                let (cart_info, kzi_path) = games.remove(0);
-                                                sound_effects.play_select(&config);
-
-                                                if DEBUG_GAME_LAUNCH {
-                                                    { // Scoped lock to add messages
-                                                        let mut logs = log_messages.lock().unwrap();
-                                                        logs.push("--- CARTRIDGE FOUND ---".to_string());
-                                                        logs.push(format!("Name: {}", cart_info.name.as_deref().unwrap_or("N/A")));
-                                                        logs.push(format!("ID: {}", cart_info.id));
-                                                        logs.push(format!("Exec: {}", cart_info.exec));
-                                                        logs.push(format!("Runtime: {}", cart_info.runtime.as_deref().unwrap_or("None")));
-                                                        logs.push(format!("KZI Path: {}", kzi_path.display()));
-                                                    }
-                                                    println!("[Debug] Single Cartridge Found! Preparing to launch...");
-                                                    println!("[Debug]   Name: {}", cart_info.name.as_deref().unwrap_or("N/A"));
-                                                    println!("[Debug]   ID: {}", cart_info.id);
-                                                    println!("[Debug]   Exec: {}", cart_info.exec);
-                                                    println!("[Debug]   Runtime: {}", cart_info.runtime.as_deref().unwrap_or("None"));
-                                                    println!("[Debug]   KZI Path: {}", kzi_path.display());
-
-                                                    match save::launch_game(&cart_info, &kzi_path) {
-                                                        Ok(mut child) => {
-                                                            log_messages.lock().unwrap().push("\n--- LAUNCHING GAME ---".to_string());
-                                                            start_log_reader(&mut child, log_messages.clone());
-                                                            game_process = Some(child);
-                                                        }
-                                                        Err(e) => {
-                                                            log_messages.lock().unwrap().push(format!("\n--- LAUNCH FAILED ---\nError: {}", e));
-                                                        }
-                                                    }
-                                                    current_screen = Screen::Debug;
-                                                } else {
-                                                    // --- PRODUCTION MODE: Fade out and launch ---
-                                                    (current_screen, fade_start_time) = trigger_session_restart(&mut current_bgm, &music_cache);
-                                                }
-                                            },
-                                            _ => { // multiple games found
-                                                println!("[Debug] Found {} games. Switching to selection screen.", games.len());
-                                                for (index, (_, path)) in games.iter().enumerate() {
-                                                    println!("[Debug]   Game {}: {}", index + 1, path.display());
-                                                }
-
-                                                // --- FIX 2: Use the cart_info.icon field ---
-                                                // Queue up the icons for loading.
-                                                game_icon_queue.clear();
-                                                for (cart_info, kzi_path) in &games {
-                                                    let icon_path = kzi_path.parent().unwrap().join(&cart_info.icon);
-                                                    game_icon_queue.push((cart_info.id.clone(), icon_path));
-                                                }
-
-                                                available_games = games;
-                                                game_selection = 0;
-                                                current_screen = Screen::GameSelection;
-                                            }
-                                        }
-                                    },
-                                    Err(e) => { // Handle the error case
-                                        let error_msg = format!("[Error] Error scanning for cartridges: {}", e);
-                                        println!("[Error] {}", &error_msg);
-                                        log_messages.lock().unwrap().push(error_msg);
-                                        current_screen = Screen::Debug;
-                                    }
-                                }
-                            } else {
-                                sound_effects.play_reject(&config);
-                                animation_state.trigger_play_option_shake();
-                            }
-                        },
-                        2 => { // SESSION LOG COPY
-                            if copy_logs_option_enabled {
-                                sound_effects.play_select(&config);
-
-                                // Call our new function and handle the result
-                                match copy_session_logs_to_sd() {
-                                    Ok(path) => {
-                                        flash_message = Some((
-                                            format!("LOGS COPIED TO {}", path),
-                                                FLASH_MESSAGE_DURATION
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        flash_message = Some((
-                                            format!("ERROR: {}", e),
-                                                FLASH_MESSAGE_DURATION
-                                        ));
-                                    }
-                                }
-                            } else {
-                                sound_effects.play_reject(&config);
-                                animation_state.trigger_copy_log_option_shake();
-                            }
-                        },
-                        3 => { // SETTINGS
-                            current_screen = Screen::VideoSettings;
-                            sound_effects.play_select(&config);
-                        },
-                        4 => { // ABOUT
-                            current_screen = Screen::About;
-                            sound_effects.play_select(&config);
-                        },
-                        _ => {}
-                    }
-                }
             },
             Screen::VideoSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
                 ui::settings::update(

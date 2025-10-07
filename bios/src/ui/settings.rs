@@ -1,9 +1,11 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::process::Command;
-use macroquad::audio;
+//use macroquad::audio;
 
 // Import things from our new modules
+use crate::assets::find_sound_packs;
+use crate::audio::{SoundEffects, play_new_bgm};
 use crate::config::{Config, save_config};
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
@@ -11,7 +13,7 @@ use crate::{FONT_SIZE, MENU_PADDING, SETTINGS_START_Y, SETTINGS_OPTION_HEIGHT};
 
 // Import types/structs/constants that are still in main.rs
 use crate::{
-    AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen, SoundEffects,
+    AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen,
     render_background, render_ui_overlay, get_current_font, measure_text,
     text_with_config_color, find_sound_packs, play_new_bgm
 };
