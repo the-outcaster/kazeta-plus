@@ -1,9 +1,10 @@
 // Make sure you have the right imports and make your structs public
 use crate::audio::SoundEffects;
 use crate::config::get_user_data_dir;
+use macroquad::prelude::*; // for load_string
 use serde::Deserialize;
 use std::collections::HashMap;
-use tokio::fs; // Use tokio's fs module!
+use std::fs;
 
 // This needs to be public so main.rs can see it
 #[derive(Deserialize, Debug, Clone)]
@@ -33,46 +34,40 @@ pub struct Theme {
 // LOAD CUSTOM THEMES
 pub async fn load_all_themes() -> HashMap<String, Theme> {
     let mut themes = HashMap::new();
-    // It's efficient to load the default sounds once and clone them
-    // for any theme that doesn't specify a custom pack.
+
+    // .await is needed here because SoundEffects::load is async
     let default_sfx = SoundEffects::load("Default").await;
 
-    // Get the path to the user's themes directory
     let themes_dir = match get_user_data_dir() {
         Some(dir) => dir.join("themes"),
-        None => return themes, // Or handle error appropriately
+        None => return themes,
     };
 
-    if let Ok(mut entries) = fs::read_dir(themes_dir).await {
-        while let Ok(Some(entry)) = entries.next_entry().await {
+    // Use synchronous std::fs to list directories. It's simple and efficient here.
+    if let Ok(entries) = fs::read_dir(themes_dir) {
+        for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 let theme_name = path.file_name().unwrap().to_string_lossy().into_owned();
                 let toml_path = path.join("theme.toml");
 
                 if toml_path.exists() {
-                    // Read and parse the theme.toml file
-                    if let Ok(content) = fs::read_to_string(toml_path).await {
+                    // Use macroquad's async load_string to read file contents
+                    if let Ok(content) = load_string(&toml_path.to_string_lossy()).await {
                         if let Ok(config) = toml::from_str::<ThemeConfigFile>(&content) {
-
-                            // Load the specified sound pack, or clone the default
                             let sounds = match &config.sfx_pack {
+                                // .await is needed here too
                                 Some(pack_name) => SoundEffects::load(pack_name).await,
                                 None => default_sfx.clone(),
                             };
-
-                            // Here, you would also load your other assets like fonts and images
-                            // let background = load_texture(...).await.unwrap();
 
                             let loaded_theme = Theme {
                                 name: theme_name.clone(),
                                 sounds,
                                 config,
-                                // background,
-                                // ...etc
                             };
 
-                            println!("Loaded theme '{}'", theme_name);
+                            println!("[INFO] Loaded theme '{}'", theme_name);
                             themes.insert(theme_name, loaded_theme);
                         }
                     }

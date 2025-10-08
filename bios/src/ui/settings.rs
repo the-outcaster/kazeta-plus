@@ -4,7 +4,7 @@ use std::process::Command;
 use macroquad::audio::{Sound, set_sound_volume};
 
 // Import things from our new modules
-use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
+use crate::audio::{SoundEffects, play_new_bgm};
 //use crate::config::{Config, save_config};
 use crate::config::Config;
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
@@ -221,20 +221,26 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
         // CUSTOM ASSETS
         4 => match index {
             0 => { // BGM SELECTION
-                // If a theme is active (not "Default"), and it has a BGM track...
-                if config.theme != "Default" && config.bgm_track.is_some() {
-                    // ...show the theme name.
-                    config.theme.clone()
-                } else {
-                    // Otherwise, show the track name or "OFF"
-                    let track = config.bgm_track.clone().unwrap_or("OFF".to_string());
-                    trim_extension(&track).replace('_', " ").to_uppercase()
-                }
+                // Always show the current track or "OFF"
+                let track = config.bgm_track.clone().unwrap_or("OFF".to_string());
+                trim_extension(&track).replace('_', " ").to_uppercase()
             },
-            1 => if config.theme != "Default" { config.theme.clone() } else { config.sfx_pack.clone().replace('_', " ").to_uppercase() },
-            2 => if config.theme != "Default" { config.theme.clone() } else { trim_extension(&config.logo_selection).replace('_', " ").to_uppercase() },
-            3 => if config.theme != "Default" { config.theme.clone() } else { trim_extension(&config.background_selection).replace('_', " ").to_uppercase() },
-            4 => if config.theme != "Default" { config.theme.clone() } else { trim_extension(&config.font_selection).replace('_', " ").to_uppercase() },
+            1 => { // SOUND PACK
+                // Always show the currently selected sound pack
+                config.sfx_pack.clone().replace('_', " ").to_uppercase()
+            },
+            2 => { // LOGO
+                // Always show the currently selected logo
+                trim_extension(&config.logo_selection).replace('_', " ").to_uppercase()
+            },
+            3 => { // BACKGROUND
+                // Always show the currently selected background
+                trim_extension(&config.background_selection).replace('_', " ").to_uppercase()
+            },
+            4 => { // FONT TYPE
+                // Always show the currently selected font
+                trim_extension(&config.font_selection).replace('_', " ").to_uppercase()
+            },
             5 => "<-".to_string(),
             _ => "".to_string(),
         },
@@ -248,6 +254,7 @@ pub fn update(
     input_state: &InputState,
     config: &mut Config,
     themes: &Vec<String>,
+    sound_pack_choices: &Vec<String>,
     loaded_themes: &HashMap<String, theme::Theme>,
     settings_menu_selection: &mut usize,
     sound_effects: &mut SoundEffects,
@@ -496,39 +503,91 @@ pub fn update(
                     if themes.is_empty() { return; } // Prevent panic if no themes are loaded
 
                     let current_index = themes.iter().position(|t| *t == config.theme).unwrap_or(0);
-
                     let new_index = if input_state.right {
                         (current_index + 1) % themes.len()
                     } else {
                         (current_index + themes.len() - 1) % themes.len()
                     };
 
-                    let new_theme_name = &themes[new_index];
+                    // Clone the name here to work around borrowing rules
+                    let new_theme_name = themes[new_index].clone();
 
-                    // --- THIS IS THE NEW LOGIC ---
-                    // 1. Update the theme name in the config
-                    config.theme = new_theme_name.clone();
+                    // --- REVISED THEME SWITCHING LOGIC ---
 
-                    // Get the full theme data from the pre-loaded map
-                    if let Some(new_theme) = loaded_themes.get(new_theme_name) {
-                        // APPLY ALL THE THEME SETTINGS TO THE MAIN CONFIG
+                    // Only run this logic if the theme has actually changed
+                    if config.theme != new_theme_name {
                         config.theme = new_theme_name.clone();
-                        *sound_effects = new_theme.sounds.clone();
 
-                        // Go through each setting from the theme's config and apply it
-                        if let Some(val) = &new_theme.config.menu_position { config.menu_position = val.parse().unwrap_or_default(); }
-                        if let Some(val) = &new_theme.config.font_color { config.font_color = val.clone(); }
-                        if let Some(val) = &new_theme.config.cursor_color { config.cursor_color = val.clone(); }
-                        if let Some(val) = &new_theme.config.background_scroll_speed { config.background_scroll_speed = val.clone(); }
-                        if let Some(val) = &new_theme.config.color_shift_speed { config.color_shift_speed = val.clone(); }
-                        if let Some(val) = &new_theme.config.bgm_track { config.bgm_track = Some(val.clone()); }
-                        if let Some(val) = &new_theme.config.logo_selection { config.logo_selection = val.clone(); }
-                        if let Some(val) = &new_theme.config.background_selection { config.background_selection = val.clone(); }
-                        if let Some(val) = &new_theme.config.font_selection { config.font_selection = val.clone(); }
+                        // Special case for the "Default" theme
+                        if new_theme_name == "Default" {
+                            println!("[INFO] Switched to Default theme.");
+                            let defaults = Config::default(); // Get a fresh set of default values
+
+                            // Apply the default settings to the live config
+                            config.sfx_pack = defaults.sfx_pack;
+                            config.bgm_track = defaults.bgm_track;
+                            config.logo_selection = defaults.logo_selection;
+                            config.background_selection = defaults.background_selection;
+                            config.font_selection = defaults.font_selection;
+                            config.menu_position = defaults.menu_position;
+                            config.font_color = defaults.font_color;
+                            config.cursor_color = defaults.cursor_color;
+                            config.background_scroll_speed = defaults.background_scroll_speed;
+                            config.color_shift_speed = defaults.color_shift_speed;
+
+                            // Apply the default sound effects from the pre-loaded "Default" theme
+                            if let Some(default_theme) = loaded_themes.get("Default") {
+                                *sound_effects = default_theme.sounds.clone();
+                            }
+
+                        } else {
+                            // For any other theme, apply its settings from the .toml file
+                            if let Some(theme) = loaded_themes.get(&new_theme_name) {
+                                println!("[INFO] Switched to '{}' theme.", new_theme_name);
+
+                                // This is the most efficient way to apply the new SFX
+                                *sound_effects = theme.sounds.clone();
+
+                                // Apply settings from the theme's config, falling back to defaults if a key is missing
+                                config.sfx_pack = theme.config.sfx_pack.clone().unwrap_or_else(|| "Default".to_string());
+                                config.bgm_track = theme.config.bgm_track.clone();
+                                config.logo_selection = theme.config.logo_selection.clone().unwrap_or_else(|| "Kazeta+ (Default)".to_string());
+                                config.background_selection = theme.config.background_selection.clone().unwrap_or_else(|| "Default".to_string());
+                                config.font_selection = theme.config.font_selection.clone().unwrap_or_else(|| "Default".to_string());
+
+                                // For these, we only update the config if the value exists in the theme.toml
+                                if let Some(val) = &theme.config.menu_position {
+                                    // .parse() is needed to convert the String "BottomLeft" into the MenuPosition::BottomLeft enum
+                                    config.menu_position = val.parse().unwrap_or_default();
+                                }
+                                if let Some(val) = &theme.config.font_color {
+                                    config.font_color = val.clone();
+                                }
+                                if let Some(val) = &theme.config.cursor_color {
+                                    config.cursor_color = val.clone();
+                                }
+                                if let Some(val) = &theme.config.background_scroll_speed {
+                                    config.background_scroll_speed = val.clone();
+                                }
+                                if let Some(val) = &theme.config.color_shift_speed {
+                                    config.color_shift_speed = val.clone();
+                                }
+                            }
+                        }
+
+                        // --- APPLY BGM CHANGE IMMEDIATELY ---
+                        // This runs after the config has been updated by the logic above.
+                        play_new_bgm(
+                            &config.bgm_track.clone().unwrap_or_else(|| "OFF".to_string()),
+                            config.bgm_volume,
+                            music_cache,
+                            current_bgm,
+                        );
+
+                        // Play a confirmation sound with the (potentially new) SFX pack
+                        sound_effects.play_cursor_move(config);
+                        config.save();
                     }
-
-                    config.save();
-                    sound_effects.play_cursor_move(config);
                 }
             },
             1 => { // MENU POSITION
@@ -645,21 +704,29 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            1 => { // SOUND PACKS
+            1 => { // SOUND PACK
                 if input_state.left || input_state.right {
-                    let sound_packs = find_sound_packs();
-                    let current_index = sound_packs.iter().position(|name| name == &config.sfx_pack).unwrap_or(0);
+                    // `sound_pack_choices` is the Vec<String> of available packs
+                    let current_index = sound_pack_choices.iter().position(|p| *p == config.sfx_pack).unwrap_or(0);
+
                     let new_index = if input_state.right {
-                        (current_index + 1) % sound_packs.len()
+                        (current_index + 1) % sound_pack_choices.len()
                     } else {
-                        (current_index + sound_packs.len() - 1) % sound_packs.len()
+                        (current_index + sound_pack_choices.len() - 1) % sound_pack_choices.len()
                     };
 
-                    config.sfx_pack = sound_packs[new_index].clone();
-                    config.save();
+                    let new_pack_name = &sound_pack_choices[new_index];
 
-                    // Signal to the main loop that we need to reload this pack
-                    *sfx_pack_to_reload = Some(config.sfx_pack.clone());
+                    if &config.sfx_pack != new_pack_name {
+                        // 1. Update the config value
+                        config.sfx_pack = new_pack_name.clone();
+
+                        // 2. Set the request for the main loop to handle
+                        *sfx_pack_to_reload = Some(new_pack_name.clone());
+
+                        // 3. Save the config
+                        config.save();
+                    }
                 }
             },
             2 => { // LOGO selection

@@ -29,10 +29,10 @@ impl SoundEffects {
             };
         }
 
-        let system_pack_path = format!("../sfx/{}", pack_name);
-        let user_pack_path = get_user_data_dir().map(|d| d.join("sfx").join(pack_name));
+        let system_pack_path = format!("../sfx/{}", pack_name); // Keep this for legacy system packs
+        // Replace the old user_pack_path line with a call to our new helper function
+        let user_pack_path = find_sfx_pack_path(pack_name);
 
-        // FIX #2: Nested functions cannot be `pub`
         async fn load_one_sfx(
             name: &str,
             user_path_base: &Option<PathBuf>,
@@ -89,7 +89,28 @@ impl SoundEffects {
     }
 }
 
-// Scans the 'sfx/' directory for sound pack folders.
+// This function finds the full path to an SFX pack by searching inside all theme folders.
+pub fn find_sfx_pack_path(pack_name: &str) -> Option<PathBuf> {
+    if let Some(themes_dir) = get_user_data_dir().map(|d| d.join("themes")) {
+        if let Ok(theme_entries) = fs::read_dir(themes_dir) {
+            for theme_entry in theme_entries.flatten() {
+                if theme_entry.path().is_dir() {
+                    // Now search inside this theme folder for the sfx pack
+                    if let Ok(asset_entries) = fs::read_dir(theme_entry.path()) {
+                        for asset_entry in asset_entries.flatten() {
+                            if asset_entry.path().is_dir() && asset_entry.file_name().to_string_lossy() == pack_name {
+                                return Some(asset_entry.path()); // Found it!
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None // Not found
+}
+
+// Scans all possible locations for sound pack folders.
 pub fn find_sound_packs() -> Vec<String> {
     let mut packs = HashSet::new();
     packs.insert("Default".to_string()); // "Default" is always an option
@@ -104,7 +125,7 @@ pub fn find_sound_packs() -> Vec<String> {
         }
     }
 
-    // 2. Scan the user's data directory
+    // 2. Scan the user's global sfx directory
     if let Some(user_sfx_dir) = get_user_data_dir().map(|d| d.join("sfx")) {
         if let Ok(entries) = fs::read_dir(user_sfx_dir) {
             for entry in entries.flatten() {
@@ -115,7 +136,25 @@ pub fn find_sound_packs() -> Vec<String> {
         }
     }
 
-    // 3. Convert the set back to a sorted list for the UI
+    // 3. Scan inside all user theme directories for sfx packs
+    if let Some(themes_dir) = get_user_data_dir().map(|d| d.join("themes")) {
+        if let Ok(theme_entries) = fs::read_dir(themes_dir) {
+            for theme_entry in theme_entries.flatten() {
+                if theme_entry.path().is_dir() {
+                    // Now search this theme folder for any subdirectories (which are sfx packs)
+                    if let Ok(asset_entries) = fs::read_dir(theme_entry.path()) {
+                        for asset_entry in asset_entries.flatten() {
+                            if asset_entry.path().is_dir() {
+                                packs.insert(asset_entry.file_name().to_string_lossy().into_owned());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Convert the set back to a sorted list for the UI
     let mut sorted_packs: Vec<String> = packs.into_iter().collect();
     sorted_packs.sort();
     sorted_packs

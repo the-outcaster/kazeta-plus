@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use macroquad::audio::{load_sound_from_bytes, load_sound, play_sound, set_sound_volume, PlaySoundParams, Sound};
+use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
@@ -37,7 +37,6 @@ use crate::audio::{SoundEffects, play_new_bgm};
 use crate::config::{Config, get_user_data_dir};
 use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
-use crate::theme::{Theme, load_all_themes};
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
 use crate::ui::*;
 use crate::utils::*; // Wildcard to get all utility functions
@@ -58,9 +57,11 @@ pub use types::*;
 - OSK
 - per-game keyboard to gamepad mapping
 - Wi-Fi
+- make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
 
 Hard
 - DVD functionality?
+- MP4 support for background videos?
 
 Unnecessary but cool
 - GCC overclocking support?
@@ -783,12 +784,13 @@ async fn main() {
     // Load all themes ONCE at the start
     println!("[INFO] Pre-loading all themes...");
     let loaded_themes: HashMap<String, theme::Theme> = theme::load_all_themes().await;
+    println!("[INFO] {} themes loaded successfully.", loaded_themes.len());
+
+    let sound_pack_choices = audio::find_sound_packs();
 
     // Create a sorted list of theme names to pass to the UI
     let mut theme_choices: Vec<String> = loaded_themes.keys().cloned().collect();
     theme_choices.sort();
-
-    println!("[INFO] {} themes loaded successfully.", loaded_themes.len());
 
     // --- FIND ALL ASSET FILES ---
     // 1. Start with the system/default assets
@@ -823,6 +825,14 @@ async fn main() {
     //let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
     let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
 
+    // --- SET THE ACTIVE THEME ---
+    let active_theme = loaded_themes.get(&config.theme).unwrap_or_else(|| {
+        println!("[WARN] Active theme '{}' not found. Falling back to 'Default'.", &config.theme);
+        loaded_themes.get("Default").expect("Default fallback theme is also missing!")
+    });
+
+    println!("[INFO] Using theme: {}", active_theme.name);
+
     // apply custom resolution if user specified it
     apply_resolution(&config.resolution);
     if config.fullscreen {
@@ -841,7 +851,7 @@ async fn main() {
     // --- Create a custom-ordered list of logo choices for the UI ---
     // 1. Get all the custom logo filenames from the cache keys (excluding the default)
     let mut custom_logos: Vec<String> = logo_cache.keys()
-    .filter(|&k| *k != "Kazeta+ (Default)")
+    .filter(|k| *k != "Kazeta+ (Default)" && k.ends_with("_logo.png")) // Add this filter
     .cloned()
     .collect();
     custom_logos.sort(); // Sort just the custom logos alphabetically
@@ -851,7 +861,7 @@ async fn main() {
     logo_choices.extend(custom_logos);
     // The final list will be: ["None", "Kazeta (Default)", "cardforce.png", ...]
 
-    // backgrounds
+    // background state
     let mut background_state = BackgroundState {
         bgx: 0.0,
         bg_color: COLOR_TARGETS[0].clone(),
@@ -859,8 +869,11 @@ async fn main() {
         tg_color: COLOR_TARGETS[1].clone(),
     };
 
-    // Create a sorted list of all available background choices for the UI
-    let mut background_choices: Vec<String> = background_cache.keys().cloned().collect();
+    // backgrounds
+    let mut background_choices: Vec<String> = background_cache.keys()
+    .filter(|k| k.ends_with("_background.png") || *k == "Default") // Add this filter
+    .cloned()
+    .collect();
     background_choices.sort();
 
     // fonts
@@ -1235,7 +1248,7 @@ async fn main() {
 
                 // --- Handle input and state changes ---
                 ui::settings::update(
-                    &mut current_screen, &input_state, &mut config, &theme_choices, &loaded_themes, &mut settings_menu_selection,
+                    &mut current_screen, &input_state, &mut config, &theme_choices, &sound_pack_choices, &loaded_themes, &mut settings_menu_selection,
                     &mut sound_effects, &mut confirm_selection, &mut display_settings_changed,
                     &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
                     &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
@@ -1251,37 +1264,6 @@ async fn main() {
                     );
                 }
             },
-            /* OLD
-            Screen::VideoSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
-                // --- STEP 1: Determine what to draw BEFORE updating state ---
-                let (page_number, options) = match current_screen {
-                    Screen::VideoSettings => (1, ui::settings::VIDEO_SETTINGS),
-                    Screen::AudioSettings => (2, ui::settings::AUDIO_SETTINGS),
-                    Screen::GuiSettings => (3, ui::settings::GUI_CUSTOMIZATION_SETTINGS),
-                    Screen::AssetSettings => (4, ui::settings::CUSTOM_ASSET_SETTINGS),
-                    _ => (0, &[] as &[&str]),
-                };
-
-                // --- STEP 2: Now, handle input and potential state changes ---
-                ui::settings::update(
-                    &mut current_screen, &input_state, &mut config, &theme_choices, &loaded_themes, &mut settings_menu_selection,
-                    &mut sound_effects, &mut confirm_selection, &mut display_settings_changed,
-                    &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
-                    &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
-                    &background_choices, &font_choices,
-                );
-
-                // --- STEP 3: Unconditionally draw what we determined in Step 1 ---
-                // (This 'if' check is still good practice, but it will no longer cause a flicker)
-                if page_number > 0 {
-                    ui::settings::render_settings_page(
-                        page_number, options, &logo_cache, &background_cache, &font_cache,
-                        &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                        &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
-                    );
-                }
-            },
-            */
             Screen::GameSelection => {
                 // --- Load Icons from Queue ---
                 if !game_icon_queue.is_empty() {
@@ -1783,66 +1765,6 @@ async fn main() {
             },
         }
 
-        /*
-        // check if theme changed and update accordingly
-        if theme_changed {
-            println!("[INFO] Theme changed, reloading assets...");
-
-            // 1. Clear the old asset caches
-            logo_cache.clear();
-            background_cache.clear();
-            font_cache.clear();
-            music_cache.clear();
-
-            // 2. Re-run your initial asset loading logic to populate the caches
-            load_default_assets(&mut logo_cache, &mut background_cache, &mut font_cache).await;
-
-            // 3. Load the specific themed assets (if they are not default)
-            if config.logo_selection != "Default" {
-                if let Ok(tex) = load_texture(&config.logo_selection).await {
-                    logo_cache.insert(config.logo_selection.clone(), tex);
-                }
-            }
-            if config.font_selection != "Default" {
-                if let Ok(font) = load_ttf_font(&config.font_selection).await {
-                    font_cache.insert(config.font_selection.clone(), font);
-                }
-            }
-            if config.background_selection != "Default" {
-                if let Ok(tex) = load_texture(&config.background_selection).await {
-                    background_cache.insert(config.background_selection.clone(), tex);
-                }
-            }
-
-            if let Some(track_path) = &config.bgm_track {
-                if let Ok(bgm) = load_sound(track_path).await {
-                    music_cache.insert(track_path.clone(), bgm);
-                }
-            }
-
-            // 4. Restart the BGM with the new track
-            play_new_bgm("OFF", 0.0, &music_cache, &mut current_bgm); // Stop the old one
-            if let Some(track) = &config.bgm_track {
-                // Find the sound that was just loaded into the cache
-                //if let Some(sound_to_play) = music_cache.get(track) {
-                if let Some(_sound_to_play) = music_cache.get(track) {
-                    play_new_bgm(track, config.bgm_volume, &music_cache, &mut current_bgm);
-                }
-            }
-
-            // 5. Reset the flag
-            theme_changed = false;
-        }
-        */
-
-        // It checks if a reload was requested by the settings screen
-        if let Some(pack_name) = sfx_pack_to_reload.take() {
-            println!("[Info] Reloading SFX pack: {}", pack_name);
-            sound_effects = SoundEffects::load(&pack_name).await;
-            // Play a sound from the new pack to confirm it changed
-            sound_effects.play_cursor_move(&config);
-        }
-
         // Handle dialog actions
         match (action_dialog_id.as_str(), action_option_value.as_str()) {
             ("main", "COPY") => {
@@ -1939,6 +1861,14 @@ async fn main() {
                 dialog_state = DialogState::Closing;
                 copy_state.should_clear_dialogs = false;
             }
+        }
+
+        // This block checks if the settings screen requested an SFX reload
+        if let Some(pack_name) = sfx_pack_to_reload.take() {
+            println!("[Info] Reloading SFX pack: {}", pack_name);
+            sound_effects = SoundEffects::load(&pack_name).await;
+            // Play a sound from the new pack to confirm it changed
+            sound_effects.play_cursor_move(&config);
         }
         next_frame().await
     }

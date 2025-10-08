@@ -18,7 +18,6 @@ fn get_config_path() -> Result<PathBuf, Box<dyn Error>> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
-    // ... all your config fields are correct ...
     pub resolution: String,
     pub fullscreen: bool,
     pub show_splash_screen: bool,
@@ -40,7 +39,6 @@ pub struct Config {
 }
 
 impl Default for Config {
-    // ... your default implementation is correct ...
     fn default() -> Self {
         Self {
             resolution: "640x360".to_string(),
