@@ -3,7 +3,7 @@ use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, Play
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use gilrs::Gilrs;
 use std::panic;
 use futures;
@@ -509,29 +509,6 @@ fn create_error_dialog(message: String) -> Dialog {
 // ASYNC FUNCTIONS
 // ===================================
 
-/*
-async fn load_default_assets(
-    logo_cache: &mut HashMap<String, Texture2D>,
-    background_cache: &mut HashMap<String, Texture2D>,
-    font_cache: &mut HashMap<String, Font>,
-) {
-    // Load default logo
-    let logo_bytes = include_bytes!("../logo.png");
-    let default_logo = Texture2D::from_file_with_format(logo_bytes, None);
-    logo_cache.insert("Default".to_string(), default_logo);
-
-    // load default background
-    let bg_bytes = include_bytes!("../background.png");
-    let default_bg = Texture2D::from_file_with_format(bg_bytes, None);
-    background_cache.insert("Default".to_string(), default_bg);
-
-    // Load default font
-    let font_bytes = include_bytes!("../november.ttf");
-    let default_font = load_ttf_font_from_bytes(font_bytes).unwrap();
-    font_cache.insert("Default".to_string(), default_font);
-}
-*/
-
 async fn load_all_assets(
     config: &Config,
     monika_message: &str,
@@ -653,7 +630,35 @@ async fn load_all_assets(
     println!("\n[INFO] Pre-loading custom assets...");
     load_asset_category!(background_files, "BACKGROUND", load_texture, &mut background_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
     load_asset_category!(logo_files, "LOGO", load_texture, &mut logo_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
-    load_asset_category!(font_files, "FONT", load_ttf_font, &mut font_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+
+    // --- CORRECTED FONT LOADING ---
+    // We'll use a manual loop to preserve our error logging.
+
+    let status = "LOADING FONTS...".to_string();
+    draw_loading_screen(&status, display_progress); // Update status text once for the whole category
+    next_frame().await;
+
+    // Loop through each font file path
+    for font_path in font_files {
+        let filename = font_path.file_name().unwrap().to_string_lossy().to_string();
+
+        // The match statement for loading is correct!
+        match load_ttf_font(&font_path.to_string_lossy()).await {
+            Ok(font) => {
+                font_cache.insert(filename.clone(), font);
+                println!("[OK] Loaded font: {}", filename);
+            },
+            Err(_) => {
+                println!("[ERROR] Failed to load font: {}", filename);
+            }
+        }
+
+        // Manually update the progress bar for each font that is processed
+        assets_loaded += 1;
+        // This is the animation/progress update that was inside your macro
+        animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+    }
+
 
     println!("\n[INFO] Pre-loading music files...");
     load_audio_category!(music_files, "MUSIC", &mut music_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
@@ -792,6 +797,7 @@ async fn main() {
     let mut theme_choices: Vec<String> = loaded_themes.keys().cloned().collect();
     theme_choices.sort();
 
+    /* OLD
     // --- FIND ALL ASSET FILES ---
     // 1. Start with the system/default assets
     let mut background_files = utils::find_asset_files("../backgrounds", &["png"]);
@@ -820,6 +826,47 @@ async fn main() {
             }
         }
     }
+    */
+
+    // 1. Create empty sets for each asset type
+    let mut background_files_set = HashSet::new();
+    let mut logo_files_set = HashSet::new();
+    let mut font_files_set = HashSet::new();
+    let mut music_files_set = HashSet::new();
+
+    // 2. Gather system/default assets and add them to the sets
+    background_files_set.extend(utils::find_asset_files("../backgrounds", &["png"]));
+    logo_files_set.extend(utils::find_asset_files("../logos", &["png"]));
+    font_files_set.extend(utils::find_asset_files("../fonts", &["ttf"]));
+    music_files_set.extend(utils::find_asset_files("../music", &["ogg", "wav"]));
+
+    // 3. Gather user-installed and theme assets and add them to the sets
+    if let Some(user_dir) = get_user_data_dir() {
+        background_files_set.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
+        logo_files_set.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
+        font_files_set.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
+        music_files_set.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
+
+        // Add assets from all installed themes
+        let theme_dir = user_dir.join("themes");
+        if let Ok(entries) = std::fs::read_dir(theme_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    let theme_path = entry.path();
+                    background_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png", "jpg", "jpeg"]));
+                    logo_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]));
+                    font_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]));
+                    music_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]));
+                }
+            }
+        }
+    }
+
+    // 4. Convert the unique sets back into vectors for the loader
+    let background_files: Vec<_> = background_files_set.into_iter().collect();
+    let logo_files: Vec<_> = logo_files_set.into_iter().collect();
+    let font_files: Vec<_> = font_files_set.into_iter().collect();
+    let music_files: Vec<_> = music_files_set.into_iter().collect();
 
     // --- LOAD ASSETS ---
     //let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;

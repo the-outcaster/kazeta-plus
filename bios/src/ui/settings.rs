@@ -208,7 +208,7 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
         },
         // GUI CUSTOMIZATION
         3 => match index {
-            0 => config.theme.clone().to_uppercase(), // THEME SELECTION
+            0 => config.theme.clone().replace('_', " ").to_uppercase(), // THEME SELECTION
             1 => format!("{:?}", config.menu_position).to_uppercase(), // MENU POSITION
             2 => config.font_color.clone(), // FONT COLOR
             3 => config.cursor_color.clone(), // CURSOR COLOR
