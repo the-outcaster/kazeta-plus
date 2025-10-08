@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
+use crate::MenuPosition;
 
 // This struct defines the structure of your config.json file
 #[derive(Serialize, Deserialize)]
@@ -7,6 +8,7 @@ pub struct Config {
     // video options
     pub resolution: String,
     pub fullscreen: bool,
+    pub show_splash_screen: bool, // SPLASH SCREEN
     pub timezone: String,
 
     // audio options
@@ -15,7 +17,7 @@ pub struct Config {
     pub audio_output: String,
 
     // GUI customization options
-    pub show_splash_screen: bool,
+    pub menu_position: MenuPosition, // MENU POSITION
     pub font_color: String,
     pub cursor_color: String,
     pub background_scroll_speed: String,
@@ -36,6 +38,7 @@ impl Default for Config {
             // video settings
             resolution: "640x360".to_string(),
             fullscreen: false,
+            show_splash_screen: true, // Splash screen is ON by default
             timezone: "UTC".to_string(),
 
             // audio settings
@@ -44,7 +47,7 @@ impl Default for Config {
             audio_output: "Auto".to_string(),
 
             // GUI settings
-            show_splash_screen: true, // Splash screen is ON by default
+            menu_position: MenuPosition::Center, // MENU POSITION
             font_color: "WHITE".to_string(),
             cursor_color: "WHITE".to_string(),
             background_scroll_speed: "NORMAL".to_string(),

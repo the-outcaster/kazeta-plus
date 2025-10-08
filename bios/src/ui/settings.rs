@@ -8,7 +8,7 @@ use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
 use crate::config::{Config, save_config};
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
-use crate::{FONT_SIZE, MENU_PADDING, SETTINGS_START_Y, SETTINGS_OPTION_HEIGHT};
+use crate::{FONT_SIZE, MENU_PADDING};
 
 // Import types/structs/constants that are still in main.rs
 use crate::{
@@ -17,12 +17,14 @@ use crate::{
     text_with_config_color,
 };
 
-// SETTINGS
+const SETTINGS_START_Y: f32 = 80.0;
+const SETTINGS_OPTION_HEIGHT: f32 = 35.0;
 
 pub const VIDEO_SETTINGS: &[&str] = &[
     "RESET SETTINGS",
     "RESOLUTION",
     "USE FULLSCREEN",
+    "SHOW SPLASH SCREEN",
     "TIME ZONE",
     "BRIGHTNESS",
     "AUDIO SETTINGS",
@@ -38,7 +40,7 @@ pub const AUDIO_SETTINGS: &[&str] = &[
 ];
 
 pub const GUI_CUSTOMIZATION_SETTINGS: &[&str] = &[
-    "SHOW SPLASH SCREEN",
+    "MAIN MENU POSITION",
     "FONT COLOR",
     "CURSOR COLOR",
     "BACKGROUND SCROLLING",
@@ -176,6 +178,7 @@ pub fn render_settings_page(
     }
 }
 
+// SETTINGS VALUE
 // Text for the settings on the RIGHT side
 pub fn get_settings_value(page: usize, index: usize, config: &Config, system_volume: f32, brightness: f32) -> String {
     match page {
@@ -184,9 +187,10 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
             0 => "CONFIRM".to_string(), // RESET SETTINGS
             1 => config.resolution.clone(), // RESOLUTION
             2 => if config.fullscreen { "ON" } else { "OFF" }.to_string(), // FULLSCREEN TOGGLE
-            3 => config.timezone.clone().to_uppercase(), // TIME ZONE
-            4 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
-            5 => "->".to_string(),
+            3 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
+            4 => config.timezone.clone().to_uppercase(), // TIME ZONE
+            5 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
+            6 => "->".to_string(),
             _ => "".to_string(),
         },
         // AUDIO SETTINGS
@@ -201,7 +205,7 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
         },
         // GUI CUSTOMIZATION
         3 => match index {
-            0 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
+            0 => format!("{:?}", config.menu_position).to_uppercase(), // MENU POSITION
             1 => config.font_color.clone(), // FONT COLOR
             2 => config.cursor_color.clone(), // CURSOR COLOR
             3 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
@@ -326,7 +330,14 @@ pub fn update(
                     *display_settings_changed = true;
                 }
             },
-            3 => { // TIME ZONE
+            3 => { // SPLASH SCREEN
+                if input_state.left || input_state.right {
+                    config.show_splash_screen = !config.show_splash_screen;
+                    save_config(&config);
+                    sound_effects.play_cursor_move(&config);
+                }
+            },
+            4 => { // TIME ZONE
                 let mut change_occurred = false;
 
                 // Find the current index of the timezone in our array
@@ -350,7 +361,7 @@ pub fn update(
                     save_config(&config);
                 }
             },
-            4 => { // MASTER VOLUME
+            5 => { // MASTER VOLUME
                 if input_state.left {
                     set_brightness(*brightness - 0.1); // Decrease by 10%
                     *brightness = get_current_brightness().unwrap_or(*brightness); // Refresh the value
@@ -362,7 +373,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            5 => { // GO TO AUDIO SETTINGS
+            6 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;
@@ -466,11 +477,16 @@ pub fn update(
 
         // GUI CUSTOMIZATION OPTIONS
         3 => match settings_menu_selection {
-            0 => { // SPLASH SCREEN
-                if input_state.left || input_state.right {
-                    config.show_splash_screen = !config.show_splash_screen;
-                    save_config(&config);
-                    sound_effects.play_cursor_move(&config);
+            0 => { // MENU POSITION
+                if input_state.left {
+                    config.menu_position = config.menu_position.prev();
+                    save_config(config);
+                    sound_effects.play_cursor_move(config);
+                }
+                if input_state.right {
+                    config.menu_position = config.menu_position.next();
+                    save_config(config);
+                    sound_effects.play_cursor_move(config);
                 }
             },
             1 => { // FONT COLOR

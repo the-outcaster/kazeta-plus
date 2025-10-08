@@ -1,4 +1,5 @@
 use crate::{Color, Vec2, Config, string_to_color, HashMap};
+use serde::{Serialize, Deserialize};
 
 // ===================================
 // TYPES
@@ -15,6 +16,15 @@ pub type SizeCache = HashMap<SizeCacheKey, f32>;
 // ===================================
 // ENUMS
 // ===================================
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum MenuPosition {
+    Center,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShakeTarget {
@@ -142,6 +152,33 @@ pub struct AnimationState {
     pub dialog_transition_progress: f32, // Progress of dialog transition (0.0 to 1.0)
     pub dialog_transition_start_pos: Vec2, // Starting position for icon transition
     pub dialog_transition_end_pos: Vec2, // Ending position for icon transition
+}
+
+// ===================================
+// IMPL
+// ===================================
+
+impl MenuPosition {
+    // Helper function to easily cycle through the options in the settings menu
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Center => Self::TopLeft,
+            Self::TopLeft => Self::TopRight,
+            Self::TopRight => Self::BottomLeft,
+            Self::BottomLeft => Self::BottomRight,
+            Self::BottomRight => Self::Center,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Center => Self::BottomRight,
+            Self::TopLeft => Self::Center,
+            Self::TopRight => Self::TopLeft,
+            Self::BottomLeft => Self::TopRight,
+            Self::BottomRight => Self::BottomLeft,
+        }
+    }
 }
 
 impl AnimationState {

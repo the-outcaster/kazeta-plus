@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 use crate::audio::SoundEffects;
 use crate::config::Config;
 use crate::save;
-use crate::types::{AnimationState, BackgroundState, BatteryInfo};
+use crate::types::{AnimationState, BackgroundState, BatteryInfo, MenuPosition};
 
 // Items that are still in `main.rs` (the crate root)
 use crate::{
@@ -27,9 +27,10 @@ use crate::{
     FLASH_MESSAGE_DURATION,
     FONT_SIZE,
     MENU_PADDING,
-    MENU_START_Y,
+    //MENU_START_Y,
     MENU_OPTION_HEIGHT,
     ShakeTarget,
+    //string_to_color,
 };
 
 pub const MAIN_MENU_OPTIONS: [&str; 5] = ["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "ABOUT"];
@@ -234,24 +235,40 @@ pub fn draw(
     render_background(background_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
 
-    // --- Create scaled layout values ---
+    // --- Define layout constants ---
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-    let menu_start_y = MENU_START_Y * scale_factor;
-    let menu_option_height = MENU_OPTION_HEIGHT * scale_factor;
     let menu_padding = MENU_PADDING * scale_factor;
+    let menu_option_height = MENU_OPTION_HEIGHT * scale_factor;
+    let margin_x = 30.0 * scale_factor; // A standard margin for corners
+    let margin_y = (font_size as f32) / 2.0; // A standard margin for corners
 
     let current_font = get_current_font(font_cache, config);
 
+    // --- Determine menu position based on config ---
+    let (start_x, start_y, is_centered) = match config.menu_position {
+        MenuPosition::TopLeft => (margin_x, margin_y, false),
+        MenuPosition::TopRight => (screen_width() - margin_x, margin_y, false),
+        MenuPosition::BottomLeft => (margin_x, screen_height() - (MAIN_MENU_OPTIONS.len() as f32 * menu_option_height) - margin_y, false),
+        MenuPosition::BottomRight => (screen_width() - margin_x, screen_height() - (MAIN_MENU_OPTIONS.len() as f32 * menu_option_height) - margin_y,
+        false),
+        MenuPosition::Center => (screen_width() / 2.0, screen_height() * 0.25, true),
+    };
+
     // Draw menu options
     for (i, &option) in menu_options.iter().enumerate() {
-        let y_pos = menu_start_y + (i as f32 * menu_option_height);
+        let y_pos = start_y + (i as f32 * menu_option_height);
 
-        // --- Calculate text dimensions and position ONCE ---
+        // --- Calculate text dimensions and horizontal position ---
         let text_dims = measure_text(option, Some(current_font), font_size, 1.0);
-        let mut x_pos = (screen_width() - text_dims.width) / 2.0;
+        let mut x_pos = if is_centered {
+            start_x - (text_dims.width / 2.0)
+        } else if start_x > screen_width() / 2.0 {
+            start_x - text_dims.width
+        } else {
+            start_x
+        };
 
         // --- Handle shake effect for disabled options ---
-        // Note: index '0' is DATA, '1' is PLAY. Update if your menu order changes.
         if i == 1 && !play_option_enabled && i == selected_option {
             x_pos += animation_state.calculate_shake_offset(ShakeTarget::PlayOption);
         }
@@ -263,17 +280,15 @@ pub fn draw(
         if i == selected_option {
             let cursor_color = animation_state.get_cursor_color(config);
             let cursor_scale = animation_state.get_cursor_scale();
-
             let base_width = text_dims.width + (menu_padding * 2.0);
             let base_height = text_dims.height + (menu_padding * 2.0);
-
             let scaled_width = base_width * cursor_scale;
             let scaled_height = base_height * cursor_scale;
             let offset_x = (scaled_width - base_width) / 2.0;
             let offset_y = (scaled_height - base_height) / 2.0;
-
-            let rect_x = (screen_width() - base_width) / 2.0;
-            let rect_y = y_pos - (base_height / 2.0) + (text_dims.height / 2.0) - (menu_padding / 2.0) - (2.0 * scale_factor);
+            let rect_x = x_pos - menu_padding;
+            let slot_center_y = y_pos + (menu_option_height / 2.0);
+            let rect_y = slot_center_y - (base_height / 2.0);
 
             draw_rectangle_lines(
                 rect_x - offset_x,
@@ -286,13 +301,15 @@ pub fn draw(
         }
 
         // --- Draw text ---
-        let y_pos_text = y_pos + (text_dims.offset_y / 2.0); // Better vertical centering for text
+        let slot_center_y = y_pos + (menu_option_height / 2.0);
+        let y_pos_text = slot_center_y + (text_dims.offset_y / 2.0);
 
+        // FIX #1: Use config.font_color and a default for disabled
         if (i == 1 && !play_option_enabled) || (i == 2 && !copy_logs_option_enabled) {
             text_disabled(font_cache, config, option, x_pos, y_pos_text, font_size);
         } else {
             text_with_config_color(font_cache, config, option, x_pos, y_pos_text, font_size);
-        }
+        };
     }
     // --- Draw the Flash Message if it exists ---
     if let Some(message) = flash_message {
