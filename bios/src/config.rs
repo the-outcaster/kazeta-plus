@@ -1,6 +1,18 @@
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, error::Error};
 use crate::MenuPosition;
+
+pub fn get_config_path() -> Result<PathBuf, Box<dyn Error>> {
+    let mut config_path = dirs::config_dir()
+    .ok_or("Could not find user's config directory.")?;
+    config_path.push("kazeta-plus");
+
+    // Create the directory if it doesn't exist
+    fs::create_dir_all(&config_path)?;
+
+    config_path.push("kazeta.toml");
+    Ok(config_path)
+}
 
 // This struct defines the structure of your config.json file
 #[derive(Serialize, Deserialize)]
@@ -17,6 +29,7 @@ pub struct Config {
     pub audio_output: String,
 
     // GUI customization options
+    pub theme: String,
     pub menu_position: MenuPosition, // MENU POSITION
     pub font_color: String,
     pub cursor_color: String,
@@ -26,6 +39,20 @@ pub struct Config {
     // custom asset options
     pub bgm_track: Option<String>,
     pub sfx_pack: String,
+    pub logo_selection: String,
+    pub background_selection: String,
+    pub font_selection: String,
+}
+
+// subset of main config
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ThemeConfig {
+    pub menu_position: MenuPosition,
+    pub font_color: String,
+    pub cursor_color: String,
+    pub background_scroll_speed: String,
+    pub color_shift_speed: String,
+    pub bgm_track: String,
     pub logo_selection: String,
     pub background_selection: String,
     pub font_selection: String,
@@ -47,6 +74,7 @@ impl Default for Config {
             audio_output: "Auto".to_string(),
 
             // GUI settings
+            theme: "Default".to_string(),
             menu_position: MenuPosition::Center, // MENU POSITION
             font_color: "WHITE".to_string(),
             cursor_color: "WHITE".to_string(),
@@ -60,6 +88,16 @@ impl Default for Config {
             background_selection: "Default".to_string(),
             font_selection: "Default".to_string(),
         }
+    }
+}
+
+impl Config {
+    /// Loads the configuration from the user's config directory.
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        let config_path = get_config_path()?;
+        let content = fs::read_to_string(config_path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
     }
 }
 

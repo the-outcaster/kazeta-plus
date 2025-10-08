@@ -9,6 +9,7 @@ use crate::config::{Config, save_config};
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
 use crate::{FONT_SIZE, MENU_PADDING};
+use crate::theme;
 
 // Import types/structs/constants that are still in main.rs
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
 };
 
 const SETTINGS_START_Y: f32 = 80.0;
-const SETTINGS_OPTION_HEIGHT: f32 = 35.0;
+const SETTINGS_OPTION_HEIGHT: f32 = 30.0;
 
 pub const VIDEO_SETTINGS: &[&str] = &[
     "RESET SETTINGS",
@@ -40,6 +41,7 @@ pub const AUDIO_SETTINGS: &[&str] = &[
 ];
 
 pub const GUI_CUSTOMIZATION_SETTINGS: &[&str] = &[
+    "THEME",
     "MAIN MENU POSITION",
     "FONT COLOR",
     "CURSOR COLOR",
@@ -205,25 +207,33 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
         },
         // GUI CUSTOMIZATION
         3 => match index {
-            0 => format!("{:?}", config.menu_position).to_uppercase(), // MENU POSITION
-            1 => config.font_color.clone(), // FONT COLOR
-            2 => config.cursor_color.clone(), // CURSOR COLOR
-            3 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
-            4 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
-            5 => "<-".to_string(),
-            6 => "->".to_string(),
+            0 => config.theme.clone().to_uppercase(), // THEME SELECTION
+            1 => format!("{:?}", config.menu_position).to_uppercase(), // MENU POSITION
+            2 => config.font_color.clone(), // FONT COLOR
+            3 => config.cursor_color.clone(), // CURSOR COLOR
+            4 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
+            5 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
+            6 => "<-".to_string(),
+            7 => "->".to_string(),
             _ => "".to_string(),
         },
         // CUSTOM ASSETS
         4 => match index {
             0 => { // BGM SELECTION
-                let track = config.bgm_track.clone().unwrap_or("OFF".to_string());
-                trim_extension(&track).replace('_', " ").to_string().to_uppercase()
+                // If a theme is active (not "Default"), and it has a BGM track...
+                if config.theme != "Default" && config.bgm_track.is_some() {
+                    // ...show the theme name.
+                    config.theme.clone()
+                } else {
+                    // Otherwise, show the track name or "OFF"
+                    let track = config.bgm_track.clone().unwrap_or("OFF".to_string());
+                    trim_extension(&track).replace('_', " ").to_uppercase()
+                }
             },
-            1 => config.sfx_pack.clone().replace('_', " ").to_uppercase(), // SFX PACK SELECTION
-            2 => trim_extension(&config.logo_selection).replace('_', " ").to_string().to_uppercase(), // LOGO SELECTION
-            3 => trim_extension(&config.background_selection).replace('_', " ").to_string().to_uppercase(), // BACKGROUND SELECTION
-            4 => trim_extension(&config.font_selection).replace('_', " ").to_string().to_uppercase(), // FONT TYPE
+            1 => if config.theme != "Default" { config.theme.clone() } else { config.sfx_pack.clone().replace('_', " ").to_uppercase() },
+            2 => if config.theme != "Default" { config.theme.clone() } else { trim_extension(&config.logo_selection).replace('_', " ").to_uppercase() },
+            3 => if config.theme != "Default" { config.theme.clone() } else { trim_extension(&config.background_selection).replace('_', " ").to_uppercase() },
+            4 => if config.theme != "Default" { config.theme.clone() } else { trim_extension(&config.font_selection).replace('_', " ").to_uppercase() },
             5 => "<-".to_string(),
             _ => "".to_string(),
         },
@@ -250,6 +260,7 @@ pub fn update(
     logo_choices: &Vec<String>,
     background_choices: &Vec<String>,
     font_choices: &Vec<String>,
+    theme_changed: &mut bool,
 ) {
     // --- Determine current page info ---
     let (page_number, options): (usize, &[&str]) = match *current_screen {
@@ -295,6 +306,9 @@ pub fn update(
             _ => {} // This case won't be reached
         }
     }
+
+    // get themes
+    let themes = theme::find_themes();
 
     match page_number {
         // VIDEO OPTIONS
@@ -477,7 +491,38 @@ pub fn update(
 
         // GUI CUSTOMIZATION OPTIONS
         3 => match settings_menu_selection {
-            0 => { // MENU POSITION
+            0 => { // THEME SELECTION
+                if input_state.left || input_state.right {
+                    // Find the index of the current theme in the `themes` list
+                    let current_index = themes.iter().position(|t| *t == config.theme).unwrap_or(0);
+
+                    // Calculate the index of the next theme
+                    let new_index = if input_state.right {
+                        (current_index + 1) % themes.len()
+                    } else {
+                        (current_index + themes.len() - 1) % themes.len()
+                    };
+
+                    // Get the name of the new theme
+                    let new_theme_name = &themes[new_index];
+
+                    if let Err(e) = theme::load_theme(&mut *config, new_theme_name) {
+                        println!("[ERROR] Failed to load theme '{}': {}", new_theme_name, e);
+                    } else {
+                        // On success, flip the flag!
+                        *theme_changed = true;
+                    }
+
+                    // Now that the theme is loaded, update the theme name in the config
+                    config.theme = new_theme_name.clone();
+
+                    // Save all the new settings to your config file
+                    save_config(config);
+
+                    sound_effects.play_cursor_move(config);
+                }
+            },
+            1 => { // MENU POSITION
                 if input_state.left {
                     config.menu_position = config.menu_position.prev();
                     save_config(config);
@@ -489,7 +534,7 @@ pub fn update(
                     sound_effects.play_cursor_move(config);
                 }
             },
-            1 => { // FONT COLOR
+            2 => { // FONT COLOR
                 if input_state.left || input_state.right {
                     // Find current color's index in our list
                     let current_index = FONT_COLORS.iter().position(|&c| c == config.font_color).unwrap_or(0);
@@ -503,7 +548,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             }
-            2 => { // CURSOR COLOR
+            3 => { // CURSOR COLOR
                 if input_state.left || input_state.right {
                     // We can reuse the FONT_COLORS constant for this
                     let current_index = FONT_COLORS.iter().position(|&c| c == config.cursor_color).unwrap_or(0);
@@ -518,7 +563,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            3 => { // BACKGROUND SCROLLING
+            4 => { // BACKGROUND SCROLLING
                 if input_state.left || input_state.right {
                     let current_index = SCROLL_SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -532,7 +577,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            4 => { // COLOR GRADIENT SHIFTING
+            5 => { // COLOR GRADIENT SHIFTING
                 if input_state.left || input_state.right {
                     let current_index = COLOR_SHIFT_SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -546,14 +591,14 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            5 => { // GO TO AUDIO SETTINGS
+            6 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;
                     sound_effects.play_select(&config);
                 }
             },
-            6 => { // GO TO CUSTOM ASSETS
+            7 => { // GO TO CUSTOM ASSETS
                 if input_state.select {
                     *current_screen = Screen::AssetSettings;
                     *settings_menu_selection = 0;

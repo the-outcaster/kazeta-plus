@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
+use macroquad::audio::{load_sound_from_bytes, load_sound, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
@@ -26,6 +26,7 @@ mod config;
 mod input;
 mod save;
 mod system;
+mod theme;
 mod types;
 mod ui;
 mod utils;
@@ -262,7 +263,6 @@ fn window_conf() -> Conf {
 // ===================================
 
 fn pixel_pos(v: f32, scale_factor: f32) -> f32 {
-    //PADDING + v*TILE_SIZE + v*PADDING
     (PADDING + v * TILE_SIZE + v * PADDING) * scale_factor
 }
 
@@ -505,6 +505,27 @@ fn create_error_dialog(message: String) -> Dialog {
 // ASYNC FUNCTIONS
 // ===================================
 
+async fn load_default_assets(
+    logo_cache: &mut HashMap<String, Texture2D>,
+    background_cache: &mut HashMap<String, Texture2D>,
+    font_cache: &mut HashMap<String, Font>,
+) {
+    // Load default logo
+    let logo_bytes = include_bytes!("../logo.png");
+    let default_logo = Texture2D::from_file_with_format(logo_bytes, None);
+    logo_cache.insert("Default".to_string(), default_logo);
+
+    // load default background
+    let bg_bytes = include_bytes!("../background.png");
+    let default_bg = Texture2D::from_file_with_format(bg_bytes, None);
+    background_cache.insert("Default".to_string(), default_bg);
+
+    // Load default font
+    let font_bytes = include_bytes!("../november.ttf");
+    let default_font = load_ttf_font_from_bytes(font_bytes).unwrap();
+    font_cache.insert("Default".to_string(), default_font);
+}
+
 async fn load_all_assets(
     config: &Config,
     monika_message: &str,
@@ -611,19 +632,15 @@ async fn load_all_assets(
 
     // sfx
     let status = "LOADING DEFAULT SFX...".to_string();
-    //let default_move = load_sound_from_bytes(include_bytes!("../move.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    //let default_select = load_sound_from_bytes(include_bytes!("../select.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    //let default_reject = load_sound_from_bytes(include_bytes!("../reject.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
-    //let default_back = load_sound_from_bytes(include_bytes!("../back.wav")).await.unwrap();
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
@@ -642,15 +659,6 @@ async fn load_all_assets(
 
     println!("\n[INFO] All asset loading complete!");
 
-    /*
-    let sound_effects = SoundEffects {
-        //splash: default_splash,
-        cursor_move: default_move,
-        select: default_select,
-        reject: default_reject,
-        back: default_back,
-    };
-    */
     let sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
 
     (background_cache, logo_cache, music_cache, font_cache, sound_effects)
@@ -738,7 +746,8 @@ async fn main() {
     const BATTERY_CHECK_INTERVAL: f64 = 5.0; // only check every 5 seconds to improve performance
 
     // load config file
-    let mut config = load_config();
+    let mut config = Config::load().unwrap_or_default();
+    let mut theme_changed = false;
 
     // FLASH MESSENGER
     let mut flash_message: Option<(String, f32)> = None; // (Message, time_remaining)
@@ -766,39 +775,36 @@ async fn main() {
     };
 
     // --- FIND ALL ASSET FILES ---
-    let system_backgrounds_dir = "../backgrounds";
-    let system_logos_dir = "../logos";
-    let system_fonts_dir = "../fonts";
-    let system_music_dir = "../bgm";
+    // 1. Start with the system/default assets
+    let mut background_files = utils::find_asset_files("../backgrounds", &["png"]);
+    let mut logo_files = utils::find_asset_files("../logos", &["png"]);
+    let mut font_files = utils::find_asset_files("../fonts", &["ttf"]);
+    let mut music_files = utils::find_asset_files("../music", &["ogg", "wav"]);
 
-    let user_data_dir = get_user_data_dir();
+    // 2. Add user-installed custom assets
+    if let Some(user_dir) = get_user_data_dir() {
+        background_files.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
+        logo_files.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
+        font_files.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
+        music_files.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
 
-    // Backgrounds
-    let mut background_files = find_asset_files(system_backgrounds_dir, &["png"]);
-    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("backgrounds")) {
-        background_files.extend(find_asset_files(&path.to_string_lossy(), &["png"]));
-    }
-
-    // Logos
-    let mut logo_files = find_asset_files(system_logos_dir, &["png"]);
-    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("logos")) {
-        logo_files.extend(find_asset_files(&path.to_string_lossy(), &["png"]));
-    }
-
-    // Fonts
-    let mut font_files = find_asset_files(system_fonts_dir, &["ttf"]);
-    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("fonts")) {
-        font_files.extend(find_asset_files(&path.to_string_lossy(), &["ttf"]));
-    }
-
-    // Music
-    let mut music_files = find_asset_files(system_music_dir, &["ogg", "wav"]);
-    if let Some(path) = user_data_dir.as_ref().map(|d| d.join("bgm")) {
-        music_files.extend(find_asset_files(&path.to_string_lossy(), &["ogg", "wav"]));
+        // --- NEW: Add assets from all installed themes ---
+        let theme_dir = user_dir.join("themes");
+        if let Ok(entries) = std::fs::read_dir(theme_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    let theme_path = entry.path();
+                    background_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png", "jpg", "jpeg"]));
+                    logo_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]));
+                    font_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]));
+                    music_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]));
+                }
+            }
+        }
     }
 
     // --- LOAD ASSETS ---
-    let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
+    let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
 
     // apply custom resolution if user specified it
     apply_resolution(&config.resolution);
@@ -1216,7 +1222,7 @@ async fn main() {
                     &sound_effects, &mut confirm_selection, &mut display_settings_changed,
                     &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
                     &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
-                    &background_choices, &font_choices
+                    &background_choices, &font_choices, &mut theme_changed,
                 );
 
                 // --- STEP 3: Unconditionally draw what we determined in Step 1 ---
@@ -1727,6 +1733,55 @@ async fn main() {
                     }
                 }
             },
+        }
+
+        // check if theme changed and update accordingly
+        if theme_changed {
+            println!("[INFO] Theme changed, reloading assets...");
+
+            // 1. Clear the old asset caches
+            logo_cache.clear();
+            background_cache.clear();
+            font_cache.clear();
+            music_cache.clear();
+
+            // 2. Re-run your initial asset loading logic to populate the caches
+            load_default_assets(&mut logo_cache, &mut background_cache, &mut font_cache).await;
+
+            // 3. Load the specific themed assets (if they are not default)
+            if config.logo_selection != "Default" {
+                if let Ok(tex) = load_texture(&config.logo_selection).await {
+                    logo_cache.insert(config.logo_selection.clone(), tex);
+                }
+            }
+            if config.font_selection != "Default" {
+                if let Ok(font) = load_ttf_font(&config.font_selection).await {
+                    font_cache.insert(config.font_selection.clone(), font);
+                }
+            }
+            if config.background_selection != "Default" {
+                if let Ok(tex) = load_texture(&config.background_selection).await {
+                    background_cache.insert(config.background_selection.clone(), tex);
+                }
+            }
+
+            if let Some(track_path) = &config.bgm_track {
+                if let Ok(bgm) = load_sound(track_path).await {
+                    music_cache.insert(track_path.clone(), bgm);
+                }
+            }
+
+            // 4. Restart the BGM with the new track
+            play_new_bgm("OFF", 0.0, &music_cache, &mut current_bgm); // Stop the old one
+            if let Some(track) = &config.bgm_track {
+                // Find the sound that was just loaded into the cache
+                if let Some(sound_to_play) = music_cache.get(track) {
+                    play_new_bgm(track, config.bgm_volume, &music_cache, &mut current_bgm);
+                }
+            }
+
+            // 5. Reset the flag
+            theme_changed = false;
         }
 
         // It checks if a reload was requested by the settings screen
