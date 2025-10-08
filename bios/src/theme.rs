@@ -1,57 +1,84 @@
-use std::fs;
-//use std::path::PathBuf;
-use crate::config::{Config, ThemeConfig, get_user_data_dir};
+// Make sure you have the right imports and make your structs public
+use crate::audio::SoundEffects;
+use crate::config::get_user_data_dir;
+use serde::Deserialize;
+use std::collections::HashMap;
+use tokio::fs; // Use tokio's fs module!
 
-/// Scans for theme folders and returns a list of their names.
-pub fn find_themes() -> Vec<String> {
-    let mut themes = vec!["Default".to_string()];
+// This needs to be public so main.rs can see it
+#[derive(Deserialize, Debug, Clone)]
+pub struct ThemeConfigFile {
+    pub menu_position: Option<String>,
+    pub font_color: Option<String>,
+    pub cursor_color: Option<String>,
+    pub background_scroll_speed: Option<String>,
+    pub color_shift_speed: Option<String>,
+    pub sfx_pack: Option<String>,
+    pub bgm_track: Option<String>,
+    pub logo_selection: Option<String>,
+    pub background_selection: Option<String>,
+    pub font_selection: Option<String>,
+}
 
-    if let Some(mut theme_dir) = get_user_data_dir() {
-        theme_dir.push("themes");
-        if let Ok(entries) = fs::read_dir(theme_dir) {
-            let mut found_themes: Vec<String> = entries
-            .flatten()
-            .filter(|e| e.path().is_dir())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
-            themes.append(&mut found_themes);
+// This also needs to be public
+#[derive(Clone)]
+pub struct Theme {
+    pub name: String,
+    pub sounds: SoundEffects,
+    // Add other pre-loaded assets here if you want
+    // pub background: Texture2D,
+    pub config: ThemeConfigFile, // Store the parsed config
+}
+
+// LOAD CUSTOM THEMES
+pub async fn load_all_themes() -> HashMap<String, Theme> {
+    let mut themes = HashMap::new();
+    // It's efficient to load the default sounds once and clone them
+    // for any theme that doesn't specify a custom pack.
+    let default_sfx = SoundEffects::load("Default").await;
+
+    // Get the path to the user's themes directory
+    let themes_dir = match get_user_data_dir() {
+        Some(dir) => dir.join("themes"),
+        None => return themes, // Or handle error appropriately
+    };
+
+    if let Ok(mut entries) = fs::read_dir(themes_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            if path.is_dir() {
+                let theme_name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let toml_path = path.join("theme.toml");
+
+                if toml_path.exists() {
+                    // Read and parse the theme.toml file
+                    if let Ok(content) = fs::read_to_string(toml_path).await {
+                        if let Ok(config) = toml::from_str::<ThemeConfigFile>(&content) {
+
+                            // Load the specified sound pack, or clone the default
+                            let sounds = match &config.sfx_pack {
+                                Some(pack_name) => SoundEffects::load(pack_name).await,
+                                None => default_sfx.clone(),
+                            };
+
+                            // Here, you would also load your other assets like fonts and images
+                            // let background = load_texture(...).await.unwrap();
+
+                            let loaded_theme = Theme {
+                                name: theme_name.clone(),
+                                sounds,
+                                config,
+                                // background,
+                                // ...etc
+                            };
+
+                            println!("Loaded theme '{}'", theme_name);
+                            themes.insert(theme_name, loaded_theme);
+                        }
+                    }
+                }
+            }
         }
     }
     themes
-}
-
-/// Loads a theme by name and applies its settings to the main config.
-pub fn load_theme(config: &mut Config, theme_name: &str) -> Result<(), String> {
-    // Handle the special "Default" case
-    if theme_name == "Default" {
-        *config = Config::default();
-        return Ok(());
-    }
-
-    // Get the path to the theme directory
-    let mut theme_dir = get_user_data_dir().ok_or("Could not find user data directory.")?;
-    theme_dir.push("themes");
-    theme_dir.push(theme_name);
-
-    // Read and parse the theme.toml file
-    let toml_path = theme_dir.join("theme.toml");
-    let toml_content = fs::read_to_string(&toml_path)
-    .map_err(|e| format!("Could not read theme.toml: {}", e))?;
-    let theme_config: ThemeConfig = toml::from_str(&toml_content)
-    .map_err(|e| format!("Could not parse theme.toml: {}", e))?;
-
-    // Apply settings from the theme to the main config
-    config.menu_position = theme_config.menu_position;
-    config.font_color = theme_config.font_color;
-    config.cursor_color = theme_config.cursor_color;
-    config.background_scroll_speed = theme_config.background_scroll_speed;
-    config.color_shift_speed = theme_config.color_shift_speed;
-
-    // IMPORTANT: For assets, construct the full path
-    config.bgm_track = Some(theme_dir.join(theme_config.bgm_track).to_string_lossy().into_owned());
-    config.logo_selection = theme_dir.join(theme_config.logo_selection).to_string_lossy().into_owned();
-    config.background_selection = theme_dir.join(theme_config.background_selection).to_string_lossy().into_owned();
-    config.font_selection = theme_dir.join(theme_config.font_selection).to_string_lossy().into_owned();
-
-    Ok(())
 }

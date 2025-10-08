@@ -1,5 +1,6 @@
 use crate::{Color, Vec2, Config, string_to_color, HashMap};
 use serde::{Serialize, Deserialize};
+use std::str::FromStr;
 
 // ===================================
 // TYPES
@@ -157,6 +158,28 @@ pub struct AnimationState {
 // ===================================
 // IMPL
 // ===================================
+
+// 1. Teach MenuPosition what its "default" value is.
+impl Default for MenuPosition {
+    fn default() -> Self {
+        MenuPosition::Center // You can choose any default you like
+    }
+}
+
+// 2. Teach MenuPosition how to be created from a string.
+impl FromStr for MenuPosition {
+    type Err = (); // We don't need a complex error type
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            "TopLeft" => Ok(MenuPosition::TopLeft),
+            "TopRight" => Ok(MenuPosition::TopRight),
+            "BottomLeft" => Ok(MenuPosition::BottomLeft),
+            "BottomRight" => Ok(MenuPosition::BottomRight),
+            _ => Err(()), // If the string is anything else, it's an error
+        }
+    }
+}
 
 impl MenuPosition {
     // Helper function to easily cycle through the options in the settings menu

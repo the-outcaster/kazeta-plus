@@ -5,7 +5,8 @@ use macroquad::audio::{Sound, set_sound_volume};
 
 // Import things from our new modules
 use crate::audio::{SoundEffects, find_sound_packs, play_new_bgm};
-use crate::config::{Config, save_config};
+//use crate::config::{Config, save_config};
+use crate::config::Config;
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
 use crate::{FONT_SIZE, MENU_PADDING};
@@ -246,8 +247,10 @@ pub fn update(
     current_screen: &mut Screen,
     input_state: &InputState,
     config: &mut Config,
+    themes: &Vec<String>,
+    loaded_themes: &HashMap<String, theme::Theme>,
     settings_menu_selection: &mut usize,
-    sound_effects: &SoundEffects,
+    sound_effects: &mut SoundEffects,
     confirm_selection: &mut usize,
     display_settings_changed: &mut bool,
     brightness: &mut f32,
@@ -260,7 +263,7 @@ pub fn update(
     logo_choices: &Vec<String>,
     background_choices: &Vec<String>,
     font_choices: &Vec<String>,
-    theme_changed: &mut bool,
+    //theme_changed: &mut bool,
 ) {
     // --- Determine current page info ---
     let (page_number, options): (usize, &[&str]) = match *current_screen {
@@ -307,9 +310,6 @@ pub fn update(
         }
     }
 
-    // get themes
-    let themes = theme::find_themes();
-
     match page_number {
         // VIDEO OPTIONS
         1 => match settings_menu_selection {
@@ -330,7 +330,7 @@ pub fn update(
                     };
 
                     config.resolution = RESOLUTIONS[new_index].to_string();
-                    save_config(&config);
+                    config.save();
                     apply_resolution(&config.resolution); // Apply the change immediately
                     sound_effects.play_cursor_move(&config);
                 }
@@ -339,7 +339,7 @@ pub fn update(
                 if input_state.left || input_state.right {
                     config.fullscreen = !config.fullscreen;
                     //set_fullscreen(config.fullscreen); // Apply the change immediately
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                     *display_settings_changed = true;
                 }
@@ -347,7 +347,7 @@ pub fn update(
             3 => { // SPLASH SCREEN
                 if input_state.left || input_state.right {
                     config.show_splash_screen = !config.show_splash_screen;
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -372,7 +372,7 @@ pub fn update(
 
                 if change_occurred {
                     sound_effects.play_cursor_move(&config);
-                    save_config(&config);
+                    config.save();
                 }
             },
             5 => { // MASTER VOLUME
@@ -425,7 +425,7 @@ pub fn update(
                         set_sound_volume(sound, config.bgm_volume);
                     }
 
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -437,7 +437,7 @@ pub fn update(
                     if input_state.right {
                         config.sfx_volume = (config.sfx_volume + 0.1).min(1.0);
                     }
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config); // Test the new volume
                 }
             },
@@ -493,44 +493,53 @@ pub fn update(
         3 => match settings_menu_selection {
             0 => { // THEME SELECTION
                 if input_state.left || input_state.right {
-                    // Find the index of the current theme in the `themes` list
+                    if themes.is_empty() { return; } // Prevent panic if no themes are loaded
+
                     let current_index = themes.iter().position(|t| *t == config.theme).unwrap_or(0);
 
-                    // Calculate the index of the next theme
                     let new_index = if input_state.right {
                         (current_index + 1) % themes.len()
                     } else {
                         (current_index + themes.len() - 1) % themes.len()
                     };
 
-                    // Get the name of the new theme
                     let new_theme_name = &themes[new_index];
 
-                    if let Err(e) = theme::load_theme(&mut *config, new_theme_name) {
-                        println!("[ERROR] Failed to load theme '{}': {}", new_theme_name, e);
-                    } else {
-                        // On success, flip the flag!
-                        *theme_changed = true;
-                    }
-
-                    // Now that the theme is loaded, update the theme name in the config
+                    // --- THIS IS THE NEW LOGIC ---
+                    // 1. Update the theme name in the config
                     config.theme = new_theme_name.clone();
 
-                    // Save all the new settings to your config file
-                    save_config(config);
+                    // Get the full theme data from the pre-loaded map
+                    if let Some(new_theme) = loaded_themes.get(new_theme_name) {
+                        // APPLY ALL THE THEME SETTINGS TO THE MAIN CONFIG
+                        config.theme = new_theme_name.clone();
+                        *sound_effects = new_theme.sounds.clone();
 
+                        // Go through each setting from the theme's config and apply it
+                        if let Some(val) = &new_theme.config.menu_position { config.menu_position = val.parse().unwrap_or_default(); }
+                        if let Some(val) = &new_theme.config.font_color { config.font_color = val.clone(); }
+                        if let Some(val) = &new_theme.config.cursor_color { config.cursor_color = val.clone(); }
+                        if let Some(val) = &new_theme.config.background_scroll_speed { config.background_scroll_speed = val.clone(); }
+                        if let Some(val) = &new_theme.config.color_shift_speed { config.color_shift_speed = val.clone(); }
+                        if let Some(val) = &new_theme.config.bgm_track { config.bgm_track = Some(val.clone()); }
+                        if let Some(val) = &new_theme.config.logo_selection { config.logo_selection = val.clone(); }
+                        if let Some(val) = &new_theme.config.background_selection { config.background_selection = val.clone(); }
+                        if let Some(val) = &new_theme.config.font_selection { config.font_selection = val.clone(); }
+                    }
+
+                    config.save();
                     sound_effects.play_cursor_move(config);
                 }
             },
             1 => { // MENU POSITION
                 if input_state.left {
                     config.menu_position = config.menu_position.prev();
-                    save_config(config);
+                    config.save();
                     sound_effects.play_cursor_move(config);
                 }
                 if input_state.right {
                     config.menu_position = config.menu_position.next();
-                    save_config(config);
+                    config.save();
                     sound_effects.play_cursor_move(config);
                 }
             },
@@ -544,7 +553,7 @@ pub fn update(
                         (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
                     };
                     config.font_color = FONT_COLORS[new_index].to_string();
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             }
@@ -559,7 +568,7 @@ pub fn update(
                     };
 
                     config.cursor_color = FONT_COLORS[new_index].to_string();
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -573,7 +582,7 @@ pub fn update(
                     };
 
                     config.background_scroll_speed = SCROLL_SPEEDS[new_index].to_string();
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -587,7 +596,7 @@ pub fn update(
                     };
 
                     config.color_shift_speed = COLOR_SHIFT_SPEEDS[new_index].to_string();
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -632,7 +641,7 @@ pub fn update(
                         config.bgm_track = Some(new_track.clone());
                     }
 
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -647,7 +656,7 @@ pub fn update(
                     };
 
                     config.sfx_pack = sound_packs[new_index].clone();
-                    save_config(&config);
+                    config.save();
 
                     // Signal to the main loop that we need to reload this pack
                     *sfx_pack_to_reload = Some(config.sfx_pack.clone());
@@ -669,7 +678,7 @@ pub fn update(
                     // Update the config with the new choice
                     config.logo_selection = logo_choices[new_index].clone();
 
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -689,7 +698,7 @@ pub fn update(
                     // Update the config with the new choice
                     config.background_selection = background_choices[new_index].clone();
 
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
@@ -703,7 +712,7 @@ pub fn update(
                     };
 
                     config.font_selection = font_choices[new_index].clone();
-                    save_config(&config);
+                    config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
