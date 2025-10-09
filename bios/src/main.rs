@@ -629,7 +629,9 @@ async fn load_all_assets(
     println!("\n[INFO] Pre-loading custom assets...");
     load_asset_category!(background_files, "BACKGROUND", load_texture, &mut background_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
     load_asset_category!(logo_files, "LOGO", load_texture, &mut logo_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+    load_asset_category!(font_files, "FONT", load_ttf_font, &mut font_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
 
+    /*
     let status = "LOADING FONTS...".to_string();
     draw_loading_screen(&status, display_progress); // Update status text once for the whole category
     next_frame().await;
@@ -654,6 +656,7 @@ async fn load_all_assets(
         // This is the animation/progress update that was inside your macro
         animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
     }
+    */
 
 
     println!("\n[INFO] Pre-loading music files...");
@@ -793,37 +796,7 @@ async fn main() {
     let mut theme_choices: Vec<String> = loaded_themes.keys().cloned().collect();
     theme_choices.sort();
 
-    /* OLD
     // --- FIND ALL ASSET FILES ---
-    // 1. Start with the system/default assets
-    let mut background_files = utils::find_asset_files("../backgrounds", &["png"]);
-    let mut logo_files = utils::find_asset_files("../logos", &["png"]);
-    let mut font_files = utils::find_asset_files("../fonts", &["ttf"]);
-    let mut music_files = utils::find_asset_files("../music", &["ogg", "wav"]);
-
-    // 2. Add user-installed custom assets
-    if let Some(user_dir) = get_user_data_dir() {
-        background_files.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
-        logo_files.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
-        font_files.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
-        music_files.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
-
-        // --- NEW: Add assets from all installed themes ---
-        let theme_dir = user_dir.join("themes");
-        if let Ok(entries) = std::fs::read_dir(theme_dir) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    let theme_path = entry.path();
-                    background_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png", "jpg", "jpeg"]));
-                    logo_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]));
-                    font_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]));
-                    music_files.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]));
-                }
-            }
-        }
-    }
-    */
-
     // 1. Create empty sets for each asset type
     let mut background_files_set = HashSet::new();
     let mut logo_files_set = HashSet::new();
@@ -836,23 +809,40 @@ async fn main() {
     font_files_set.extend(utils::find_asset_files("../fonts", &["ttf"]));
     music_files_set.extend(utils::find_asset_files("../music", &["ogg", "wav"]));
 
-    // 3. Gather user-installed and theme assets and add them to the sets
+    // 3. Gather user-installed and theme assets
     if let Some(user_dir) = get_user_data_dir() {
+        // Add assets from global user folders first
         background_files_set.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
         logo_files_set.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
         font_files_set.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
         music_files_set.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
 
-        // Add assets from all installed themes
+        // --- REVISED LOGIC for scanning theme folders ---
         let theme_dir = user_dir.join("themes");
         if let Ok(entries) = std::fs::read_dir(theme_dir) {
             for entry in entries.flatten() {
                 if entry.path().is_dir() {
                     let theme_path = entry.path();
-                    background_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png", "jpg", "jpeg"]));
-                    logo_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]));
-                    font_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]));
-                    music_files_set.extend(utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]));
+
+                    // Find all assets within this theme folder just ONCE
+                    let theme_images = utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]);
+                    let theme_fonts = utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]);
+                    let theme_music = utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]);
+
+                    // Now, intelligently sort the images into the correct sets based on filename
+                    for image_path in theme_images {
+                        if let Some(filename) = image_path.file_name().and_then(|s| s.to_str()) {
+                            if filename.ends_with("_logo.png") {
+                                logo_files_set.insert(image_path);
+                            } else if filename.ends_with("_background.png") {
+                                background_files_set.insert(image_path);
+                            }
+                        }
+                    }
+
+                    // Add the fonts and music from the theme to their respective sets
+                    font_files_set.extend(theme_fonts);
+                    music_files_set.extend(theme_music);
                 }
             }
         }
@@ -865,7 +855,6 @@ async fn main() {
     let music_files: Vec<_> = music_files_set.into_iter().collect();
 
     // --- LOAD ASSETS ---
-    //let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
     let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
 
     // --- SET THE ACTIVE THEME ---
