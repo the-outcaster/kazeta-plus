@@ -34,9 +34,27 @@ pub struct Theme {
 // LOAD CUSTOM THEMES
 pub async fn load_all_themes() -> HashMap<String, Theme> {
     let mut themes = HashMap::new();
-
-    // .await is needed here because SoundEffects::load is async
     let default_sfx = SoundEffects::load("Default").await;
+
+    // create a virtual default theme so we don't crash at startup
+    let virtual_default_theme = Theme {
+        name: "Default".to_string(),
+        sounds: default_sfx.clone(), // Use the pre-loaded default sounds
+        config: ThemeConfigFile { // Create an empty config, just like from an empty theme.toml
+            menu_position: None,
+            font_color: None,
+            cursor_color: None,
+            background_scroll_speed: None,
+            color_shift_speed: None,
+            sfx_pack: None,
+            bgm_track: None,
+            logo_selection: None,
+            background_selection: None,
+            font_selection: None,
+        },
+    };
+    // Insert our virtual theme into the map before scanning for others.
+    themes.insert("Default".to_string(), virtual_default_theme);
 
     let themes_dir = match get_user_data_dir() {
         Some(dir) => dir.join("themes"),

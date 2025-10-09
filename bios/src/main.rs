@@ -525,7 +525,6 @@ async fn load_all_assets(
     SoundEffects, // sfx
 ) {
     let draw_loading_screen = |status_message: &str, progress: f32| {
-
         let font_size = 16.0 as u16;
         let line_spacing = 10.0;
         let lines: Vec<&str> = monika_message.lines().collect();
@@ -630,9 +629,6 @@ async fn load_all_assets(
     println!("\n[INFO] Pre-loading custom assets...");
     load_asset_category!(background_files, "BACKGROUND", load_texture, &mut background_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
     load_asset_category!(logo_files, "LOGO", load_texture, &mut logo_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
-
-    // --- CORRECTED FONT LOADING ---
-    // We'll use a manual loop to preserve our error logging.
 
     let status = "LOADING FONTS...".to_string();
     draw_loading_screen(&status, display_progress); // Update status text once for the whole category
