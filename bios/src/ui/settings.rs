@@ -22,7 +22,7 @@ use crate::{
 const SETTINGS_START_Y: f32 = 80.0;
 const SETTINGS_OPTION_HEIGHT: f32 = 30.0;
 
-pub const VIDEO_SETTINGS: &[&str] = &[
+pub const GENERAL_SETTINGS: &[&str] = &[
     "RESET SETTINGS",
     "RESOLUTION",
     "USE FULLSCREEN",
@@ -183,13 +183,42 @@ pub fn render_settings_page(
             text_with_config_color(font_cache, config, message, x, y, font_size);
         }
     }
+
+    // let the user know what page they're on
+    // 1. Determine the title text based on the page number
+    let page_title = match page_number {
+        1 => "GENERAL SETTINGS",
+        2 => "AUDIO SETTINGS",
+        3 => "GUI CUSTOMIZATION",
+        4 => "CUSTOM ASSETS",
+        _ => "", // Should not happen, but a safe fallback
+    };
+
+    // 2. Set up drawing parameters
+    let title_font_size = (FONT_SIZE as f32 * scale_factor * 1.2) as u16;
+    let current_font = get_current_font(font_cache, config);
+
+    // 3. Calculate position to center the text at the bottom
+    let dims = measure_text(page_title, Some(current_font), title_font_size, 1.0);
+    let x_pos = screen_width() / 2.0 - dims.width / 2.0;
+    let y_pos = screen_height() - (20.0 * scale_factor); // Position it from the bottom
+
+    // 4. Draw the title using our shared helper function
+    text_with_config_color(
+        font_cache,
+        config,
+        page_title,
+        x_pos,
+        y_pos,
+        title_font_size,
+    );
 }
 
 // SETTINGS VALUE
 // Text for the settings on the RIGHT side
 pub fn get_settings_value(page: usize, index: usize, config: &Config, system_volume: f32, brightness: f32) -> String {
     match page {
-        // VIDEO SETTINGS
+        // GENERAL SETTINGS
         1 => match index {
             0 => "CONFIRM".to_string(), // RESET SETTINGS
             1 => config.resolution.clone(), // RESOLUTION
@@ -277,7 +306,7 @@ pub fn update(
 ) {
     // --- Determine current page info ---
     let (page_number, options): (usize, &[&str]) = match *current_screen {
-        Screen::VideoSettings => (1, &VIDEO_SETTINGS),
+        Screen::GeneralSettings => (1, &GENERAL_SETTINGS),
         Screen::AudioSettings => (2, &AUDIO_SETTINGS),
         Screen::GuiSettings => (3, &GUI_CUSTOMIZATION_SETTINGS),
         Screen::AssetSettings => (4, &CUSTOM_ASSET_SETTINGS),
@@ -301,10 +330,10 @@ pub fn update(
         sound_effects.play_select(&config);
         *settings_menu_selection = 0; // Reset selection for the new page
         match current_screen {
-            Screen::VideoSettings => *current_screen = Screen::AudioSettings,
+            Screen::GeneralSettings => *current_screen = Screen::AudioSettings,
             Screen::AudioSettings => *current_screen = Screen::GuiSettings,
             Screen::GuiSettings => *current_screen = Screen::AssetSettings,
-            Screen::AssetSettings => *current_screen = Screen::VideoSettings,
+            Screen::AssetSettings => *current_screen = Screen::GeneralSettings,
             _ => {} // This case won't be reached
         }
     }
@@ -312,8 +341,8 @@ pub fn update(
         sound_effects.play_select(&config);
         *settings_menu_selection = 0; // Reset selection for the new page
         match current_screen {
-            Screen::VideoSettings => *current_screen = Screen::AssetSettings,
-            Screen::AudioSettings => *current_screen = Screen::VideoSettings,
+            Screen::GeneralSettings => *current_screen = Screen::AssetSettings,
+            Screen::AudioSettings => *current_screen = Screen::GeneralSettings,
             Screen::GuiSettings => *current_screen = Screen::AudioSettings,
             Screen::AssetSettings => *current_screen = Screen::GuiSettings,
             _ => {} // This case won't be reached
@@ -321,7 +350,7 @@ pub fn update(
     }
 
     match page_number {
-        // VIDEO OPTIONS
+        // GENERAL OPTIONS
         1 => match settings_menu_selection {
             0 => { // RESET SETTINGS
                 if input_state.select {
@@ -385,7 +414,7 @@ pub fn update(
                     config.save();
                 }
             },
-            5 => { // MASTER VOLUME
+            5 => { // BRIGHTNESS
                 if input_state.left {
                     set_brightness(*brightness - 0.1); // Decrease by 10%
                     *brightness = get_current_brightness().unwrap_or(*brightness); // Refresh the value
@@ -482,9 +511,9 @@ pub fn update(
                     }
                 }
             },
-            4 => { // GO TO VIDEO SETTINGS
+            4 => { // GO TO GENERAL SETTINGS
                 if input_state.select {
-                    *current_screen = Screen::VideoSettings;
+                    *current_screen = Screen::GeneralSettings;
                     *settings_menu_selection = 0;
                     sound_effects.play_select(&config);
                 }

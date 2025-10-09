@@ -60,7 +60,7 @@ pub enum Screen {
     MainMenu,
     SaveData,
     FadingOut,
-    VideoSettings,
+    GeneralSettings,
     AudioSettings,
     GuiSettings,
     AssetSettings,

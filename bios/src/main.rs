@@ -39,7 +39,7 @@ use crate::ui::main_menu::MAIN_MENU_OPTIONS;
 use crate::ui::*;
 use crate::utils::*; // Wildcard to get all utility functions
 use crate::save::StorageMediaState;
-use crate::settings::VIDEO_SETTINGS;
+use crate::settings::GENERAL_SETTINGS;
 use crate::settings::render_settings_page;
 
 pub use types::*;
@@ -966,10 +966,10 @@ async fn main() {
                     flash_message.as_ref().map(|(msg, _)| msg.as_str()),
                 );
             },
-            Screen::VideoSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
+            Screen::GeneralSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
                 // --- Determine what to draw BEFORE updating state ---
                 let (page_number, options) = match current_screen {
-                    Screen::VideoSettings => (1, ui::settings::VIDEO_SETTINGS),
+                    Screen::GeneralSettings => (1, ui::settings::GENERAL_SETTINGS),
                     Screen::AudioSettings => (2, ui::settings::AUDIO_SETTINGS),
                     Screen::GuiSettings => (3, ui::settings::GUI_CUSTOMIZATION_SETTINGS),
                     Screen::AssetSettings => (4, ui::settings::CUSTOM_ASSET_SETTINGS),
@@ -1159,7 +1159,7 @@ async fn main() {
                     sound_effects.play_cursor_move(&config);
                 }
                 if input_state.back {
-                    current_screen = Screen::VideoSettings; // Or whatever page you came from
+                    current_screen = Screen::GeneralSettings; // Or whatever page you came from
                     sound_effects.play_back(&config);
                 }
                 if input_state.select {
@@ -1171,7 +1171,7 @@ async fn main() {
                         current_screen = Screen::ResetComplete;
                         sound_effects.play_select(&config);
                     } else { // User selected NO
-                        current_screen = Screen::VideoSettings;
+                        current_screen = Screen::GeneralSettings;
                         sound_effects.play_back(&config);
                     }
                 }
@@ -1179,7 +1179,7 @@ async fn main() {
                 // --- Render ---
                 // First, render the settings page in the background
                 render_settings_page(
-                    1, &VIDEO_SETTINGS, &logo_cache, &background_cache, &font_cache,
+                    1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
                     &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
                 );
@@ -1200,7 +1200,7 @@ async fn main() {
 
                 // --- Render ---
                 render_settings_page(
-                    1, &VIDEO_SETTINGS, &logo_cache, &background_cache, &font_cache,
+                    1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
                     &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness
                 );

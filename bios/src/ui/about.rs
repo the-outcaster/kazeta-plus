@@ -1,34 +1,10 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
-use crate::audio::SoundEffects;
 
 use crate::{
+    audio::SoundEffects,
     config::Config, FONT_SIZE, SystemInfo, Screen, BackgroundState, BatteryInfo, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, InputState,
 };
-
-// New helper function to draw text with a drop shadow for readability
-fn draw_text_with_shadow(
-    font_cache: &HashMap<String, Font>,
-    config: &Config,
-    text: &str,
-    x: f32,
-    y: f32,
-    font_size: u16,
-    shadow_color: Color,
-    offset: f32,
-) {
-    // Draw the shadow text first
-    let shadow_params = TextParams {
-        font: Some(get_current_font(font_cache, config)),
-        font_size,
-        color: shadow_color,
-        ..Default::default()
-    };
-    draw_text_ex(text, x + offset, y + offset, shadow_params);
-
-    // Draw the main text on top
-    text_with_config_color(font_cache, config, text, x, y, font_size);
-}
 
 pub fn update(
     input_state: &InputState,
@@ -65,10 +41,6 @@ pub fn draw(
     let about_font_size = (FONT_SIZE as f32 * scale_factor * 0.8) as u16;
     let line_height = 25.0 * scale_factor;
 
-    // Define shadow properties for our new text function
-    let shadow_offset = 1.0 * scale_factor;
-    let shadow_color = BLACK;
-
     let start_x_labels = 50.0 * scale_factor;
     let start_x_values = 120.0 * scale_factor;
     let mut current_y = 100.0 * scale_factor;
@@ -83,15 +55,12 @@ pub fn draw(
     ];
 
     for (label, value) in info {
-        // --- MODIFIED: Use the new shadow text function ---
-        draw_text_with_shadow(font_cache, config, label, start_x_labels, current_y, about_font_size, shadow_color, shadow_offset);
-        draw_text_with_shadow(font_cache, config, value, start_x_values, current_y, about_font_size, shadow_color, shadow_offset);
-        // ---
+        text_with_config_color(font_cache, config, label, start_x_labels, current_y, about_font_size);
+        text_with_config_color(font_cache, config, value, start_x_values, current_y, about_font_size);
         current_y += line_height;
     }
 
     // --- Credits ---
-    // --- MODIFIED: Increased the offset to fix clipping ---
     current_y = screen_height() - (130.0 * scale_factor);
 
     let credit_lines = vec![
@@ -106,12 +75,10 @@ pub fn draw(
         let x_pos = screen_width() / 2.0 - dims.width / 2.0;
 
         // --- MODIFIED: Use the new shadow text function here as well ---
-        draw_text_with_shadow(
+        text_with_config_color(
             font_cache, config, line,
             x_pos, current_y,
-            about_font_size,
-            shadow_color,
-            shadow_offset
+            about_font_size
         );
         // ---
         current_y += line_height;

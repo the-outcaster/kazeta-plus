@@ -1,13 +1,6 @@
 // Add necessary imports for the shared functions
 use crate::config::Config;
 use crate::memory::{get_game_playtime, get_game_size};
-/*
-use crate::{string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
-    save, PathBuf, AnimationState, RECT_COLOR, Memory, Arc, Mutex, StorageMediaState, InputState, PlaytimeCache, SizeCache, TILE_SIZE,
-    PADDING, GRID_OFFSET, SELECTED_OFFSET, GRID_WIDTH, UIFocus, UI_BG_COLOR_DARK, ShakeTarget,
-    GRID_HEIGHT, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
-};
-*/
 use crate::{string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
     save, PathBuf, AnimationState, RECT_COLOR, Memory, Arc, Mutex, PlaytimeCache, SizeCache, TILE_SIZE,
     PADDING, GRID_OFFSET, GRID_WIDTH, ShakeTarget, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
@@ -625,6 +618,7 @@ pub fn text_with_config_color(font_cache: &HashMap<String, Font>, config: &Confi
     });
 }
 
+// text when "PLAY" or "COPY SESSION LOGS" is greyed out
 pub fn text_disabled(font_cache: &HashMap<String, Font>, config: &Config, text : &str, x : f32, y: f32, font_size: u16) {
     let font = get_current_font(font_cache, config);
     let shadow_offset = 1.0 * (font_size as f32 / FONT_SIZE as f32);

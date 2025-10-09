@@ -27,10 +27,8 @@ use crate::{
     FLASH_MESSAGE_DURATION,
     FONT_SIZE,
     MENU_PADDING,
-    //MENU_START_Y,
     MENU_OPTION_HEIGHT,
     ShakeTarget,
-    //string_to_color,
 };
 
 pub const MAIN_MENU_OPTIONS: [&str; 5] = ["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "ABOUT"];
@@ -204,7 +202,7 @@ pub fn update(
                 }
             },
             3 => { // SETTINGS
-                *current_screen = Screen::VideoSettings;
+                *current_screen = Screen::GeneralSettings;
                 sound_effects.play_select(&config);
             },
             4 => { // ABOUT
