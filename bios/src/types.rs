@@ -66,6 +66,7 @@ pub enum Screen {
     AssetSettings,
     ConfirmReset,
     ResetComplete,
+    Wifi,
     Debug,
     GameSelection,
     About,

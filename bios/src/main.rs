@@ -36,6 +36,7 @@ use crate::dialog::Dialog;
 use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
+use crate::ui::wifi::WifiState;
 use crate::ui::*;
 use crate::utils::*; // Wildcard to get all utility functions
 use crate::save::StorageMediaState;
@@ -421,6 +422,9 @@ async fn main() {
     // SYSTEM INFO
     let system_info = get_system_info();
     println!("[Debug] System Info Loaded: {:#?}", system_info); // Optional: for debugging
+
+    // WI-FI
+    let mut wifi_state = WifiState::new().expect("Wi-Fi initialization failed. Ensure wlan0 is available.");
 
     // RESET SETTINGS CONFIRMATION
     let mut confirm_selection = 0; // 0 for YES, 1 for NO
@@ -1242,6 +1246,29 @@ async fn main() {
                     }
                 }
             },
+            Screen::Wifi => {
+                ui::wifi::update(
+                    &mut wifi_state,
+                    &input_state,
+                    &mut current_screen,
+                    &sound_effects,
+                    &config,
+                );
+
+                // Tell the about module to draw itself
+                ui::wifi::draw(
+                    &wifi_state,
+                    &mut animation_state,
+                    &logo_cache,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    &battery_info,
+                    &current_time_str,
+                    scale_factor,
+                );
+            }
         }
 
         // This block checks if the settings screen requested an SFX reload
