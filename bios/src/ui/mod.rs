@@ -1,20 +1,22 @@
 // Add necessary imports for the shared functions
 use crate::config::Config;
+use crate::memory::{get_game_playtime, get_game_size};
 use crate::{string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
     save, PathBuf, AnimationState, RECT_COLOR, Memory, Arc, Mutex, StorageMediaState, InputState, PlaytimeCache, SizeCache, TILE_SIZE,
-    PADDING, GRID_OFFSET, SELECTED_OFFSET, GRID_WIDTH, UIFocus, pixel_pos, get_memory_index, UI_BG_COLOR_DARK, ShakeTarget,
-    GRID_HEIGHT, get_game_playtime, get_game_size, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
+    PADDING, GRID_OFFSET, SELECTED_OFFSET, GRID_WIDTH, UIFocus, UI_BG_COLOR_DARK, ShakeTarget,
+    GRID_HEIGHT, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
 };
 use macroquad::prelude::*;
 use std::collections::HashMap;
 
 pub mod about;
+pub mod dialog;
 pub mod main_menu;
 pub mod settings;
 
-////////////////////////
+// ===================================
 // SCREEN RENDERING
-////////////////////////
+// ===================================
 
 // BACKGROUND
 pub fn render_background(
@@ -208,18 +210,18 @@ pub fn render_ui_overlay(
 // GAME SELECTION
 pub fn render_game_selection_menu(
     games: &[(save::CartInfo, PathBuf)],
-                              game_icon_cache: &HashMap<String, Texture2D>,
-                              placeholder: &Texture2D,
-                              selected_game: usize,
-                              animation_state: &AnimationState,
-                              logo_cache: &HashMap<String, Texture2D>,
-                              background_cache: &HashMap<String, Texture2D>,
-                              font_cache: &HashMap<String, Font>,
-                              config: &Config,
-                              background_state: &mut BackgroundState,
-                              battery_info: &Option<BatteryInfo>,
-                              current_time_str: &str,
-                              scale_factor: f32,
+    game_icon_cache: &HashMap<String, Texture2D>,
+    placeholder: &Texture2D,
+    selected_game: usize,
+    animation_state: &AnimationState,
+    logo_cache: &HashMap<String, Texture2D>,
+    background_cache: &HashMap<String, Texture2D>,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    background_state: &mut BackgroundState,
+    battery_info: &Option<BatteryInfo>,
+    current_time_str: &str,
+    scale_factor: f32,
 ) {
     render_background(background_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
@@ -479,11 +481,11 @@ pub fn render_data_view(
             //pixel_pos(xp)-3.0-SELECTED_OFFSET - offset,
             //pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET - offset,
             pixel_pos(xp, scale_factor) - (3.0 * scale_factor) - selected_offset - offset,
-                             pixel_pos(yp, scale_factor) - (3.0 * scale_factor) - selected_offset + grid_offset - offset,
-                             scaled_size,
-                             scaled_size,
-                             cursor_thickness,
-                             cursor_color
+            pixel_pos(yp, scale_factor) - (3.0 * scale_factor) - selected_offset + grid_offset - offset,
+            scaled_size,
+            scaled_size,
+            cursor_thickness,
+            cursor_color
         );
     }
 
@@ -811,6 +813,38 @@ pub fn render_dialog(
         );
     }
 }
+
+// ===================================
+// CURSOR FUNCTIONS
+// ===================================
+
+pub fn pixel_pos(v: f32, scale_factor: f32) -> f32 {
+    (PADDING + v * TILE_SIZE + v * PADDING) * scale_factor
+}
+
+pub fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
+    selected_memory + GRID_WIDTH * scroll_offset
+}
+
+pub fn calculate_icon_transition_positions(selected_memory: usize, scale_factor: f32) -> (Vec2, Vec2) {
+    let xp = (selected_memory % GRID_WIDTH) as f32;
+    let yp = (selected_memory / GRID_WIDTH) as f32;
+
+    // Create scaled versions of constants used for positioning
+    let grid_offset = GRID_OFFSET * scale_factor;
+    let padding = PADDING * scale_factor;
+
+    let grid_pos = Vec2::new(
+        pixel_pos(xp, scale_factor),
+                             pixel_pos(yp, scale_factor) + grid_offset
+    );
+    let dialog_pos = Vec2::new(padding, padding);
+    (grid_pos, dialog_pos)
+}
+
+// ===================================
+// TEXT RENDERING
+// ===================================
 
 /// Looks up the currently selected font in the cache.
 /// Falls back to the "Default" font if the selection is not found.

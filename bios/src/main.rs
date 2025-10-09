@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use gilrs::Gilrs;
 use std::panic;
 use futures;
-use std::sync::atomic::{AtomicU16, Ordering, AtomicBool};
+use std::sync::atomic::{Ordering, AtomicBool};
 use std::fs;
 use std::process;
 use std::process::Child;
@@ -25,6 +25,7 @@ use regex::Regex; // fetching audio sinks
 mod audio;
 mod config;
 mod input;
+mod memory;
 mod save;
 mod system;
 mod theme;
@@ -35,7 +36,9 @@ mod utils;
 use crate::audio::{SoundEffects, play_new_bgm};
 //use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::config::{Config, get_user_data_dir};
+use crate::dialog::{Dialog, create_main_dialog, create_copy_storage_dialog, create_confirm_delete_dialog, create_error_dialog, create_save_exists_dialog};
 use crate::input::InputState;
+use crate::memory::{load_memories, copy_memory, check_save_exists};
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
 use crate::ui::*;
@@ -263,249 +266,6 @@ fn window_conf() -> Conf {
 }
 
 // ===================================
-// FUNCTIONS
-// ===================================
-
-fn pixel_pos(v: f32, scale_factor: f32) -> f32 {
-    (PADDING + v * TILE_SIZE + v * PADDING) * scale_factor
-}
-
-fn copy_memory(memory: &Memory, from_media: &StorageMedia, to_media: &StorageMedia, state: Arc<Mutex<CopyOperationState>>) {
-    // Initialize the copy operation state
-    if let Ok(mut copy_state) = state.lock() {
-        copy_state.progress = 0;
-        copy_state.running = true;
-        copy_state.error_message = None;
-    }
-
-    // Small delay to show the operation has started
-    thread::sleep(time::Duration::from_millis(500));
-
-    // Create progress tracking
-    let progress = Arc::new(AtomicU16::new(0));
-    let progress_clone = progress.clone();
-    let state_clone = state.clone();
-
-    // Spawn a thread to monitor progress from the copy operation
-    let monitor_handle = thread::spawn(move || {
-        loop {
-            let current_progress = progress_clone.load(Ordering::SeqCst);
-
-            // Update the UI state with the current progress
-            if let Ok(mut copy_state) = state_clone.lock() {
-                // Only update if the operation is still running
-                if copy_state.running {
-                    copy_state.progress = current_progress;
-                } else {
-                    // Operation completed, exit the monitoring loop
-                    break;
-                }
-            }
-
-            // If we've reached 100%, the copy operation should be finishing soon
-            if current_progress >= 100 {
-                break;
-            }
-
-            thread::sleep(time::Duration::from_millis(50));
-        }
-    });
-
-    // Perform the actual copy operation
-    let copy_result = save::copy_save(&memory.id, &from_media.id, &to_media.id, progress);
-
-    // Handle the result
-    match copy_result {
-        Ok(_) => {
-            // Ensure progress shows 100% on success
-            if let Ok(mut copy_state) = state.lock() {
-                copy_state.progress = 100;
-            }
-
-            // Pause for 1.5 seconds to show completion clearly while keeping the operation running
-            thread::sleep(time::Duration::from_millis(1500));
-
-            // Mark operation as complete (this will allow the monitoring thread to exit)
-            if let Ok(mut copy_state) = state.lock() {
-                copy_state.running = false;
-                copy_state.should_clear_dialogs = true;
-            }
-
-            // Wait for the monitoring thread to finish
-            monitor_handle.join().ok();
-        },
-        Err(e) => {
-            // Handle error case (this will also stop the monitoring thread)
-            if let Ok(mut copy_state) = state.lock() {
-                copy_state.running = false;
-                copy_state.should_clear_dialogs = true;
-                copy_state.error_message = Some(format!("Failed to copy save: {}", e));
-            }
-
-            // Wait for the monitoring thread to finish
-            monitor_handle.join().ok();
-        }
-    }
-}
-
-/// Get playtime for a specific game, using cache when available
-fn get_game_playtime(memory: &Memory, playtime_cache: &mut PlaytimeCache) -> f32 {
-    let cache_key = (memory.id.clone(), memory.drive_name.clone());
-
-    if let Some(&cached_playtime) = playtime_cache.get(&cache_key) {
-        cached_playtime
-    } else {
-        let calculated_playtime = save::calculate_playtime(&memory.id, &memory.drive_name);
-        playtime_cache.insert(cache_key, calculated_playtime);
-        calculated_playtime
-    }
-}
-
-/// Get size for a specific game, using cache when available
-fn get_game_size(memory: &Memory, size_cache: &mut SizeCache) -> f32 {
-    let cache_key = (memory.id.clone(), memory.drive_name.clone());
-
-    if let Some(&cached_size) = size_cache.get(&cache_key) {
-        cached_size
-    } else {
-        let calculated_size = save::calculate_save_size(&memory.id, &memory.drive_name);
-        size_cache.insert(cache_key, calculated_size);
-        calculated_size
-    }
-}
-
-fn get_memory_index(selected_memory: usize, scroll_offset: usize) -> usize {
-    selected_memory + GRID_WIDTH * scroll_offset
-}
-
-fn calculate_icon_transition_positions(selected_memory: usize, scale_factor: f32) -> (Vec2, Vec2) {
-    let xp = (selected_memory % GRID_WIDTH) as f32;
-    let yp = (selected_memory / GRID_WIDTH) as f32;
-
-    // Create scaled versions of constants used for positioning
-    let grid_offset = GRID_OFFSET * scale_factor;
-    let padding = PADDING * scale_factor;
-
-    let grid_pos = Vec2::new(
-        pixel_pos(xp, scale_factor),
-                             pixel_pos(yp, scale_factor) + grid_offset
-    );
-    let dialog_pos = Vec2::new(padding, padding);
-    (grid_pos, dialog_pos)
-}
-
-fn create_confirm_delete_dialog() -> Dialog {
-    Dialog {
-        id: "confirm_delete".to_string(),
-        desc: Some("PERMANENTLY DELETE THIS SAVE DATA?".to_string()),
-        options: vec![
-            DialogOption {
-                text: "DELETE".to_string(),
-                value: "DELETE".to_string(),
-                disabled: false,
-            },
-            DialogOption {
-                text: "CANCEL".to_string(),
-                value: "CANCEL".to_string(),
-                disabled: false,
-            }
-        ],
-        selection: 1,
-    }
-}
-
-fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
-    let mut options = Vec::new();
-    if let Ok(state) = storage_state.lock() {
-        for drive in state.media.iter() {
-            if drive.id == state.media[state.selected].id {
-                continue;
-            }
-            options.push(DialogOption {
-                text: format!("{} ({} MB Free)", drive.id.clone(), drive.free),
-                         value: drive.id.clone(),
-                         disabled: false,
-            });
-        }
-    }
-    options.push(DialogOption {
-        text: "CANCEL".to_string(),
-                 value: "CANCEL".to_string(),
-                 disabled: false,
-    });
-
-    Dialog {
-        id: "copy_storage_select".to_string(),
-        desc: Some("WHERE TO COPY THIS SAVE DATA?".to_string()),
-        options,
-        selection: 0,
-    }
-}
-
-fn create_main_dialog(storage_state: &Arc<Mutex<StorageMediaState>>) -> Dialog {
-    let has_external_devices = if let Ok(state) = storage_state.lock() {
-        state.media.len() > 1
-    } else {
-        false
-    };
-
-    let options = vec![
-        DialogOption {
-            text: "COPY".to_string(),
-            value: "COPY".to_string(),
-            disabled: !has_external_devices,
-        },
-        DialogOption {
-            text: "DELETE".to_string(),
-            value: "DELETE".to_string(),
-            disabled: false,
-        },
-        DialogOption {
-            text: "CANCEL".to_string(),
-            value: "CANCEL".to_string(),
-            disabled: false,
-        },
-    ];
-
-    Dialog {
-        id: "main".to_string(),
-        desc: None,
-        options,
-        selection: 0,
-    }
-}
-
-fn create_save_exists_dialog() -> Dialog {
-    Dialog {
-        id: "save_exists".to_string(),
-        desc: Some("THIS SAVE DATA ALREADY EXISTS AT THE SELECTED DESTINATION".to_string()),
-        options: vec![
-            DialogOption {
-                text: "OK".to_string(),
-                value: "OK".to_string(),
-                disabled: false,
-            }
-        ],
-        selection: 0,
-    }
-}
-
-fn create_error_dialog(message: String) -> Dialog {
-    Dialog {
-        id: "error".to_string(),
-        desc: Some(message),
-        options: vec![
-            DialogOption {
-                text: "OK".to_string(),
-                value: "OK".to_string(),
-                disabled: false,
-            }
-        ],
-        selection: 0,
-    }
-}
-
-// ===================================
 // ASYNC FUNCTIONS
 // ===================================
 
@@ -631,34 +391,6 @@ async fn load_all_assets(
     load_asset_category!(logo_files, "LOGO", load_texture, &mut logo_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
     load_asset_category!(font_files, "FONT", load_ttf_font, &mut font_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
 
-    /*
-    let status = "LOADING FONTS...".to_string();
-    draw_loading_screen(&status, display_progress); // Update status text once for the whole category
-    next_frame().await;
-
-    // Loop through each font file path
-    for font_path in font_files {
-        let filename = font_path.file_name().unwrap().to_string_lossy().to_string();
-
-        // The match statement for loading is correct!
-        match load_ttf_font(&font_path.to_string_lossy()).await {
-            Ok(font) => {
-                font_cache.insert(filename.clone(), font);
-                println!("[OK] Loaded font: {}", filename);
-            },
-            Err(_) => {
-                println!("[ERROR] Failed to load font: {}", filename);
-            }
-        }
-
-        // Manually update the progress bar for each font that is processed
-        assets_loaded += 1;
-        // This is the animation/progress update that was inside your macro
-        animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
-    }
-    */
-
-
     println!("\n[INFO] Pre-loading music files...");
     load_audio_category!(music_files, "MUSIC", &mut music_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
 
@@ -672,32 +404,6 @@ async fn load_all_assets(
     let sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
 
     (background_cache, logo_cache, music_cache, font_cache, sound_effects)
-}
-
-async fn load_memories(media: &StorageMedia, cache: &mut HashMap<String, Texture2D>, queue: &mut Vec<(String, String)>) -> Vec<Memory> {
-    let mut memories = Vec::new();
-
-    if let Ok(details) = save::get_save_details(&media.id) {
-        for (cart_id, name, icon_path) in details {
-            if !cache.contains_key(&cart_id) {
-                queue.push((cart_id.clone(), icon_path.clone()));
-            }
-
-            let m = Memory {
-                id: cart_id,
-                name: Some(name),
-                drive_name: media.id.clone(),
-            };
-            memories.push(m);
-        }
-    }
-
-    memories
-}
-
-async fn check_save_exists(memory: &Memory, target_media: &StorageMedia, icon_cache: &mut HashMap<String, Texture2D>, icon_queue: &mut Vec<(String, String)>) -> bool {
-    let target_memories = load_memories(target_media, icon_cache, icon_queue).await;
-    target_memories.iter().any(|m| m.id == memory.id)
 }
 
 // ===================================

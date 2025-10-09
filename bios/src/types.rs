@@ -131,19 +131,6 @@ pub struct StorageMedia {
     pub free: u32,
 }
 
-pub struct DialogOption {
-    pub text: String,
-    pub value: String,
-    pub disabled: bool,
-}
-
-pub struct Dialog {
-    pub id: String,
-    pub desc: Option<String>,
-    pub options: Vec<DialogOption>,
-    pub selection: usize,
-}
-
 pub struct AnimationState {
     pub shake_time: f32,  // Current shake animation time
     pub shake_target: ShakeTarget, // Which element is currently shaking
