@@ -5,8 +5,6 @@ use std::thread;
 use std::time;
 use std::collections::{HashMap, HashSet};
 use gilrs::Gilrs;
-use std::panic;
-use futures;
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::fs;
 use std::process;
@@ -19,7 +17,6 @@ use std::env; // backtracing
 use ::rand::Rng; // for selecting a random message on startup
 use chrono::Local; // for getting clock
 use regex::Regex; // fetching audio sinks
-//use tokio::fs; // ensure fs::read_dir and fs::read_to_string inside async fn resolve to Tokio's awaitable versions
 
 // Import our new modules
 mod audio;
@@ -34,11 +31,9 @@ mod ui;
 mod utils;
 
 use crate::audio::{SoundEffects, play_new_bgm};
-//use crate::config::{Config, load_config, delete_config_file, get_user_data_dir};
 use crate::config::{Config, get_user_data_dir};
-use crate::dialog::{Dialog, create_main_dialog, create_copy_storage_dialog, create_confirm_delete_dialog, create_error_dialog, create_save_exists_dialog};
+use crate::dialog::Dialog;
 use crate::input::InputState;
-use crate::memory::{load_memories, copy_memory, check_save_exists};
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
 use crate::ui::*;
@@ -826,9 +821,6 @@ async fn main() {
             last_battery_check = get_time();
         }
 
-        let mut action_dialog_id = String::new();
-        let mut action_option_value = String::new();
-
         // Update input state from both keyboard and controller
         input_state.update_keyboard();
         input_state.update_controller(&mut gilrs);
@@ -1221,387 +1213,35 @@ async fn main() {
                 );
             },
             Screen::SaveData => {
+                // --- UPDATE ---
+                ui::data::update(
+                    &mut input_state, &mut current_screen, &sound_effects, &config,
+                    &storage_state, &mut memories, &mut icon_cache, &mut icon_queue,
+                    &mut selected_memory, &mut scroll_offset, &mut dialogs, &mut dialog_state, &mut animation_state,
+                    scale_factor, &copy_op_state
+                ).await;
+
+                // --- RENDER ---
                 render_background(&background_cache, &config, &mut background_state);
 
-                // Check if memories need to be refreshed due to storage media changes
-                if let Ok(mut state) = storage_state.lock() {
-                    if state.needs_memory_refresh {
-                        if !state.media.is_empty() {
-                            memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                        } else {
-                            memories = Vec::new();
-                        }
-                        state.needs_memory_refresh = false;
-                        dialogs.clear();
-                    }
-                }
-                match dialog_state {
-                    DialogState::None => {
-                        render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
+                ui::data::draw(
+                    selected_memory, &memories, &icon_cache, &font_cache,
+                    &config, &storage_state, &placeholder, scroll_offset,
+                    &input_state, &animation_state, &mut playtime_cache, &mut size_cache,
+                    scale_factor, &dialog_state
+                );
 
-                        // Handle back navigation
-                        if input_state.back {
-                           current_screen = Screen::MainMenu;
-                           sound_effects.play_back(&config);
-                        }
-
-                        // Handle storage media switching with tab/bumpers regardless of focus
-                        if input_state.cycle || input_state.next || input_state.prev {
-                            if let Ok(mut state) = storage_state.lock() {
-                                if input_state.cycle {
-                                    if state.media.len() > 1 {
-                                        // Cycle wraps around
-                                        state.selected = (state.selected + 1) % state.media.len();
-                                        memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                        scroll_offset = 0;
-                                        sound_effects.play_select(&config);
-                                    }
-                                } else if input_state.next {
-                                    // Next stops at end
-                                    if state.selected < state.media.len() - 1 {
-                                        state.selected += 1;
-                                        memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                        scroll_offset = 0;
-                                        sound_effects.play_select(&config);
-                                    } else {
-                                        animation_state.trigger_shake(false); // Shake right arrow when can't go next
-                                        sound_effects.play_reject(&config);
-                                    }
-                                } else if input_state.prev {
-                                    // Prev stops at beginning
-                                    if state.selected > 0 {
-                                        state.selected -= 1;
-                                        memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                        scroll_offset = 0;
-                                        sound_effects.play_select(&config);
-                                    } else {
-                                        animation_state.trigger_shake(true); // Shake left arrow when can't go prev
-                                        sound_effects.play_reject(&config);
-                                    }
-                                }
-                            }
-                        }
-
-                        match input_state.ui_focus {
-                            UIFocus::Grid => {
-                                if input_state.select {
-                                    let memory_index = get_memory_index(selected_memory, scroll_offset);
-                                    if let Some(_) = memories.get(memory_index) {
-                                        let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                                        animation_state.trigger_dialog_transition(grid_pos, dialog_pos);
-                                        dialogs.push(create_main_dialog(&storage_state));
-                                        dialog_state = DialogState::Opening;
-                                        sound_effects.play_select(&config);
-                                    }
-                                }
-                                if input_state.right && selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
-                                    selected_memory += 1;
-                                    animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                                if input_state.left && selected_memory >= 1 {
-                                    selected_memory -= 1;
-                                    animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                                if input_state.down {
-                                    if selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
-                                        selected_memory += GRID_WIDTH;
-                                        animation_state.trigger_transition();
-                                        sound_effects.play_cursor_move(&config);
-                                    } else {
-                                        // Check if there are any saves in the next row
-                                        let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
-                                        if next_row_start < memories.len() {
-                                            scroll_offset += 1;
-                                            animation_state.trigger_transition();
-                                            sound_effects.play_cursor_move(&config);
-                                        }
-                                    }
-                                }
-                                if input_state.up {
-                                    if selected_memory >= GRID_WIDTH {
-                                        selected_memory -= GRID_WIDTH;
-                                        animation_state.trigger_transition();
-                                        sound_effects.play_cursor_move(&config);
-                                    } else if scroll_offset > 0 {
-                                        scroll_offset -= 1;
-                                        animation_state.trigger_transition();
-                                        sound_effects.play_cursor_move(&config);
-                                    } else {
-                                        // Allow moving to storage navigation from leftmost or rightmost column
-                                        if selected_memory % GRID_WIDTH == 0 {
-                                            input_state.ui_focus = UIFocus::StorageLeft;
-                                            animation_state.trigger_transition();
-                                            sound_effects.play_cursor_move(&config);
-                                        } else if selected_memory % GRID_WIDTH == GRID_WIDTH - 1 {
-                                            input_state.ui_focus = UIFocus::StorageRight;
-                                            animation_state.trigger_transition();
-                                            sound_effects.play_cursor_move(&config);
-                                        }
-                                    }
-                                }
-                            },
-                            UIFocus::StorageLeft => {
-                                if input_state.right {
-                                    input_state.ui_focus = UIFocus::StorageRight;
-                                    animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                                if input_state.down {
-                                    input_state.ui_focus = UIFocus::Grid;
-                                    selected_memory = 0; // Move to leftmost grid position
-                                    animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                                if input_state.select {
-                                    if let Ok(mut state) = storage_state.lock() {
-                                        if state.selected > 0 {
-                                            state.selected -= 1;
-                                            memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                            scroll_offset = 0;
-                                            sound_effects.play_select(&config);
-                                        } else {
-                                            animation_state.trigger_shake(true);
-                                            sound_effects.play_reject(&config);
-                                        }
-                                    }
-                                }
-                            },
-                            UIFocus::StorageRight => {
-                                if input_state.left {
-                                    input_state.ui_focus = UIFocus::StorageLeft;
-                                    animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                                if input_state.down {
-                                    input_state.ui_focus = UIFocus::Grid;
-                                    selected_memory = GRID_WIDTH - 1; // Move to rightmost grid position
-                                    animation_state.trigger_transition();
-                                    sound_effects.play_cursor_move(&config);
-                                }
-                                if input_state.select {
-                                    if let Ok(mut state) = storage_state.lock() {
-                                        if state.selected < state.media.len() - 1 {
-                                            state.selected += 1;
-                                            memories = load_memories(&state.media[state.selected], &mut icon_cache, &mut icon_queue).await;
-                                            scroll_offset = 0;
-                                            sound_effects.play_select(&config);
-                                        } else {
-                                            animation_state.trigger_shake(false);
-                                            sound_effects.play_reject(&config);
-                                        }
-                                    }
-                                }
-                            },
-                        }
-                    },
-                    DialogState::Opening => {
-                        // During opening, only render the main view and the transitioning icon
-                        render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
-
-                        // Only render the icon during transition
-                        let memory_index = get_memory_index(selected_memory, scroll_offset);
-                        if let Some(mem) = memories.get(memory_index) {
-                            let icon = match icon_cache.get(&mem.id) {
-                                Some(icon) => icon,
-                                None => &placeholder,
-                            };
-
-                            let params = DrawTextureParams {
-                                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-                                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                                rotation: 0.0,
-                                flip_x: false,
-                                flip_y: false,
-                                pivot: None
-                            };
-
-                            let icon_pos = animation_state.get_dialog_transition_pos();
-                            draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
-                        }
-                    },
-                    DialogState::Open => {
-                        // When dialog is fully open, only render the dialog
-                        if let Some(dialog) = dialogs.last_mut() {
-                            render_dialog(dialog, &memories, selected_memory, &icon_cache, &font_cache, &config, &copy_op_state, &placeholder, scroll_offset, &animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
-
-                            let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
-                            if input_state.up {
-                                selection -= 1;
-                                animation_state.trigger_transition();
-                                sound_effects.play_cursor_move(&config);
-                            }
-
-                            if input_state.down {
-                                selection += 1;
-                                animation_state.trigger_transition();
-                                sound_effects.play_cursor_move(&config);
-                            }
-
-                            let mut cancel = false;
-                            if input_state.back {
-                                cancel = true;
-                            }
-
-                            let next_selection = selection as usize % dialog.options.len();
-                            if next_selection != dialog.selection {
-                                // Store the new selection to apply after we're done with the immutable borrow
-                                let new_selection = next_selection;
-                                dialog.selection = new_selection;
-                            } else {
-                                // We need to handle the select input
-                                if input_state.select {
-                                    let selected_option = &dialog.options[dialog.selection];
-                                    if !selected_option.disabled {
-                                        action_dialog_id = dialog.id.clone();
-                                        action_option_value = selected_option.value.clone();
-
-                                        if selected_option.value == "CANCEL" || selected_option.value == "OK" {
-                                            cancel = true;
-                                        } else {
-                                            sound_effects.play_select(&config);
-                                        }
-                                    } else {
-                                        animation_state.trigger_dialog_shake();
-                                        sound_effects.play_reject(&config);
-                                    }
-                                }
-                            }
-
-                            if cancel {
-                                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                                dialog_state = DialogState::Closing;
-                                sound_effects.play_back(&config);
-                            }
-                        }
-                    },
-                    DialogState::Closing => {
-                        // During closing, render both views to show the icon returning
-                        render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
-
-                        // Only render the icon during transition
-                        let memory_index = get_memory_index(selected_memory, scroll_offset);
-                        if let Some(mem) = memories.get(memory_index) {
-                            let icon = match icon_cache.get(&mem.id) {
-                                Some(icon) => icon,
-                                None => &placeholder,
-                            };
-
-                            let params = DrawTextureParams {
-                                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-                                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                                rotation: 0.0,
-                                flip_x: false,
-                                flip_y: false,
-                                pivot: None
-                            };
-
-                            let icon_pos = animation_state.get_dialog_transition_pos();
-                            draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
-                        }
+                // Draw dialogs on top if they are open
+                if let Some(dialog) = dialogs.last_mut() {
+                    if dialog_state == DialogState::Open {
+                        ui::render_dialog(
+                            dialog, &memories, selected_memory, &icon_cache, &font_cache,
+                            &config, &copy_op_state, &placeholder, scroll_offset,
+                            &animation_state, &mut playtime_cache, &mut size_cache, scale_factor
+                        );
                     }
                 }
             },
-        }
-
-        // Handle dialog actions
-        match (action_dialog_id.as_str(), action_option_value.as_str()) {
-            ("main", "COPY") => {
-                dialogs.push(create_copy_storage_dialog(&storage_state));
-            },
-            ("main", "DELETE") => {
-                dialogs.push(create_confirm_delete_dialog());
-            },
-            ("main", "CANCEL") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                dialog_state = DialogState::Closing;
-                sound_effects.play_back(&config);
-            },
-            ("confirm_delete", "DELETE") => {
-                if let Ok(mut state) = storage_state.lock() {
-                    let memory_index = get_memory_index(selected_memory, scroll_offset);
-                    if let Some(mem) = memories.get(memory_index) {
-                        if let Err(e) = save::delete_save(&mem.id, &state.media[state.selected].id) {
-                            dialogs.push(create_error_dialog(format!("ERROR: {}", e)));
-                        } else {
-                            state.needs_memory_refresh = true;
-                            dialog_state = DialogState::None;
-                            sound_effects.play_back(&config);
-                        }
-                    }
-                }
-            },
-            ("confirm_delete", "CANCEL") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                dialog_state = DialogState::Closing;
-                sound_effects.play_back(&config);
-            },
-            ("copy_storage_select", target_id) if target_id != "CANCEL" => {
-                let memory_index = get_memory_index(selected_memory, scroll_offset);
-                let mem = memories[memory_index].clone();
-                let target_id = target_id.to_string();
-                if let Ok(state) = storage_state.lock() {
-                    let to_media = StorageMedia { id: target_id, free: 0 };
-
-                    // Check if save already exists
-                    if check_save_exists(&mem, &to_media, &mut icon_cache, &mut icon_queue).await {
-                        dialogs.push(create_save_exists_dialog());
-                    } else {
-                        let thread_state = copy_op_state.clone();
-                        let from_media = state.media[state.selected].clone();
-                        thread::spawn(move || {
-                            copy_memory(&mem, &from_media, &to_media, thread_state);
-                        });
-                    }
-                }
-            },
-            ("copy_storage_select", "CANCEL") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                dialog_state = DialogState::Closing;
-                sound_effects.play_back(&config);
-            },
-            ("save_exists", "OK") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                dialog_state = DialogState::Closing;
-                sound_effects.play_back(&config);
-            },
-            ("error", "OK") => {
-                let (grid_pos, dialog_pos) = calculate_icon_transition_positions(selected_memory, scale_factor);
-                animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
-                dialog_state = DialogState::Closing;
-                sound_effects.play_back(&config);
-            },
-            _ => {}
-        }
-
-        if !icon_queue.is_empty() {
-            let (cart_id, icon_path) = icon_queue.remove(0);
-            let texture_future = load_texture(&icon_path);
-            let texture_result = panic::catch_unwind(|| {
-                futures::executor::block_on(texture_future)
-            });
-
-            if let Ok(Ok(texture)) = texture_result {
-                icon_cache.insert(cart_id.clone(), texture);
-            }
-        }
-
-        // Display any copy operation errors
-        if let Ok(mut copy_state) = copy_op_state.lock() {
-            if let Some(error_msg) = copy_state.error_message.take() {
-                dialogs.push(create_error_dialog(error_msg));
-                dialog_state = DialogState::Opening;
-            }
-            if copy_state.should_clear_dialogs {
-                dialog_state = DialogState::Closing;
-                copy_state.should_clear_dialogs = false;
-            }
         }
 
         // This block checks if the settings screen requested an SFX reload

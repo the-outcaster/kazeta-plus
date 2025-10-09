@@ -1,15 +1,22 @@
 // Add necessary imports for the shared functions
 use crate::config::Config;
 use crate::memory::{get_game_playtime, get_game_size};
+/*
 use crate::{string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
     save, PathBuf, AnimationState, RECT_COLOR, Memory, Arc, Mutex, StorageMediaState, InputState, PlaytimeCache, SizeCache, TILE_SIZE,
     PADDING, GRID_OFFSET, SELECTED_OFFSET, GRID_WIDTH, UIFocus, UI_BG_COLOR_DARK, ShakeTarget,
     GRID_HEIGHT, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
 };
+*/
+use crate::{string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
+    save, PathBuf, AnimationState, RECT_COLOR, Memory, Arc, Mutex, PlaytimeCache, SizeCache, TILE_SIZE,
+    PADDING, GRID_OFFSET, GRID_WIDTH, ShakeTarget, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
+};
 use macroquad::prelude::*;
 use std::collections::HashMap;
 
 pub mod about;
+pub mod data;
 pub mod dialog;
 pub mod main_menu;
 pub mod settings;
@@ -350,11 +357,11 @@ pub fn render_debug_screen(
 pub fn render_dialog_box(
     message: &str,
     options: Option<(&str, &str)>,
-                     selection: usize,
-                     font_cache: &HashMap<String, Font>,
-                     config: &Config,
-                     scale_factor: f32,
-                     animation_state: &AnimationState,
+    selection: usize,
+    font_cache: &HashMap<String, Font>,
+    config: &Config,
+    scale_factor: f32,
+    animation_state: &AnimationState,
 ) {
     let current_font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
@@ -438,269 +445,6 @@ pub fn render_dialog_box(
         let text_x = screen_width() / 2.0 - text_dims.width / 2.0;
         let text_y = box_y + box_height - 40.0 * scale_factor;
         text_with_config_color(font_cache, config, ok_text, text_x, text_y, font_size);
-    }
-}
-
-// DATA VIEW
-pub fn render_data_view(
-    selected_memory: usize,
-    memories: &Vec<Memory>,
-    icon_cache: &HashMap<String, Texture2D>,
-    font_cache: &HashMap<String, Font>,
-    config: &Config,
-    storage_state: &Arc<Mutex<StorageMediaState>>,
-    placeholder: &Texture2D,
-    scroll_offset: usize,
-    input_state: &mut InputState,
-    animation_state: &mut AnimationState,
-    playtime_cache: &mut PlaytimeCache,
-    size_cache: &mut SizeCache,
-    scale_factor: f32,
-) {
-    // --- Create scaled layout values at the top ---
-    let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-    let tile_size = TILE_SIZE * scale_factor;
-    let padding = PADDING * scale_factor;
-    let grid_offset = GRID_OFFSET * scale_factor;
-    let selected_offset = SELECTED_OFFSET * scale_factor;
-
-    let xp = (selected_memory % GRID_WIDTH) as f32;
-    let yp = (selected_memory / GRID_WIDTH) as f32;
-
-    // Draw grid selection highlight when focused on grid
-    if let UIFocus::Grid = input_state.ui_focus {
-        let cursor_color = animation_state.get_cursor_color(config);
-        let cursor_thickness = 6.0 * scale_factor;
-        let cursor_scale = animation_state.get_cursor_scale();
-
-        let base_size = tile_size + 6.0;
-        let scaled_size = base_size * cursor_scale;
-        let offset = (scaled_size - base_size) / 2.0;
-
-        draw_rectangle_lines(
-            //pixel_pos(xp)-3.0-SELECTED_OFFSET - offset,
-            //pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET - offset,
-            pixel_pos(xp, scale_factor) - (3.0 * scale_factor) - selected_offset - offset,
-            pixel_pos(yp, scale_factor) - (3.0 * scale_factor) - selected_offset + grid_offset - offset,
-            scaled_size,
-            scaled_size,
-            cursor_thickness,
-            cursor_color
-        );
-    }
-
-    for x in 0..GRID_WIDTH {
-        for y in 0..GRID_HEIGHT {
-            let memory_index = get_memory_index(x + GRID_WIDTH * y, scroll_offset);
-            let pos_x = pixel_pos(x as f32, scale_factor);
-            let pos_y = pixel_pos(y as f32, scale_factor) + grid_offset;
-
-            if xp as usize == x && yp as usize == y {
-                if let UIFocus::Grid = input_state.ui_focus {
-                    draw_rectangle(pos_x-selected_offset, pos_y-selected_offset, tile_size, tile_size, UI_BG_COLOR);
-                } else {
-                    draw_rectangle(pos_x - (2.0 * scale_factor), pos_y- (2.0 * scale_factor), tile_size + (4.0 * scale_factor), tile_size + (4.0 * scale_factor), UI_BG_COLOR);
-                }
-            } else {
-                draw_rectangle(pos_x - (2.0 * scale_factor), pos_y - (2.0 * scale_factor), tile_size + (4.0 * scale_factor), tile_size + (4.0 * scale_factor), UI_BG_COLOR);
-            }
-
-            let Some(mem) = memories.get(memory_index) else {
-                continue;
-            };
-
-            // Skip rendering the icon at its grid position during transitions
-            if xp as usize == x && yp as usize == y && animation_state.dialog_transition_time > 0.0 {
-                continue;
-            }
-
-            let icon = match icon_cache.get(&mem.id) {
-                Some(icon) => icon,
-                None => placeholder,
-            };
-
-            let params = DrawTextureParams {
-                dest_size: Some(Vec2 {x: tile_size, y: tile_size }),
-                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                rotation: 0.0,
-                flip_x: false,
-                flip_y: false,
-                pivot: None
-            };
-            if xp as usize == x && yp as usize == y {
-                if let UIFocus::Grid = input_state.ui_focus {
-                    draw_texture_ex(&icon, pos_x-selected_offset, pos_y-selected_offset, WHITE, params);
-                } else {
-                    draw_texture_ex(&icon, pos_x, pos_y, WHITE, params);
-                }
-            } else {
-                draw_texture_ex(&icon, pos_x, pos_y, WHITE, params);
-            }
-        }
-    }
-
-    // --- Storage media info area (NOW FULLY SCALED) ---
-    let storage_info_w = 512.0 * scale_factor;
-    let storage_info_x = tile_size * 2.0;
-    let storage_info_y = 16.0 * scale_factor;
-    let storage_info_h = 36.0 * scale_factor;
-    let nav_arrow_size = 10.0 * scale_factor;
-    let nav_arrow_outline = 1.0 * scale_factor;
-    let box_line_thickness = 4.0 * scale_factor;
-
-    // Draw storage info background
-    draw_rectangle(storage_info_x, storage_info_y, storage_info_w, storage_info_h, UI_BG_COLOR);
-    draw_rectangle_lines(storage_info_x - box_line_thickness, storage_info_y - box_line_thickness, storage_info_w + (box_line_thickness * 2.0), storage_info_h + (box_line_thickness * 2.0), box_line_thickness, UI_BG_COLOR_DARK);
-
-    if let Ok(state) = storage_state.lock() {
-        if !state.media.is_empty() {
-            // Draw storage info text (NOW in the correct, scaled box)
-            text_with_config_color(font_cache, config, &state.media[state.selected].id.to_uppercase(), storage_info_x + (2.0 * scale_factor), storage_info_y + (17.0 * scale_factor), font_size);
-            let free_space_text = format!("{} MB Free", state.media[state.selected].free as f32).to_uppercase();
-            text_with_config_color(font_cache, config, &free_space_text, storage_info_x + (2.0 * scale_factor), storage_info_y + (33.0 * scale_factor), font_size);
-
-            // Draw left arrow background
-            let left_box_x = padding;  // Align with leftmost grid column
-            let left_box_y = storage_info_y + storage_info_h / 2.0 - tile_size / 2.0;
-            let left_shake = animation_state.calculate_shake_offset(ShakeTarget::LeftArrow);
-
-            if let UIFocus::StorageLeft = input_state.ui_focus {
-                let cursor_color = animation_state.get_cursor_color(config);
-                let cursor_thickness = 6.0;
-                let cursor_scale = animation_state.get_cursor_scale();
-
-                let base_size = tile_size + 6.0;
-                let scaled_size = base_size * cursor_scale;
-                let offset = (scaled_size - base_size) / 2.0;
-
-                draw_rectangle(left_box_x-selected_offset + left_shake, left_box_y-selected_offset, tile_size, tile_size, UI_BG_COLOR);
-                draw_rectangle_lines(
-                    left_box_x-3.0-selected_offset + left_shake - offset,
-                    left_box_y-3.0-selected_offset - offset,
-                    scaled_size,
-                    scaled_size,
-                    cursor_thickness,
-                    cursor_color
-                );
-            } else {
-                draw_rectangle(left_box_x-2.0 + left_shake, left_box_y-2.0, tile_size+4.0, tile_size+4.0, UI_BG_COLOR);
-            }
-
-            let left_offset = if let UIFocus::StorageLeft = input_state.ui_focus {
-                selected_offset
-            } else {
-                0.0
-            };
-
-            let left_points = [
-                Vec2::new(4.0 + left_box_x + tile_size/2.0 - nav_arrow_size - left_offset + left_shake, left_box_y + tile_size/2.0 - left_offset),
-                Vec2::new(4.0 + left_box_x + tile_size/2.0 - left_offset + left_shake, left_box_y + tile_size/2.0 - nav_arrow_size - left_offset),
-                Vec2::new(4.0 + left_box_x + tile_size/2.0 - left_offset + left_shake, left_box_y + tile_size/2.0 + nav_arrow_size - left_offset),
-            ];
-            let left_color = if state.selected > 0 {
-                WHITE
-            } else {
-                Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 } // Dark gray when disabled
-            };
-            draw_triangle(left_points[0], left_points[1], left_points[2], left_color);
-            draw_triangle_lines(left_points[0], left_points[1], left_points[2], nav_arrow_outline, BLACK);
-
-            // Draw right arrow background
-            let right_box_x = padding + (GRID_WIDTH as f32 - 1.0) * (tile_size + padding);  // Align with rightmost grid column
-            let right_box_y = storage_info_y + storage_info_h / 2.0 - tile_size / 2.0;
-            let right_shake = animation_state.calculate_shake_offset(ShakeTarget::RightArrow);
-
-            if let UIFocus::StorageRight = input_state.ui_focus {
-                let cursor_color = animation_state.get_cursor_color(config);
-                let cursor_thickness = 6.0;
-                let cursor_scale = animation_state.get_cursor_scale();
-
-                let base_size = tile_size + 6.0;
-                let scaled_size = base_size * cursor_scale;
-                let offset = (scaled_size - base_size) / 2.0;
-
-                draw_rectangle(right_box_x-selected_offset + right_shake, right_box_y-selected_offset, tile_size, tile_size, UI_BG_COLOR);
-                draw_rectangle_lines(
-                    right_box_x-3.0-selected_offset + right_shake - offset,
-                    right_box_y-3.0-selected_offset - offset,
-                    scaled_size,
-                    scaled_size,
-                    cursor_thickness,
-                    cursor_color
-                );
-            } else {
-                draw_rectangle(right_box_x-2.0 + right_shake, right_box_y-2.0, tile_size+4.0, tile_size+4.0, UI_BG_COLOR);
-            }
-
-            let right_offset = if let UIFocus::StorageRight = input_state.ui_focus {
-                selected_offset
-            } else {
-                0.0
-            };
-            let right_points = [
-                Vec2::new(right_box_x + tile_size/2.0 + nav_arrow_size - 4.0 - right_offset + right_shake, right_box_y + tile_size/2.0 - right_offset),
-                Vec2::new(right_box_x + tile_size/2.0 - 4.0 - right_offset + right_shake, right_box_y + tile_size/2.0 - nav_arrow_size - right_offset),
-                Vec2::new(right_box_x + tile_size/2.0 - 4.0 - right_offset + right_shake, right_box_y + tile_size/2.0 + nav_arrow_size - right_offset),
-            ];
-            let right_color = if state.selected < state.media.len() - 1 {
-                WHITE
-            } else {
-                Color { r: 0.3, g: 0.3, b: 0.3, a: 1.0 } // Dark gray when disabled
-            };
-            draw_triangle(right_points[0], right_points[1], right_points[2], right_color);
-            draw_triangle_lines(right_points[0], right_points[1], right_points[2], nav_arrow_outline, BLACK);
-        }
-    }
-
-    // --- Draw highlight box for save info (NOW FULLY SCALED) ---
-    draw_rectangle(16.0 * scale_factor, 309.0 * scale_factor, screen_width() - (32.0 * scale_factor), 40.0 * scale_factor, UI_BG_COLOR);
-    draw_rectangle_lines(12.0 * scale_factor, 305.0 * scale_factor, screen_width() - (24.0 * scale_factor), 48.0 * scale_factor, box_line_thickness, UI_BG_COLOR_DARK);
-
-    let memory_index = get_memory_index(selected_memory, scroll_offset);
-    if input_state.ui_focus == UIFocus::Grid {
-        if let Some(selected_mem) = memories.get(memory_index) {
-            let desc = selected_mem.name.clone().unwrap_or_else(|| selected_mem.id.clone());
-            let playtime = get_game_playtime(selected_mem, playtime_cache);
-            let size = get_game_size(selected_mem, size_cache);
-            let stats_text = format!("{:.1} MB | {:.1} H", size, playtime);
-
-            // Draw save info text (NOW in the correct, scaled box)
-            text_with_config_color(font_cache, config, &desc, 19.0 * scale_factor, 327.0 * scale_factor, font_size);
-            text_with_config_color(font_cache, config, &stats_text, 19.0 * scale_factor, 345.0 * scale_factor, font_size);
-        }
-    }
-    // --- Draw scroll indicators (NOW FULLY SCALED) ---
-    let indicator_size = 8.0 * scale_factor;
-    let distance_top = -13.0 * scale_factor;
-    let distance_bottom = 4.0 * scale_factor;
-    let outline_thickness = 1.0 * scale_factor;
-
-    if scroll_offset > 0 {
-        // Up arrow
-        let center_x = screen_width() / 2.0;
-        let top_y = grid_offset - distance_top;
-        let points = [
-            Vec2::new(center_x, top_y - indicator_size),
-            Vec2::new(center_x - indicator_size, top_y),
-            Vec2::new(center_x + indicator_size, top_y),
-        ];
-        draw_triangle(points[0], points[1], points[2], WHITE);
-        draw_triangle_lines(points[0], points[1], points[2], outline_thickness, BLACK);
-    }
-
-    let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
-    if next_row_start < memories.len() {
-        // Down arrow
-        let grid_bottom = grid_offset + GRID_HEIGHT as f32 * (tile_size + padding);
-        let center_x = screen_width() / 2.0;
-        let bottom_y = grid_bottom + distance_bottom;
-        let points = [
-            Vec2::new(center_x, bottom_y + indicator_size),
-            Vec2::new(center_x - indicator_size, bottom_y),
-            Vec2::new(center_x + indicator_size, bottom_y),
-        ];
-        draw_triangle(points[0], points[1], points[2], WHITE);
-        draw_triangle_lines(points[0], points[1], points[2], outline_thickness, BLACK);
     }
 }
 
