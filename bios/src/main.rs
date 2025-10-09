@@ -1506,6 +1506,7 @@ async fn main() {
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
                     &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness
                 );
+
                 render_dialog_box(
                     "Settings have been reset.\nRestart required.",
                     None, // No YES/NO options needed
@@ -1692,6 +1693,7 @@ async fn main() {
                     DialogState::Opening => {
                         // During opening, only render the main view and the transitioning icon
                         render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
+
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {
@@ -1772,6 +1774,7 @@ async fn main() {
                     DialogState::Closing => {
                         // During closing, render both views to show the icon returning
                         render_data_view(selected_memory, &memories, &icon_cache, &font_cache, &config, &storage_state, &placeholder, scroll_offset, &mut input_state, &mut animation_state, &mut playtime_cache, &mut size_cache, scale_factor);
+
                         // Only render the icon during transition
                         let memory_index = get_memory_index(selected_memory, scroll_offset);
                         if let Some(mem) = memories.get(memory_index) {

@@ -833,17 +833,17 @@ pub fn text_with_config_color(font_cache: &HashMap<String, Font>, config: &Confi
     // Shadow
     draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
         font: Some(font),
-                 font_size,
-                 color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 },
-                 ..Default::default()
+        font_size,
+        color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 },
+        ..Default::default()
     });
 
     // Main Text (using the color from config)
     draw_text_ex(text, x, y, TextParams {
         font: Some(font),
-                 font_size,
-                 color: string_to_color(&config.font_color),
-                 ..Default::default()
+        font_size,
+        color: string_to_color(&config.font_color),
+        ..Default::default()
     });
 }
 
@@ -854,18 +854,18 @@ pub fn text_disabled(font_cache: &HashMap<String, Font>, config: &Config, text :
     // SHADOW
     draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
         font: Some(font),
-                 //font_size: font_size,
-                 font_size,
-                 color: Color {r:0.0, g:0.0, b:0.0, a:1.0},
-                 ..Default::default()
+        //font_size: font_size,
+        font_size,
+        color: Color {r:0.0, g:0.0, b:0.0, a:1.0},
+        ..Default::default()
     });
 
     // MAIN TEXT
     draw_text_ex(text, x, y, TextParams {
         font: Some(font),
-                 //font_size: font_size,
-                 font_size,
-                 color: Color {r:0.4, g:0.4, b:0.4, a:1.0},
-                 ..Default::default()
+        //font_size: font_size,
+        font_size,
+        color: Color {r:0.4, g:0.4, b:0.4, a:1.0},
+        ..Default::default()
     });
 }

@@ -122,6 +122,10 @@ pub fn render_settings_page(
     let current_font = get_current_font(font_cache, config);
 
     render_background(background_cache, config, background_state);
+
+    // dim the background for easier legibility
+    draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
+
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
 
     //render_debug_info(config);
@@ -270,7 +274,6 @@ pub fn update(
     logo_choices: &Vec<String>,
     background_choices: &Vec<String>,
     font_choices: &Vec<String>,
-    //theme_changed: &mut bool,
 ) {
     // --- Determine current page info ---
     let (page_number, options): (usize, &[&str]) = match *current_screen {
