@@ -286,7 +286,7 @@ pub fn update(
     current_screen: &mut Screen,
     input_state: &InputState,
     config: &mut Config,
-    themes: &Vec<String>,
+    //themes: &Vec<String>,
     sound_pack_choices: &Vec<String>,
     loaded_themes: &HashMap<String, theme::Theme>,
     settings_menu_selection: &mut usize,
@@ -532,30 +532,31 @@ pub fn update(
         3 => match settings_menu_selection {
             0 => { // THEME SELECTION
                 if input_state.left || input_state.right {
-                    if themes.is_empty() { return; } // Prevent panic if no themes are loaded
+                    if loaded_themes.is_empty() { return; } // Prevent panic if no themes are loaded
 
-                    let current_index = themes.iter().position(|t| *t == config.theme).unwrap_or(0);
+                    // --- THIS IS THE FIX ---
+                    // 1. Get a fresh, sorted list of theme names directly from the live data.
+                    let mut theme_names: Vec<_> = loaded_themes.keys().cloned().collect();
+                    theme_names.sort();
+                    // --- END FIX ---
+
+                    // Now, use this up-to-date 'theme_names' vector for the rest of the logic
+                    let current_index = theme_names.iter().position(|t| *t == config.theme).unwrap_or(0);
                     let new_index = if input_state.right {
-                        (current_index + 1) % themes.len()
+                        (current_index + 1) % theme_names.len()
                     } else {
-                        (current_index + themes.len() - 1) % themes.len()
+                        (current_index + theme_names.len() - 1) % theme_names.len()
                     };
 
-                    // Clone the name here to work around borrowing rules
-                    let new_theme_name = themes[new_index].clone();
+                    let new_theme_name = theme_names[new_index].clone();
 
-                    // --- REVISED THEME SWITCHING LOGIC ---
-
-                    // Only run this logic if the theme has actually changed
                     if config.theme != new_theme_name {
                         config.theme = new_theme_name.clone();
 
-                        // Special case for the "Default" theme
                         if new_theme_name == "Default" {
                             println!("[INFO] Switched to Default theme.");
-                            let defaults = Config::default(); // Get a fresh set of default values
+                            let defaults = Config::default();
 
-                            // Apply the default settings to the live config
                             config.sfx_pack = defaults.sfx_pack;
                             config.bgm_track = defaults.bgm_track;
                             config.logo_selection = defaults.logo_selection;
@@ -567,48 +568,27 @@ pub fn update(
                             config.background_scroll_speed = defaults.background_scroll_speed;
                             config.color_shift_speed = defaults.color_shift_speed;
 
-                            // Apply the default sound effects from the pre-loaded "Default" theme
                             if let Some(default_theme) = loaded_themes.get("Default") {
                                 *sound_effects = default_theme.sounds.clone();
                             }
-
                         } else {
-                            // For any other theme, apply its settings from the .toml file
                             if let Some(theme) = loaded_themes.get(&new_theme_name) {
                                 println!("[INFO] Switched to '{}' theme.", new_theme_name);
-
-                                // This is the most efficient way to apply the new SFX
                                 *sound_effects = theme.sounds.clone();
-
-                                // Apply settings from the theme's config, falling back to defaults if a key is missing
                                 config.sfx_pack = theme.config.sfx_pack.clone().unwrap_or_else(|| "Default".to_string());
                                 config.bgm_track = theme.config.bgm_track.clone();
                                 config.logo_selection = theme.config.logo_selection.clone().unwrap_or_else(|| "Kazeta+ (Default)".to_string());
                                 config.background_selection = theme.config.background_selection.clone().unwrap_or_else(|| "Default".to_string());
                                 config.font_selection = theme.config.font_selection.clone().unwrap_or_else(|| "Default".to_string());
 
-                                // For these, we only update the config if the value exists in the theme.toml
-                                if let Some(val) = &theme.config.menu_position {
-                                    // .parse() is needed to convert the String "BottomLeft" into the MenuPosition::BottomLeft enum
-                                    config.menu_position = val.parse().unwrap_or_default();
-                                }
-                                if let Some(val) = &theme.config.font_color {
-                                    config.font_color = val.clone();
-                                }
-                                if let Some(val) = &theme.config.cursor_color {
-                                    config.cursor_color = val.clone();
-                                }
-                                if let Some(val) = &theme.config.background_scroll_speed {
-                                    config.background_scroll_speed = val.clone();
-                                }
-                                if let Some(val) = &theme.config.color_shift_speed {
-                                    config.color_shift_speed = val.clone();
-                                }
+                                if let Some(val) = &theme.config.menu_position { config.menu_position = val.parse().unwrap_or_default(); }
+                                if let Some(val) = &theme.config.font_color { config.font_color = val.clone(); }
+                                if let Some(val) = &theme.config.cursor_color { config.cursor_color = val.clone(); }
+                                if let Some(val) = &theme.config.background_scroll_speed { config.background_scroll_speed = val.clone(); }
+                                if let Some(val) = &theme.config.color_shift_speed { config.color_shift_speed = val.clone(); }
                             }
                         }
 
-                        // --- APPLY BGM CHANGE IMMEDIATELY ---
-                        // This runs after the config has been updated by the logic above.
                         play_new_bgm(
                             &config.bgm_track.clone().unwrap_or_else(|| "OFF".to_string()),
                             config.bgm_volume,
@@ -616,7 +596,6 @@ pub fn update(
                             current_bgm,
                         );
 
-                        // Play a confirmation sound with the (potentially new) SFX pack
                         sound_effects.play_cursor_move(config);
                         config.save();
                     }

@@ -13,6 +13,7 @@ pub mod data;
 pub mod dialog;
 pub mod main_menu;
 pub mod settings;
+pub mod theme_downloader;
 pub mod wifi;
 
 // ===================================

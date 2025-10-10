@@ -32,3 +32,9 @@ regex = "1"
 
 # reliably find user's home directory
 home = "0.5"
+
+# handle HTTP requests
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+
+# handle zip extraction
+zip = "0.6"

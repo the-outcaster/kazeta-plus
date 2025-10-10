@@ -67,6 +67,8 @@ pub enum Screen {
     ConfirmReset,
     ResetComplete,
     Wifi,
+    ThemeDownloader,
+    ReloadingThemes,
     Debug,
     GameSelection,
     About,

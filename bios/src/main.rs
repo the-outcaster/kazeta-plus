@@ -36,6 +36,7 @@ use crate::dialog::Dialog;
 use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
+use crate::ui::theme_downloader::ThemeDownloaderState;
 use crate::ui::wifi::WifiState;
 use crate::ui::*;
 use crate::utils::*; // Wildcard to get all utility functions
@@ -53,10 +54,9 @@ pub use types::*;
 - gamepad tester
 - add system debugger in the event the game crashed
 - fix D-pad reversal with some games (Godot-based games in particular)
-- OSK
 - per-game keyboard to gamepad mapping
-- Wi-Fi
 - make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
+- OTA updates
 
 Hard
 - DVD functionality?
@@ -103,7 +103,7 @@ const SELECTED_OFFSET: f32 = 5.0;
 const WINDOW_TITLE: &str = "Kazeta+";
 const VERSION_NUMBER: &str = "V2025.KAZETA+";
 
-const MENU_OPTION_HEIGHT: f32 = 40.0;
+const MENU_OPTION_HEIGHT: f32 = 35.0;
 const MENU_PADDING: f32 = 8.0;
 const RECT_COLOR: Color = Color::new(0.15, 0.15, 0.15, 1.0);
 
@@ -262,12 +262,80 @@ fn window_conf() -> Conf {
 }
 
 // ===================================
+// FUNCTIONS
+// ===================================
+
+fn find_all_asset_files() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
+    println!("[INFO] Scanning for all asset files...");
+
+    // 1. Create empty sets for each asset type
+    let mut background_files_set = HashSet::new();
+    let mut logo_files_set = HashSet::new();
+    let mut font_files_set = HashSet::new();
+    let mut music_files_set = HashSet::new();
+
+    // 2. Gather system/default assets and add them to the sets
+    background_files_set.extend(utils::find_asset_files("../backgrounds", &["png"]));
+    logo_files_set.extend(utils::find_asset_files("../logos", &["png"]));
+    font_files_set.extend(utils::find_asset_files("../fonts", &["ttf"]));
+    music_files_set.extend(utils::find_asset_files("../music", &["ogg", "wav"]));
+
+    // 3. Gather user-installed and theme assets
+    if let Some(user_dir) = get_user_data_dir() {
+        // Add assets from global user folders first
+        background_files_set.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
+        logo_files_set.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
+        font_files_set.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
+        music_files_set.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
+
+        // --- REVISED LOGIC for scanning theme folders ---
+        let theme_dir = user_dir.join("themes");
+        if let Ok(entries) = std::fs::read_dir(theme_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    let theme_path = entry.path();
+
+                    // Find all assets within this theme folder just ONCE
+                    let theme_images = utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]);
+                    let theme_fonts = utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]);
+                    let theme_music = utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]);
+
+                    // Now, intelligently sort the images into the correct sets based on filename
+                    for image_path in theme_images {
+                        if let Some(filename) = image_path.file_name().and_then(|s| s.to_str()) {
+                            if filename.ends_with("_logo.png") {
+                                logo_files_set.insert(image_path);
+                            } else if filename.ends_with("_background.png") {
+                                background_files_set.insert(image_path);
+                            }
+                        }
+                    }
+
+                    // Add the fonts and music from the theme to their respective sets
+                    font_files_set.extend(theme_fonts);
+                    music_files_set.extend(theme_music);
+                }
+            }
+        }
+    }
+
+    // 4. Convert the unique sets back into vectors for the loader
+    let background_files: Vec<_> = background_files_set.into_iter().collect();
+    let logo_files: Vec<_> = logo_files_set.into_iter().collect();
+    let font_files: Vec<_> = font_files_set.into_iter().collect();
+    let music_files: Vec<_> = music_files_set.into_iter().collect();
+
+    // Return all the lists as a tuple
+    (background_files, logo_files, font_files, music_files)
+}
+
+// ===================================
 // ASYNC FUNCTIONS
 // ===================================
 
 async fn load_all_assets(
     config: &Config,
-    monika_message: &str,
+    display_message: &str,
     font: &Font,
     background_files: &[PathBuf],
     logo_files: &[PathBuf],
@@ -283,7 +351,7 @@ async fn load_all_assets(
     let draw_loading_screen = |status_message: &str, progress: f32| {
         let font_size = 16.0 as u16;
         let line_spacing = 10.0;
-        let lines: Vec<&str> = monika_message.lines().collect();
+        let lines: Vec<&str> = display_message.lines().collect();
 
         let total_text_height = (lines.len() as f32 * font_size as f32) + ((lines.len() - 1) as f32 * line_spacing);
         let y_start = screen_height() / 2.0 - total_text_height / 2.0;
@@ -426,6 +494,9 @@ async fn main() {
     // WI-FI
     let mut wifi_state = WifiState::new().expect("Wi-Fi initialization failed. Ensure wlan0 is available.");
 
+    // THEME DOWNLOADER
+    let mut theme_downloader_state = ThemeDownloaderState::new();
+
     // RESET SETTINGS CONFIRMATION
     let mut confirm_selection = 0; // 0 for YES, 1 for NO
 
@@ -451,9 +522,7 @@ async fn main() {
     const BATTERY_CHECK_INTERVAL: f64 = 5.0; // only check every 5 seconds to improve performance
 
     // load config file
-    //let mut config = Config::load().unwrap_or_default();
     let mut config = Config::load();
-    //let mut theme_changed = false;
 
     // AUDIO SINKS
     let available_sinks = get_available_sinks();
@@ -467,8 +536,6 @@ async fn main() {
 
     // FLASH MESSENGER
     let mut flash_message: Option<(String, f32)> = None; // (Message, time_remaining)
-
-    //let loading_icon = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
 
     // Generate a random message on startup
     let mut rng = ::rand::thread_rng();
@@ -492,75 +559,26 @@ async fn main() {
 
     // Load all themes ONCE at the start
     println!("[INFO] Pre-loading all themes...");
-    let loaded_themes: HashMap<String, theme::Theme> = theme::load_all_themes().await;
+    let mut loaded_themes: HashMap<String, theme::Theme> = theme::load_all_themes().await;
     println!("[INFO] {} themes loaded successfully.", loaded_themes.len());
 
     let sound_pack_choices = audio::find_sound_packs();
 
-    // Create a sorted list of theme names to pass to the UI
-    let mut theme_choices: Vec<String> = loaded_themes.keys().cloned().collect();
-    theme_choices.sort();
+    // find all asset files
+    let (background_files, logo_files, font_files, music_files) = find_all_asset_files();
 
-    // --- FIND ALL ASSET FILES ---
-    // 1. Create empty sets for each asset type
-    let mut background_files_set = HashSet::new();
-    let mut logo_files_set = HashSet::new();
-    let mut font_files_set = HashSet::new();
-    let mut music_files_set = HashSet::new();
-
-    // 2. Gather system/default assets and add them to the sets
-    background_files_set.extend(utils::find_asset_files("../backgrounds", &["png"]));
-    logo_files_set.extend(utils::find_asset_files("../logos", &["png"]));
-    font_files_set.extend(utils::find_asset_files("../fonts", &["ttf"]));
-    music_files_set.extend(utils::find_asset_files("../music", &["ogg", "wav"]));
-
-    // 3. Gather user-installed and theme assets
-    if let Some(user_dir) = get_user_data_dir() {
-        // Add assets from global user folders first
-        background_files_set.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
-        logo_files_set.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
-        font_files_set.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
-        music_files_set.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
-
-        // --- REVISED LOGIC for scanning theme folders ---
-        let theme_dir = user_dir.join("themes");
-        if let Ok(entries) = std::fs::read_dir(theme_dir) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    let theme_path = entry.path();
-
-                    // Find all assets within this theme folder just ONCE
-                    let theme_images = utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]);
-                    let theme_fonts = utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]);
-                    let theme_music = utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]);
-
-                    // Now, intelligently sort the images into the correct sets based on filename
-                    for image_path in theme_images {
-                        if let Some(filename) = image_path.file_name().and_then(|s| s.to_str()) {
-                            if filename.ends_with("_logo.png") {
-                                logo_files_set.insert(image_path);
-                            } else if filename.ends_with("_background.png") {
-                                background_files_set.insert(image_path);
-                            }
-                        }
-                    }
-
-                    // Add the fonts and music from the theme to their respective sets
-                    font_files_set.extend(theme_fonts);
-                    music_files_set.extend(theme_music);
-                }
-            }
-        }
-    }
-
-    // 4. Convert the unique sets back into vectors for the loader
-    let background_files: Vec<_> = background_files_set.into_iter().collect();
-    let logo_files: Vec<_> = logo_files_set.into_iter().collect();
-    let font_files: Vec<_> = font_files_set.into_iter().collect();
-    let music_files: Vec<_> = music_files_set.into_iter().collect();
-
-    // --- LOAD ASSETS ---
-    let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
+    // load them
+    //let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
+    let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) =
+    load_all_assets(
+        &config,
+        loading_text,
+        &startup_font,
+        &background_files,
+        &logo_files,
+        &font_files,
+        &music_files
+    ).await;
 
     // --- SET THE ACTIVE THEME ---
     let active_theme = loaded_themes.get(&config.theme).unwrap_or_else(|| {
@@ -982,7 +1000,7 @@ async fn main() {
 
                 // --- Handle input and state changes ---
                 ui::settings::update(
-                    &mut current_screen, &input_state, &mut config, &theme_choices, &sound_pack_choices, &loaded_themes, &mut settings_menu_selection,
+                    &mut current_screen, &input_state, &mut config, &sound_pack_choices, &loaded_themes, &mut settings_menu_selection,
                     &mut sound_effects, &mut confirm_selection, &mut display_settings_changed,
                     &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
                     &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
@@ -1268,6 +1286,52 @@ async fn main() {
                     &current_time_str,
                     scale_factor,
                 );
+            }
+            Screen::ThemeDownloader => {
+                ui::theme_downloader::update(
+                    &mut theme_downloader_state,
+                    &input_state,
+                    &mut current_screen,
+                    &sound_effects,
+                    &config,
+                );
+                ui::theme_downloader::draw(
+                    &theme_downloader_state,
+                    &mut animation_state,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    scale_factor,
+                );
+            }
+            Screen::ReloadingThemes => {
+                // ... (drawing "Reloading themes..." text)
+                next_frame().await;
+
+                // 1. Re-run the theme loading function
+                loaded_themes = theme::load_all_themes().await;
+
+                // 2. Re-scan all asset directories to find the new files
+                let (background_files, logo_files, font_files, music_files) = find_all_asset_files();
+
+                // --- Define a new message for reloading ---
+                let reloading_text = "APPLYING NEW THEME ASSETS...";
+
+                // 3. Re-load all assets and assign them to the original mutable caches
+                (background_cache, logo_cache, music_cache, font_cache, sound_effects) =
+                load_all_assets(
+                    &config,
+                    reloading_text,
+                    &startup_font,
+                    &background_files,
+                    &logo_files,
+                    &font_files,
+                    &music_files
+                ).await;
+
+                // 4. After reloading, go back to the downloader screen
+                current_screen = Screen::ThemeDownloader;
             }
         }
 
