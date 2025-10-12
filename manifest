@@ -59,7 +59,6 @@ export SERVICES="\
 	keyd \
 	kazeta-profile-loader.service \
 "
-# added keyd and inputplumber profile loader (for brightness controls)
 
 export FILES_TO_DELETE="\
 	/boot/initramfs-linux-fallback.img \
@@ -71,9 +70,8 @@ export FILES_TO_DELETE="\
 "
 
 postinstallhook() {
-	mkdir -p /var/kazeta
 	# Add sudo permissions
-	sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+	sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //g' /etc/sudoers
 
 	# Disable SPDIF/IEC958 audio output
 	sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
@@ -94,12 +92,10 @@ postinstallhook() {
 	chown -R ${USERNAME}:${USERNAME} /var/kazeta
 
 	# Automount storage to /run/media
-	if [ -f /usr/bin/media-automount ]; then
-		sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
+	sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
 
-		# Drop filesystem type from mount directory name
-		sed -i -e 's,}.$TYPE",}",' /usr/bin/media-automount
-	fi
+	# Drop filesystem type from mount directory name
+	sed -i -e 's,}.$TYPE",}",' /usr/bin/media-automount
 
 	# Force Xbox 360 emulation for all controller devices
 	sed -i -e 's/- xbox-elite/- xb360/' /usr/share/inputplumber/devices/*.yaml
