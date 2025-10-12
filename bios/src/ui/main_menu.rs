@@ -31,7 +31,7 @@ use crate::{
     ShakeTarget,
 };
 
-pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "CONNECT TO WI-FI", "GET NEW THEMES", "ABOUT"];
+pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "CONNECT TO WI-FI", "GET NEW THEMES", "CHECK FOR UPDATES", "ABOUT"];
 
 pub fn update(
     current_screen: &mut Screen,
@@ -213,7 +213,11 @@ pub fn update(
                 *current_screen = Screen::ThemeDownloader;
                 sound_effects.play_select(&config);
             },
-            6 => { // ABOUT
+            6 => { // UPDATE CHECKER
+                *current_screen = Screen::UpdateChecker;
+                sound_effects.play_select(&config);
+            },
+            7 => { // ABOUT
                 *current_screen = Screen::About;
                 sound_effects.play_select(&config);
             },
@@ -332,10 +336,10 @@ pub fn draw(
         // Draw a semi-transparent background for readability
         draw_rectangle(
             x - (10.0 * scale_factor),
-                       y - dims.height,
-                       dims.width + (20.0 * scale_factor),
-                       dims.height + (10.0 * scale_factor),
-                       Color::new(0.0, 0.0, 0.0, 0.7),
+            y - dims.height,
+            dims.width + (20.0 * scale_factor),
+            dims.height + (10.0 * scale_factor),
+            Color::new(0.0, 0.0, 0.0, 0.7),
         );
 
         // Draw the message text itself

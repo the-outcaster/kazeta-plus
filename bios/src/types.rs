@@ -69,6 +69,7 @@ pub enum Screen {
     Wifi,
     ThemeDownloader,
     ReloadingThemes,
+    UpdateChecker,
     Debug,
     GameSelection,
     About,

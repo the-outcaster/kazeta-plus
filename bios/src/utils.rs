@@ -10,6 +10,43 @@ use crate::audio::play_new_bgm;
 use crate::types::Screen;
 use macroquad::audio::Sound;
 
+// wrap text in certain menus so it doesn't clip outside the screen
+pub fn wrap_text(text: &str, font: Font, font_size: u16, max_width: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let space_width = measure_text(" ", Some(&font), font_size, 1.0).width;
+
+    for paragraph in text.lines() {
+        if paragraph.is_empty() {
+            lines.push("".to_string());
+            continue;
+        }
+
+        let mut current_line = String::new();
+        let mut current_line_width = 0.0;
+
+        for word in paragraph.split_whitespace() {
+            let word_width = measure_text(word, Some(&font), font_size, 1.0).width;
+
+            if !current_line.is_empty() && current_line_width + space_width + word_width > max_width {
+                lines.push(current_line);
+                current_line = String::new();
+                current_line_width = 0.0;
+            }
+
+            if !current_line.is_empty() {
+                current_line.push(' ');
+                current_line_width += space_width;
+            }
+
+            current_line.push_str(word);
+            current_line_width += word_width;
+        }
+        lines.push(current_line);
+    }
+
+    lines
+}
+
 /// Scans a directory and returns a sorted list of paths for files with given extensions.
 pub fn find_asset_files(dir_path: &str, extensions: &[&str]) -> Vec<PathBuf> {
     if let Ok(entries) = fs::read_dir(dir_path) {

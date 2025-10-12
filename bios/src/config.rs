@@ -12,7 +12,7 @@ pub fn get_user_data_dir() -> Option<PathBuf> {
 fn get_config_path() -> Result<PathBuf, Box<dyn Error>> {
     let mut config_path = get_user_data_dir().ok_or("Could not find user's data directory.")?;
     fs::create_dir_all(&config_path)?; // Create the directory if it doesn't exist
-    config_path.push("kazeta.toml");
+    config_path.push("config.toml");
     Ok(config_path)
 }
 

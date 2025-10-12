@@ -37,6 +37,7 @@ use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
 use crate::ui::theme_downloader::ThemeDownloaderState;
+use crate::ui::update_checker::UpdateCheckerState;
 use crate::ui::wifi::WifiState;
 use crate::ui::*;
 use crate::utils::*; // Wildcard to get all utility functions
@@ -50,13 +51,13 @@ pub use types::*;
 // ===================================
 // TO-DO LIST
 // ===================================
-- theme support
 - gamepad tester
 - add system debugger in the event the game crashed
 - fix D-pad reversal with some games (Godot-based games in particular)
 - per-game keyboard to gamepad mapping
 - make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
 - OTA updates
+- use OSK in-game
 
 Hard
 - DVD functionality?
@@ -103,7 +104,7 @@ const SELECTED_OFFSET: f32 = 5.0;
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
 const VERSION_NUMBER: &str = "V1.1.KAZETA+";
 
-const MENU_OPTION_HEIGHT: f32 = 35.0;
+const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
 const RECT_COLOR: Color = Color::new(0.15, 0.15, 0.15, 1.0);
 
@@ -497,6 +498,9 @@ async fn main() {
     // THEME DOWNLOADER
     let mut theme_downloader_state = ThemeDownloaderState::new();
 
+    // UPDATE CHECKER
+    let mut update_checker_state = UpdateCheckerState::new();
+
     // RESET SETTINGS CONFIRMATION
     let mut confirm_selection = 0; // 0 for YES, 1 for NO
 
@@ -568,7 +572,6 @@ async fn main() {
     let (background_files, logo_files, font_files, music_files) = find_all_asset_files();
 
     // load them
-    //let (background_cache, logo_cache, music_cache, font_cache, mut sound_effects) = load_all_assets(&config, loading_text, &startup_font, &background_files, &logo_files, &font_files, &music_files).await;
     let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) =
     load_all_assets(
         &config,
@@ -1332,6 +1335,23 @@ async fn main() {
 
                 // 4. After reloading, go back to the downloader screen
                 current_screen = Screen::ThemeDownloader;
+            }
+            Screen::UpdateChecker => {
+                ui::update_checker::update(
+                    &mut update_checker_state,
+                    &input_state,
+                    &mut current_screen,
+                    &sound_effects,
+                    &config,
+                );
+                ui::update_checker::draw(
+                    &update_checker_state,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    scale_factor,
+                );
             }
         }
 
