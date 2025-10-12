@@ -1,9 +1,9 @@
 use macroquad::prelude::*;
-use regex::Regex; // get rid of the ugly text that shows the img description
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::{io, fs, thread};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 
 use crate::{
     audio::SoundEffects,
@@ -11,42 +11,41 @@ use crate::{
     FONT_SIZE, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text,
 };
 
-// --- Structs for State Management ---
+// --- State Management & Structs ---
 
-/// Represents the different views or states of the downloader UI.
 pub enum DownloaderState {
     FetchingList,
     DisplayingList,
     Downloading(String),
     Success(String),
     Error(String),
+    ConfirmDelete {
+        theme_folder_name: String,
+        theme_display_name: String,
+        selection: usize, // 0 for Yes, 1 for No
+    },
 }
 
-/// A message passed from a background thread to the main UI thread.
 enum DownloaderMessage {
     ThemeList(Result<Vec<RemoteTheme>, String>),
     InstallResult(Result<String, String>),
 }
 
-/// Holds all the information needed to manage the theme downloader UI.
+#[derive(Deserialize, Debug, Clone)]
+pub struct RemoteTheme {
+    pub name: String,         // Display name, e.g., "Soul Calibur II"
+    pub folder_name: String,  // Directory name, e.g., "soul_calibur_ii"
+    pub author: String,
+    pub description: String,
+    pub download_url: String,
+}
+
 pub struct ThemeDownloaderState {
     pub screen_state: DownloaderState,
     pub themes: Vec<RemoteTheme>,
     pub selected_index: usize,
-    // The receiver for messages from our background threads
     rx: Receiver<DownloaderMessage>,
-    // We hold on to the sender so we can spawn new threads
     tx: Sender<DownloaderMessage>,
-}
-
-// --- Structs for Deserializing GitHub API Response ---
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct RemoteTheme {
-    pub name: String,
-    pub author: String,
-    pub description: String,
-    pub download_url: String,
 }
 
 #[derive(Deserialize)]
@@ -65,13 +64,9 @@ struct GithubRelease {
 // --- Implementation ---
 
 impl ThemeDownloaderState {
-    /// Creates a new state and immediately spawns a thread to fetch the theme list.
     pub fn new() -> Self {
         let (tx, rx) = channel();
-
-        // Spawn a thread to fetch the theme list so the UI doesn't freeze.
         fetch_theme_list(tx.clone());
-
         Self {
             screen_state: DownloaderState::FetchingList,
             themes: Vec::new(),
@@ -89,65 +84,84 @@ pub fn update(
     sound_effects: &SoundEffects,
     config: &Config,
 ) {
-    // Always allow going back to the main menu
     if input_state.back {
-        *current_screen = Screen::MainMenu;
         sound_effects.play_back(config);
-        return;
+        match &state.screen_state {
+            // If on the main list, exit to the main menu
+            DownloaderState::DisplayingList => *current_screen = Screen::MainMenu,
+            // If in a sub-menu (confirm, success, error), go back to the list
+            _ => state.screen_state = DownloaderState::DisplayingList,
+        }
+        return; // Stop further processing after handling 'back'
     }
 
-    // Check for any messages from background threads
     if let Ok(msg) = state.rx.try_recv() {
         match msg {
-            DownloaderMessage::ThemeList(Ok(themes)) => {
-                state.themes = themes;
-                state.screen_state = DownloaderState::DisplayingList;
-            }
-            DownloaderMessage::ThemeList(Err(e)) => {
-                state.screen_state = DownloaderState::Error(e);
-            }
-            DownloaderMessage::InstallResult(Ok(theme_name)) => {
-                state.screen_state = DownloaderState::Success(format!("'{}' installed successfully!", theme_name));
-
-                // After success, tell the main app to reload all themes.
-                *current_screen = Screen::ReloadingThemes;
-            }
-            DownloaderMessage::InstallResult(Err(e)) => {
-                state.screen_state = DownloaderState::Error(e);
-            }
+            DownloaderMessage::ThemeList(Ok(themes)) => { state.themes = themes; state.screen_state = DownloaderState::DisplayingList; }
+            DownloaderMessage::ThemeList(Err(e)) => { state.screen_state = DownloaderState::Error(e); }
+            DownloaderMessage::InstallResult(Ok(theme_name)) => { state.screen_state = DownloaderState::Success(format!("'{}' installed!", theme_name)); *current_screen = Screen::ReloadingThemes; }
+            DownloaderMessage::InstallResult(Err(e)) => { state.screen_state = DownloaderState::Error(e); }
         }
     }
 
-    // Handle input based on the current state
     match &mut state.screen_state {
         DownloaderState::DisplayingList => {
             if !state.themes.is_empty() {
-                if input_state.down && state.selected_index < state.themes.len() - 1 {
-                    state.selected_index += 1;
-                    sound_effects.play_cursor_move(&config);
-                }
-                if input_state.up && state.selected_index > 0 {
-                    state.selected_index -= 1;
-                    sound_effects.play_cursor_move(&config);
-                }
+                if input_state.down && state.selected_index < state.themes.len() - 1 { state.selected_index += 1; sound_effects.play_cursor_move(&config); }
+                if input_state.up && state.selected_index > 0 { state.selected_index -= 1; sound_effects.play_cursor_move(&config); }
                 if input_state.select {
                     sound_effects.play_select(config);
                     let theme_to_download = state.themes[state.selected_index].clone();
                     state.screen_state = DownloaderState::Downloading(theme_to_download.name.clone());
-
-                    // Spawn a thread to download and extract the theme
                     download_and_extract_theme(theme_to_download, state.tx.clone());
+                }
+                if input_state.secondary {
+                    let theme_to_delete = &state.themes[state.selected_index];
+                    if theme_to_delete.name != "Default" {
+                        sound_effects.play_select(config);
+                        state.screen_state = DownloaderState::ConfirmDelete {
+                            theme_folder_name: theme_to_delete.folder_name.clone(),
+                            theme_display_name: theme_to_delete.name.clone(),
+                            selection: 1,
+                        };
+                    } else {
+                        sound_effects.play_reject(config);
+                    }
                 }
             }
         }
-        DownloaderState::Success(_) | DownloaderState::Error(_) => {
-            // After seeing a success/error message, any key press returns to the list
+        DownloaderState::ConfirmDelete { theme_folder_name, theme_display_name, selection } => {
+            if input_state.left || input_state.right { *selection = 1 - *selection; sound_effects.play_cursor_move(&config); }
             if input_state.select {
+                sound_effects.play_select(config);
+                if *selection == 0 {
+                    let theme_path = get_user_data_dir().unwrap().join("themes").join(theme_folder_name);
+                    match fs::remove_dir_all(&theme_path) {
+                        Ok(_) => {
+                            state.screen_state = DownloaderState::Success(format!("'{}' deleted.", theme_display_name));
+                            *current_screen = Screen::ReloadingThemes;
+                        }
+                        Err(e) => { state.screen_state = DownloaderState::Error(format!("Failed to delete: {}", e)); }
+                    }
+                } else {
+                    state.screen_state = DownloaderState::DisplayingList;
+                }
+            }
+            if input_state.back {
+                sound_effects.play_back(config);
                 state.screen_state = DownloaderState::DisplayingList;
+            }
+        }
+        DownloaderState::Success(_) | DownloaderState::Error(_) => {
+            // --- THIS IS THE FIX ---
+            if input_state.select || input_state.back {
+                // After success/error, re-fetch the list to show the change
+                fetch_theme_list(state.tx.clone());
+                state.screen_state = DownloaderState::FetchingList;
                 sound_effects.play_select(config);
             }
         }
-        _ => { /* No input handled for Fetching, Downloading, etc. */ }
+        _ => {}
     }
 }
 
@@ -219,7 +233,38 @@ pub fn draw(
                         text_with_config_color(font_cache, config, line, text_x, y_pos, font_size);
                     }
                 }
+                // Add a UI hint for the new delete button
+                let hint_text = "Press [SELECT] to Download, [SECONDARY] to Delete";
+                let hint_dims = measure_text(hint_text, Some(font), (font_size as f32 * 0.8) as u16, 1.0);
+                text_with_config_color(font_cache, config, hint_text, screen_width() / 2.0 - hint_dims.width / 2.0, container_y + container_h - 20.0, (font_size as f32 * 0.8) as u16);
             }
+        }
+        DownloaderState::ConfirmDelete { theme_display_name, selection, .. } => {
+            let dialog_w = 400.0 * scale_factor;
+            let dialog_h = 150.0 * scale_factor;
+            let dialog_x = screen_width() / 2.0 - dialog_w / 2.0;
+            let dialog_y = screen_height() / 2.0 - dialog_h / 2.0;
+            draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::new(0.1, 0.1, 0.1, 0.9));
+            draw_rectangle_lines(dialog_x, dialog_y, dialog_w, dialog_h, 3.0, WHITE);
+
+            let question = format!("Delete '{}'?", theme_display_name);
+            let question_dims = measure_text(&question, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, &question, screen_width() / 2.0 - question_dims.width / 2.0, dialog_y + 40.0 * scale_factor, font_size);
+
+            let yes_text = "YES";
+            let no_text = "NO";
+            let yes_dims = measure_text(yes_text, Some(font), font_size, 1.0);
+            let no_dims = measure_text(no_text, Some(font), font_size, 1.0);
+            let yes_x = screen_width() / 2.0 - yes_dims.width - 20.0 * scale_factor;
+            let no_x = screen_width() / 2.0 + 20.0 * scale_factor;
+            let options_y = dialog_y + dialog_h - 50.0 * scale_factor;
+            text_with_config_color(font_cache, config, yes_text, yes_x, options_y, font_size);
+            text_with_config_color(font_cache, config, no_text, no_x, options_y, font_size);
+
+            let cursor_x = if *selection == 0 { yes_x } else { no_x };
+            let cursor_w = if *selection == 0 { yes_dims.width } else { no_dims.width };
+            let cursor_color = animation_state.get_cursor_color(config);
+            draw_rectangle_lines(cursor_x - 5.0, options_y - font_size as f32, cursor_w + 10.0, line_height, 3.0, cursor_color);
         }
         DownloaderState::Downloading(name) => {
             let text = format!("Downloading {}...", name);
@@ -239,66 +284,46 @@ pub fn draw(
 
 // --- Background Thread Functions ---
 
-/// Fetches the list of releases from the GitHub API in a separate thread.
 fn fetch_theme_list(tx: Sender<DownloaderMessage>) {
     thread::spawn(move || {
-        let client = reqwest::blocking::Client::builder()
-        .user_agent("KazetaPlus-Theme-Downloader")
-        .build().unwrap();
-
+        let client = reqwest::blocking::Client::builder().user_agent("KazetaPlus-Theme-Downloader").build().unwrap();
         let response = client.get("https://api.github.com/repos/the-outcaster/kazeta-plus-themes/releases").send();
-
         let result = match response {
-            Ok(resp) => {
-                match resp.json::<Vec<GithubRelease>>() {
-                    Ok(releases) => {
-                        let themes: Vec<RemoteTheme> = releases.into_iter().filter_map(|release| {
-                            // Find the .zip asset in the release
-                            release.assets.iter().find(|asset| asset.name.ends_with(".zip")).map(|asset| {
-                                // A simple way to parse author from the body text
-                                let author = release.body.lines()
-                                .find(|line| line.to_lowercase().starts_with("author:"))
-                                .map(|line| line.split(':').nth(1).unwrap_or("").trim().to_string())
-                                .unwrap_or_else(|| "Unknown".to_string());
-
-                                RemoteTheme {
-                                    name: release.name,
-                                    author,
-                                    description: release.body,
-                                    download_url: asset.browser_download_url.clone(),
-                                }
-                            })
-                        }).collect();
-                        Ok(themes)
-                    }
-                    Err(_) => Err("Failed to parse theme list from GitHub.".to_string()),
+            Ok(resp) => match resp.json::<Vec<GithubRelease>>() {
+                Ok(releases) => {
+                    let themes: Vec<RemoteTheme> = releases.into_iter().filter_map(|release| {
+                        release.assets.iter().find(|asset| asset.name.ends_with(".zip")).map(|asset| {
+                            let author = release.body.lines().find(|line| line.to_lowercase().starts_with("author:")).map(|line| line.split(':').nth(1).unwrap_or("").trim().to_string()).unwrap_or_else(|| "Unknown".to_string());
+                            let folder_name = asset.name.strip_suffix(".zip").unwrap_or(&asset.name).to_string();
+                            RemoteTheme {
+                                name: release.name,
+                                folder_name,
+                                author,
+                                description: release.body,
+                                download_url: asset.browser_download_url.clone(),
+                            }
+                        })
+                    }).collect();
+                    Ok(themes)
                 }
-            }
+                Err(_) => Err("Failed to parse theme list from GitHub.".to_string()),
+            },
             Err(_) => Err("Failed to fetch theme list from GitHub.".to_string()),
         };
         tx.send(DownloaderMessage::ThemeList(result)).unwrap();
     });
 }
 
-/// Downloads and extracts a single theme .zip file in a separate thread.
 fn download_and_extract_theme(theme: RemoteTheme, tx: Sender<DownloaderMessage>) {
     thread::spawn(move || {
         let result = (|| -> Result<String, String> {
             let themes_dir = get_user_data_dir().ok_or("Could not find user data directory.")?.join("themes");
-
-            // Download the file to a temporary path
-            let response = reqwest::blocking::get(&theme.download_url).map_err(|e| format!("Download failed: {}", e))?;
-            let bytes = response.bytes().map_err(|e| format!("Failed to read download: {}", e))?;
-
-            // Extract the zip archive
-            let reader = std::io::Cursor::new(bytes);
+            let response_bytes = reqwest::blocking::get(&theme.download_url).map_err(|e| format!("Download failed: {}", e))?.bytes().map_err(|e| format!("Failed to read download: {}", e))?;
+            let reader = io::Cursor::new(response_bytes);
             let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("Invalid zip file: {}", e))?;
-
             archive.extract(&themes_dir).map_err(|e| format!("Failed to extract theme: {}", e))?;
-
             Ok(theme.name)
         })();
-
         tx.send(DownloaderMessage::InstallResult(result)).unwrap();
     });
 }

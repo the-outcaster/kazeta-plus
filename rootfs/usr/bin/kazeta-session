@@ -5,6 +5,7 @@ LAUNCH_CMD_FILE="/var/kazeta/state/.LAUNCH_CMD"
 # If a game was selected from the BIOS, launch it in this self-contained block.
 if [ -f "$LAUNCH_CMD_FILE" ]; then
     LAUNCH_CMD=$(cat "$LAUNCH_CMD_FILE")
+
     rm -f "$LAUNCH_CMD_FILE"
 
     # Run the game session script.

@@ -12,6 +12,7 @@ pub struct InputState {
     pub prev: bool,
     pub cycle: bool,
     pub back: bool,
+    pub secondary: bool,
     pub analog_was_neutral: bool,
     pub ui_focus: UIFocus,
 }
@@ -30,6 +31,7 @@ impl InputState {
             prev: false,
             cycle: false,
             back: false,
+            secondary: false,
             analog_was_neutral: true,
             ui_focus: UIFocus::Grid,
         }
@@ -44,6 +46,7 @@ impl InputState {
         self.next = is_key_pressed(KeyCode::RightBracket);
         self.prev = is_key_pressed(KeyCode::LeftBracket);
         self.back = is_key_pressed(KeyCode::Backspace);
+        self.secondary = is_key_pressed(KeyCode::X);
         self.cycle = is_key_pressed(KeyCode::Tab);
     }
 
@@ -67,6 +70,8 @@ impl InputState {
                 gilrs::EventType::ButtonReleased(Button::LeftTrigger, _) => self.prev = false,
                 gilrs::EventType::ButtonPressed(Button::East, _) => self.back = true,
                 gilrs::EventType::ButtonReleased(Button::East, _) => self.back = false,
+                gilrs::EventType::ButtonPressed(Button::West, _) => self.secondary = true,
+                gilrs::EventType::ButtonReleased(Button::West, _) => self.secondary = false,
                 _ => {}
             }
         }
