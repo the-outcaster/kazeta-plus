@@ -1,0 +1,47 @@
+#!/bin/bash
+set -e # Exit immediately if a command fails
+
+echo "Kazeta Log Copy Helper running..."
+
+# 1. Find the SD card path by looking for the first .kzi file
+SD_CARD_PATH=$(find /run/media/ -name '*.kzi' -print -quit | xargs dirname)
+
+if [ -z "$SD_CARD_PATH" ]; then
+    echo "Error: Could not locate SD card (no .kzi files found?)." >&2
+    exit 1
+fi
+
+# 2. Define the 'logs' subdirectory and create it
+DEST_DIR="$SD_CARD_PATH/logs"
+mkdir -p "$DEST_DIR"
+
+# 3. Force a filesystem sync to flush log buffers to disk
+sync
+
+SOURCE_DIR="/var/kazeta"
+COPIED_COUNT=0
+
+for FILENAME in "session.log" "session.log.old"; do
+    SOURCE_FILE="$SOURCE_DIR/$FILENAME"
+    if [ -f "$SOURCE_FILE" ]; then
+        DEST_FILE="$DEST_DIR/$FILENAME"
+
+        # 4. Back up the existing log file if it exists
+        if [ -f "$DEST_FILE" ]; then
+            mv "$DEST_FILE" "$DEST_FILE.bak"
+        fi
+
+        # 5. Copy the new log file
+        cp "$SOURCE_FILE" "$DEST_DIR/"
+        COPIED_COUNT=$((COPIED_COUNT + 1))
+        echo "Copied $FILENAME to $DEST_DIR"
+    fi
+done
+
+if [ "$COPIED_COUNT" -eq 0 ]; then
+    echo "Error: No log files found in $SOURCE_DIR" >&2
+    exit 1
+fi
+
+echo "Log copy successful. Files are in $DEST_DIR"
+exit 0

@@ -74,71 +74,22 @@ pub fn read_line_from_file(path: &str, key: &str) -> Option<String> {
 }
 
 /// Calls a privileged helper script to copy session logs to the SD card.
-// put log files in "logs" and backup existing files
 pub fn copy_session_logs_to_sd() -> Result<String, String> {
-    // 1. Find the SD card path
-    let sd_card_path = match save::find_all_kzi_files() {
-        Ok((paths, _)) => paths.get(0).and_then(|p| p.parent()).map(PathBuf::from),
-        Err(e) => return Err(format!("SD card scan error: {}", e)),
-    };
-    let Some(base_path) = sd_card_path else {
-        return Err("Could not locate SD card (no .kzi files found?).".to_string());
-    };
+    let output = Command::new("sudo")
+    .arg("/usr/bin/kazeta-copy-logs")
+    .output()
+    .map_err(|e| format!("Failed to execute helper script: {}", e))?;
 
-    // 2. Define the 'logs' subdirectory and create it
-    let dest_dir = base_path.join("logs");
-    fs::create_dir_all(&dest_dir)
-    .map_err(|e| format!("Failed to create logs dir: {}", e))?;
-
-    // Force a filesystem sync to flush log buffers to disk
-    Command::new("sync").status().map_err(|e| format!("Failed to run sync: {}", e))?;
-
-    let source_files = ["session.log", "session.log.old"];
-    let mut files_copied_count = 0;
-
-    for filename in source_files {
-        let source_file = Path::new("/var/kazeta/").join(filename);
-        if source_file.exists() {
-            let dest_file = dest_dir.join(filename);
-
-            // 3. Check for an existing file at the destination to back it up
-            if dest_file.exists() {
-                let backup_file = dest_dir.join(format!("{}.bak", filename));
-                // Use sudo to rename the existing log to a .bak file
-                let mv_output = Command::new("sudo")
-                .arg("mv")
-                .arg(&dest_file)
-                .arg(&backup_file)
-                .output()
-                .map_err(|e| format!("Failed to run sudo mv: {}", e))?;
-
-                if !mv_output.status.success() {
-                    let error_message = String::from_utf8_lossy(&mv_output.stderr);
-                    return Err(format!("Failed to back up {}: {}", filename, error_message.trim()));
-                }
-            }
-
-            // 4. Copy the new file using sudo
-            let cp_output = Command::new("sudo")
-            .arg("cp")
-            .arg(&source_file)
-            .arg(&dest_dir)
-            .output()
-            .map_err(|e| format!("Failed to run sudo cp: {}", e))?;
-
-            if !cp_output.status.success() {
-                let error_message = String::from_utf8_lossy(&cp_output.stderr);
-                return Err(format!("Failed to copy {}: {}", filename, error_message.trim()));
-            }
-            files_copied_count += 1;
-        }
+    if output.status.success() {
+        // The script prints the destination path on success, so we can capture it.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Find the last line of output that contains the path
+        let path_line = stdout.lines().last().unwrap_or("Log copy successful.");
+        Ok(path_line.to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("Log copy script failed: {}", stderr.trim()))
     }
-
-    if files_copied_count == 0 {
-        return Err(format!("No log files found in /var/kazeta/"));
-    }
-
-    Ok(dest_dir.to_string_lossy().to_string())
 }
 
 // FOR ACTUAL HARDWARE USE

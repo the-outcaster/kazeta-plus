@@ -1,1 +1,8 @@
-%wheel ALL=(ALL:ALL) NOPASSWD: ALL
+# Allow running the game session script without a password
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-session
+
+# Allow running the log copy helper script without a password
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-copy-logs
+
+# IMPORTANT: Preserve the game selection variable for the session script
+Defaults env_keep += "KAZETA_SELECTED_GAME"
