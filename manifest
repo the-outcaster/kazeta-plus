@@ -1,14 +1,14 @@
 #! /bin/bash
 
-export VERSION="2025-0"
-export SYSTEM_DESC="Kazeta"
-export SYSTEM_NAME="kazeta"
+export VERSION="2025-1" # Updated version for the new release
+export SYSTEM_DESC="Kazeta+" # Updated to Kazeta+
+export SYSTEM_NAME="kazeta-plus"
 export USERNAME="gamer"
 export SIZE="5000MB"
 export ARCHIVE_DATE=$(date -d 'yesterday' +%Y/%m/%d)
 export WEBSITE="https://kazeta.org"
 export DOCUMENTATION_URL="https://kazeta.org"
-export BUG_REPORT_URL="https://github.com/kazetaos/kazeta/issues"
+export BUG_REPORT_URL="https://github.com/the-outcaster/kazeta-plus/issues"
 
 export KERNEL_PACKAGE="linux"
 
@@ -42,8 +42,9 @@ export PACKAGES="\
 	wireplumber \
 	brightnessctl \
 	keyd \
+	networkmanager \
+	iwd \
 "
-# added brightnessctl and keyd
 
 export AUR_PACKAGES="\
 	downgrade \
@@ -58,6 +59,9 @@ export SERVICES="\
 	lightdm \
 	keyd \
 	kazeta-profile-loader.service \
+	NetworkManager.service \
+	iwd.service \
+	frzr-first-boot-unlock.service \
 "
 
 export FILES_TO_DELETE="\
@@ -70,13 +74,18 @@ export FILES_TO_DELETE="\
 "
 
 postinstallhook() {
-	# Add sudo permissions
-	sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //g' /etc/sudoers
+	# --- IMPROVED: Use sudoers.d for better security and consistency ---
+	mkdir -p /etc/sudoers.d
+	cat <<- 'EOF' > /etc/sudoers.d/99-kazeta-plus
+	# Allow running the mount and log copy helpers without a password
+	%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount, /usr/bin/kazeta-copy-logs
+	EOF
+	chmod 440 /etc/sudoers.d/99-kazeta-plus
 
 	# Disable SPDIF/IEC958 audio output
 	sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
 
-	# Set a default timezone, FNA/XNA (and probably others) need it
+	# Set a default timezone
 	ln -s /usr/share/zoneinfo/UTC /etc/localtime
 
 	# Persist kazeta save data
@@ -87,14 +96,15 @@ postinstallhook() {
 	mkdir -p /home/${USERNAME}/.local/state
 	ln -s /var/kazeta/state/wireplumber /home/${USERNAME}/.local/state/wireplumber
 
+	# make /var/kazeta dir before setting its permissions
+	mkdir -p /var/kazeta
+
 	# Set permissions
 	chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 	chown -R ${USERNAME}:${USERNAME} /var/kazeta
 
 	# Automount storage to /run/media
 	sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
-
-	# Drop filesystem type from mount directory name
 	sed -i -e 's,}.$TYPE",}",' /usr/bin/media-automount
 
 	# Force Xbox 360 emulation for all controller devices
@@ -102,4 +112,26 @@ postinstallhook() {
 	sed -i -e 's/- xbox-series/- xb360/' /usr/share/inputplumber/devices/*.yaml
 	sed -i -e 's/- ds5/- xb360/' /usr/share/inputplumber/devices/*.yaml
 	sed -i -e 's/- ds5-edge/- xb360/' /usr/share/inputplumber/devices/*.yaml
+
+    # --- NEW: Configure NetworkManager to use iwd as the Wi-Fi backend ---
+    mkdir -p /etc/NetworkManager/conf.d
+    cat <<- 'EOF' > /etc/NetworkManager/conf.d/wifi_backend.conf
+    [device]
+    wifi.backend=iwd
+EOF
+
+    # --- NEW: Create the one-shot service for frzr-unlock ---
+    cat <<- 'EOF' > /etc/systemd/system/frzr-first-boot-unlock.service
+    [Unit]
+    Description=Unlock frzr filesystem on first boot
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/bin/frzr-unlock
+    ExecStartPost=/usr/bin/systemctl disable frzr-first-boot-unlock.service
+    RemainAfterExit=yes
+
+    [Install]
+    WantedBy=multi-user.target
+EOF
 }

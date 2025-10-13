@@ -131,6 +131,14 @@ rm -rf /var/cache/pacman/pkg
 # doing yes | pacman omitting --noconfirm is a necessity
 yes | pacman -S iptables-nft
 
+# create user first
+groupadd -r autologin
+useradd -m ${USERNAME} -G autologin,wheel
+echo "${USERNAME}:${USERNAME}" | chpasswd
+
+# run post install hook
+postinstallhook
+
 # enable services
 if [ -n "${SERVICES}" ]; then
 	systemctl enable ${SERVICES}
@@ -143,11 +151,6 @@ fi
 
 # disable root login
 passwd --lock root
-
-# create user
-groupadd -r autologin
-useradd -m ${USERNAME} -G autologin,wheel
-echo "${USERNAME}:${USERNAME}" | chpasswd
 
 # set the default editor, so visudo works
 echo "export EDITOR=/usr/bin/vim" >> /etc/bash.bashrc
@@ -164,7 +167,7 @@ sed -i "/^hosts:/ s/resolve/mdns resolve/" /etc/nsswitch.conf
 # configure ssh
 echo "
 AuthorizedKeysFile	.ssh/authorized_keys
-PasswordAuthentication no
+PasswordAuthentication yes
 ChallengeResponseAuthentication no
 UsePAM yes
 PrintMotd no # pam does that
@@ -199,9 +202,6 @@ BUG_REPORT_URL="${BUG_REPORT_URL}"' > /usr/lib/os-release
 if [ -n "$(ls -A '/extra_certs')" ]; then
 	trust anchor --store /extra_certs/*.crt
 fi
-
-# run post install hook
-postinstallhook
 
 # record installed packages & versions
 pacman -Q > /manifest
@@ -247,13 +247,8 @@ echo "" >> ${BUILD_PATH}/build_info
 cat ${BUILD_PATH}/manifest >> ${BUILD_PATH}/build_info
 rm ${BUILD_PATH}/manifest
 
-# freeze archive date of build to avoid package drift on unlock
-# if no archive date is set
-if [ -z "${ARCHIVE_DATE}" ]; then
-	export TODAY_DATE=$(date +%Y/%m/%d)
-	echo "Server=https://archive.archlinux.org/repos/${TODAY_DATE}/\$repo/os/\$arch" > \
-	${BUILD_PATH}/etc/pacman.d/mirrorlist
-fi
+echo "Server=https://archive.archlinux.org/repos/${TODAY_DATE}/\$repo/os/\$arch" > \
+${BUILD_PATH}/etc/pacman.d/mirrorlist
 
 btrfs subvolume snapshot -r ${BUILD_PATH} ${SNAP_PATH}
 btrfs send -f ${SYSTEM_NAME}-${VERSION}.img ${SNAP_PATH}
