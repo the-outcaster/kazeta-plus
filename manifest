@@ -120,10 +120,11 @@ postinstallhook() {
     wifi.backend=iwd
 EOF
 
-    # --- NEW: Create the one-shot service for frzr-unlock ---
     cat <<- 'EOF' > /etc/systemd/system/frzr-first-boot-unlock.service
     [Unit]
     Description=Unlock frzr filesystem on first boot
+    Requires=frzr_root.mount
+    After=frzr_root.mount
 
     [Service]
     Type=oneshot

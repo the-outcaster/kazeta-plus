@@ -8,7 +8,7 @@ alsa-lib 1.2.14-1
 alsa-topology-conf 1.2.5.1-4
 alsa-ucm-conf 1.2.14-2
 aom 3.13.1-1
-archlinux-keyring 20250929-1
+archlinux-keyring 20251012-1
 attr 2.5.2-1
 audit 4.0.5-1
 avahi 1:0.9rc2-1

@@ -65,3 +65,32 @@ jobs:
     uses: ./.github/workflows/build-system-image.yml
     with:
       postfix: "[UNSTABLE]"
+
+  build-iso:
+    name: Build Installer ISO
+    needs: build # This job will only start after the main system image is built
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Installer Repository
+        uses: actions/checkout@v4
+        with:
+          repository: kazetaos/install-media # Checks out the installer repo
+          path: install-media
+
+      - name: Download System Image Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kazeta-plus-image # The name of the artifact from the 'build' job
+          path: install-media/installer/airootfs/root/
+
+      - name: Run the ISO Build Script
+        run: |
+          cd install-media
+          sudo ./build-iso-docker.sh
+
+      - name: Upload Installer ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kazeta-plus-iso
+          path: install-media/out/*.iso
