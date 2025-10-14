@@ -374,24 +374,26 @@ pub fn draw(
 
         // During opening, only render the main view and the transitioning icon
         // Only render the icon during transition
-        let memory_index = get_memory_index(selected_memory, scroll_offset);
-        if let Some(mem) = memories.get(memory_index) {
-            let icon = match icon_cache.get(&mem.id) {
-                Some(icon) => icon,
-                None => &placeholder,
-            };
+        if animation_state.dialog_transition_time > 0.0 {
+            let memory_index = get_memory_index(selected_memory, scroll_offset);
+            if let Some(mem) = memories.get(memory_index) {
+                let icon = match icon_cache.get(&mem.id) {
+                    Some(icon) => icon,
+                    None => &placeholder,
+                };
 
-            let params = DrawTextureParams {
-                dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
-                source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
-                rotation: 0.0,
-                flip_x: false,
-                flip_y: false,
-                pivot: None
-            };
+                let params = DrawTextureParams {
+                    dest_size: Some(Vec2 {x: TILE_SIZE, y: TILE_SIZE }),
+                    source: Some(Rect { x: 0.0, y: 0.0, h: icon.height(), w: icon.width() }),
+                    rotation: 0.0,
+                    flip_x: false,
+                    flip_y: false,
+                    pivot: None
+                };
 
-            let icon_pos = animation_state.get_dialog_transition_pos();
-            draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
+                let icon_pos = animation_state.get_dialog_transition_pos();
+                draw_texture_ex(&icon, icon_pos.x, icon_pos.y, WHITE, params);
+            }
         }
 
         // --- Create scaled layout values at the top ---
@@ -464,6 +466,7 @@ pub fn draw(
                     flip_y: false,
                     pivot: None
                 };
+
                 if xp as usize == x && yp as usize == y {
                     if let UIFocus::Grid = input_state.ui_focus {
                         draw_texture_ex(&icon, pos_x-selected_offset, pos_y-selected_offset, WHITE, params);

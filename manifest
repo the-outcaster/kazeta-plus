@@ -59,9 +59,6 @@ export SERVICES="\
 	lightdm \
 	keyd \
 	kazeta-profile-loader.service \
-	NetworkManager.service \
-	iwd.service \
-	frzr-first-boot-unlock.service \
 "
 
 export FILES_TO_DELETE="\
@@ -118,21 +115,5 @@ postinstallhook() {
     cat <<- 'EOF' > /etc/NetworkManager/conf.d/wifi_backend.conf
     [device]
     wifi.backend=iwd
-EOF
-
-    cat <<- 'EOF' > /etc/systemd/system/frzr-first-boot-unlock.service
-    [Unit]
-    Description=Unlock frzr filesystem on first boot
-    Requires=frzr_root.mount
-    After=frzr_root.mount
-
-    [Service]
-    Type=oneshot
-    ExecStart=/usr/bin/frzr-unlock
-    ExecStartPost=/usr/bin/systemctl disable frzr-first-boot-unlock.service
-    RemainAfterExit=yes
-
-    [Install]
-    WantedBy=multi-user.target
 EOF
 }

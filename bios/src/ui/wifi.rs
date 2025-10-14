@@ -1,6 +1,10 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+
+const DEV_MODE: bool = false;
 
 use crate::{
     get_current_font, text_with_config_color, BatteryInfo,
@@ -34,6 +38,7 @@ pub struct AccessPoint {
 
 #[derive(PartialEq)]
 pub enum WifiScreenState {
+    Preparing,
     Scanning,
     List,
     PasswordInput,
@@ -42,9 +47,12 @@ pub enum WifiScreenState {
     Error(String),
 }
 
+enum WifiMessage {
+    PreparationComplete(Result<(), String>),
+}
+
 pub struct WifiState {
     pub screen_state: WifiScreenState,
-    // The result now holds our local AccessPoint struct or a simple String error.
     pub networks: Result<Vec<AccessPoint>, String>,
     pub selected_index: usize,
     pub password_buffer: String,
@@ -52,22 +60,29 @@ pub struct WifiState {
     pub osk_coords: (usize, usize),
     pub osk_shift_active: bool,
     pub show_password: bool,
+    rx: Receiver<WifiMessage>,
+    _tx: Sender<WifiMessage>,
 }
 
 impl WifiState {
-    pub fn new() -> Result<Self, String> {
-        let mut state = Self {
-            screen_state: WifiScreenState::Scanning,
+    pub fn new() -> Self {
+        let (tx, rx) = channel();
+
+        prepare_wifi_system(tx.clone());
+
+        Self {
+            screen_state: WifiScreenState::Preparing,
             networks: Ok(Vec::new()),
             selected_index: 0,
             password_buffer: String::new(),
-            //connection_status: None,
             osk_coords: (0, 0),
             osk_shift_active: false,
             show_password: false,
-        };
-        state.scan_networks();
-        Ok(state)
+            rx,
+            _tx: tx,
+        }
+        //state.scan_networks();
+        //Ok(state)
     }
 
     /// Scans for networks using the `nmcli` command-line tool.
@@ -147,6 +162,19 @@ pub fn update(
     sound_effects: &SoundEffects,
     config: &Config,
 ) {
+    // Check for messages from the background thread first
+    if let Ok(msg) = wifi_state.rx.try_recv() {
+        match msg {
+            WifiMessage::PreparationComplete(Ok(_)) => {
+                // Setup was successful, now we can scan for networks.
+                wifi_state.scan_networks();
+            }
+            WifiMessage::PreparationComplete(Err(e)) => {
+                // If setup fails, show an error.
+                wifi_state.screen_state = WifiScreenState::Error(e);
+            }
+        }
+    }
     if input_state.back {
         // If we are showing the password, the first back press should hide it
         if wifi_state.screen_state == WifiScreenState::PasswordInput && wifi_state.show_password {
@@ -250,6 +278,11 @@ pub fn draw(
     let text_x = container_x + 40.0 * scale_factor;
 
     match &wifi_state.screen_state {
+        WifiScreenState::Preparing => {
+            let text = "Preparing network services...";
+            let text_dims = measure_text(text, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, text, screen_width() / 2.0 - text_dims.width / 2.0, screen_height() / 2.0, font_size);
+        }
         WifiScreenState::PasswordInput => {
             if let Ok(networks) = &wifi_state.networks {
                 if let Some(network) = networks.get(wifi_state.selected_index) {
@@ -374,4 +407,36 @@ pub fn draw(
         }
     }
     //render_ui_overlay(&logo_cache, &font_cache, &config, &battery_info, &current_time_str, scale_factor);
+}
+
+// --- Background Thread Functions ---
+
+fn prepare_wifi_system(tx: Sender<WifiMessage>) {
+    thread::spawn(move || {
+        let output;
+
+        if DEV_MODE {
+            output = Command::new("sudo")
+            .arg("/home/fedora/Programs/kazeta-plus/rootfs/usr/bin/kazeta-wifi-setup")
+            .output();
+        } else {
+            output = Command::new("sudo")
+            .arg("/usr/bin/kazeta-wifi-setup")
+            .output();
+        }
+
+        let result = match output {
+            Ok(out) => {
+                if out.status.success() {
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    Err(format!("Setup script failed: {}", stderr.trim()))
+                }
+            }
+            Err(e) => Err(format!("Failed to run setup script: {}", e)),
+        };
+
+        tx.send(WifiMessage::PreparationComplete(result)).unwrap();
+    });
 }

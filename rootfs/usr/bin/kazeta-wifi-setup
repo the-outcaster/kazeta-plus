@@ -1,0 +1,29 @@
+#!/bin/bash
+# This script runs with sudo to prepare the system for Wi-Fi.
+
+set -e
+echo "--- Kazeta+ Wi-Fi Setup ---"
+
+SENTINEL_FILE="/var/kazeta/state/.kazeta_unlocked"
+
+# Check if the system has been unlocked before.
+if [ ! -f "$SENTINEL_FILE" ]; then
+    echo "Filesystem is locked. Unlocking now..."
+    frzr-unlock
+    # Create the sentinel file to remember that we've unlocked.
+    mkdir -p /var/kazeta/state
+    touch "$SENTINEL_FILE"
+    echo "Filesystem unlocked successfully."
+else
+    echo "Filesystem is already unlocked. Skipping."
+fi
+
+echo "Starting networking services..."
+systemctl start iwd.service
+systemctl start NetworkManager.service
+
+# Give the services a moment to start up
+sleep 2
+
+echo "Network services are ready."
+exit 0

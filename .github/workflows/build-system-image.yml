@@ -67,3 +67,8 @@ jobs:
             output/build_info.txt
             output/sha256sum.txt
             output/container.txt
+      - name: Upload System Image as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kazeta-plus-image # This name must match what the build-iso job expects
+          path: output/${{ steps.build_image.outputs.image_filename }}

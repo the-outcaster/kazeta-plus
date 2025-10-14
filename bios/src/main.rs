@@ -86,6 +86,7 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
+const DEV_MODE: bool = false;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -102,7 +103,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.1.KAZETA+";
+const VERSION_NUMBER: &str = "V1.12.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -493,7 +494,8 @@ async fn main() {
     println!("[Debug] System Info Loaded: {:#?}", system_info); // Optional: for debugging
 
     // WI-FI
-    let mut wifi_state = WifiState::new().expect("Wi-Fi initialization failed. Ensure wlan0 is available.");
+    //let mut wifi_state = WifiState::new().expect("Wi-Fi initialization failed. Ensure wlan0 is available.");
+    let mut wifi_state = WifiState::new();
 
     // THEME DOWNLOADER
     let mut theme_downloader_state = ThemeDownloaderState::new();
@@ -923,6 +925,7 @@ async fn main() {
                     &sound_effects,
                     &config,
                     &log_messages,
+                    &storage_state,
                     &mut fade_start_time,
                     &mut current_bgm,
                     &music_cache,
@@ -964,6 +967,7 @@ async fn main() {
                     &sound_effects,
                     &config,
                     &log_messages,
+                    &storage_state,
                     &mut fade_start_time,
                     &mut current_bgm,
                     &music_cache,
@@ -1238,7 +1242,14 @@ async fn main() {
                 );
             },
             Screen::SaveData => {
-                // --- UPDATE ---
+                // Process one item from the icon queue each frame to prevent stuttering.
+                if !icon_queue.is_empty() {
+                    let (save_id, icon_path_str) = icon_queue.remove(0);
+                    if let Ok(texture) = load_texture(&icon_path_str).await {
+                        icon_cache.insert(save_id, texture);
+                    }
+                }
+
                 ui::data::update(
                     &mut input_state, &mut current_screen, &sound_effects, &config,
                     &storage_state, &mut memories, &mut icon_cache, &mut icon_queue,
@@ -1246,7 +1257,6 @@ async fn main() {
                     scale_factor, &copy_op_state
                 ).await;
 
-                // --- RENDER ---
                 render_background(&background_cache, &config, &mut background_state);
 
                 ui::data::draw(

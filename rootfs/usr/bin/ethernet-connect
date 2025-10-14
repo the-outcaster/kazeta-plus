@@ -16,4 +16,6 @@ DHCP=yes\
 
 systemctl start systemd-networkd
 systemctl start systemd-resolved
+systemctl enable systemd-networkd
+systemctl enable systemd-resolved
 sleep 5

@@ -232,20 +232,40 @@ fn perform_update(release_info: GithubRelease) {
     let mut tmp_file = fs::File::create(&tmp_zip_path).expect("Failed to create temp file.");
     tmp_file.write_all(&response_bytes).expect("Failed to save update file.");
 
-    let tmp_extract_dir = Path::new("/tmp/kazeta-update-kit");
-    if tmp_extract_dir.exists() { fs::remove_dir_all(&tmp_extract_dir).unwrap_or(()); }
-    fs::create_dir_all(&tmp_extract_dir).expect("Failed to create temp directory.");
+    // 1. Change the extraction directory to /tmp/
+    let tmp_extract_dir = Path::new("/tmp/");
 
+    // 2. Get the kit's directory name *before* extraction
+    let root_dir_name = update_asset.name.strip_suffix(".zip").unwrap_or(&update_asset.name);
+
+    // 3. Define the *full path* to the kit directory
+    let kit_path = tmp_extract_dir.join(root_dir_name);
+
+    // 4. SAFELY remove the *specific* kit directory if it already exists
+    if kit_path.exists() {
+        fs::remove_dir_all(&kit_path).unwrap_or_else(|e| {
+            eprintln!("Failed to remove old kit directory: {}", e);
+        });
+    }
+
+    // 5. We no longer create_dir_all, since /tmp/ exists
+    //    and the extractor will create the nested folder.
     extract_archive(&tmp_zip_path, &tmp_extract_dir);
 
-    let script_path = tmp_extract_dir.join("upgrade-to-plus.sh");
+    // 6. This line now correctly resolves to the new path:
+    //    e.g., /tmp/kazeta-plus-upgrade-kit-1.11/upgrade-to-plus.sh
+    let script_path = tmp_extract_dir.join(root_dir_name).join("upgrade-to-plus.sh");
+
     if !script_path.exists() { eprintln!("Error: upgrade-to-plus.sh not found in the archive."); return; }
 
     let mut perms = fs::metadata(&script_path).unwrap().permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).expect("Failed to set script permissions.");
 
-    Command::new(script_path).spawn().expect("Failed to start upgrade script.");
+    Command::new("sudo")
+        .arg(script_path)
+        .spawn()
+        .expect("Failed to start upgrade script.");
     exit(0);
 }
 

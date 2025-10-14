@@ -1,6 +1,7 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 
 // --- Corrected Imports ---
@@ -8,7 +9,7 @@ use std::sync::atomic::Ordering;
 // Items from your new modules
 use crate::audio::SoundEffects;
 use crate::config::Config;
-use crate::save;
+use crate::{save, StorageMediaState};
 use crate::types::{AnimationState, BackgroundState, BatteryInfo, MenuPosition};
 
 // Items that are still in `main.rs` (the crate root)
@@ -44,6 +45,7 @@ pub fn update(
     sound_effects: &SoundEffects,
     config: &Config,
     log_messages: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    storage_state: &Arc<Mutex<StorageMediaState>>,
     fade_start_time: &mut Option<f64>,
     current_bgm: &mut Option<macroquad::audio::Sound>,
     music_cache: &HashMap<String, macroquad::audio::Sound>,
@@ -77,6 +79,11 @@ pub fn update(
     if input_state.select {
         match *main_menu_selection {
             0 => { // SAVE DATA
+                // Trigger a refresh the next time the data screen is entered.
+                if let Ok(mut state) = storage_state.lock() {
+                    state.needs_memory_refresh = true;
+                }
+
                 *current_screen = Screen::SaveData;
                 input_state.ui_focus = UIFocus::Grid;
                 sound_effects.play_select(&config);

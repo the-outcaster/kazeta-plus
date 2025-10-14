@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# upgrade version 1.1
-
 # Exit immediately if any command fails.
 set -e
 

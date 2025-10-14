@@ -3,3 +3,9 @@
 
 # Allow running the log copy helper script without a password
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-copy-logs
+
+# wi-fi
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-wifi-setup
+
+# kazeta+ upgrade
+%wheel ALL=(ALL:ALL) NOPASSWD: /tmp/kazeta-plus-upgrade-kit-*/upgrade-to-plus.sh

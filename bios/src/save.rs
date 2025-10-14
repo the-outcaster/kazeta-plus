@@ -1,19 +1,17 @@
+use chrono::DateTime;
 use std::path::{Path, PathBuf};
-use std::fs;
+use std::{fs, fmt};
 use std::collections::VecDeque;
 use std::io::{self, BufRead, Write, Read};
 use sysinfo::Disks;
-use tar::{Builder, Archive};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
+use std::process::{Command, Child, Stdio};
+use tar::{Builder, Archive};
 use walkdir;
-use std::process::{Command, Child};
-use chrono::DateTime;
 
-// some extra uses for debugging...
-use std::fmt;
-use std::process::Stdio;
-
+use crate::DEV_MODE;
+use crate::config::get_user_data_dir;
 use crate::types::StorageMedia;
 
 // ===================================
@@ -385,13 +383,29 @@ fn sync_to_disk() {
         }
 }
 
+/// Returns the correct directory for state files based on the environment.
+fn get_state_dir() -> std::io::Result<PathBuf> {
+    let path = if DEV_MODE {
+        // In dev mode, use a user-writable path like ~/.local/share/kazeta-plus/state
+        get_user_data_dir().unwrap().join("state")
+    } else {
+        // In production on the device, use the system path
+        PathBuf::from("/var/kazeta/state")
+    };
+
+    // Ensure the directory exists, creating it if necessary.
+    fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
 // ===================================
 // PUBLIC FUNCTIONS
 // ===================================
 
 pub fn write_launch_command(kzi_path: &Path) -> std::io::Result<()> {
-    let state_dir = Path::new("/var/kazeta/state");
-    fs::create_dir_all(state_dir)?; // Ensure the directory exists
+    //let state_dir = Path::new("/var/kazeta/state");
+    //fs::create_dir_all(state_dir)?; // Ensure the directory exists
+    let state_dir = get_state_dir()?;
 
     let launch_cmd_path = state_dir.join(".LAUNCH_CMD");
     let mut file = fs::File::create(launch_cmd_path)?;

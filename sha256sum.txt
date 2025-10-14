@@ -1,1 +1,1 @@
-c1f787fd34c97ee3ec6dec9490742f199a9a7066e9ffc62a4ed9a9308b44478b  kazeta-plus-2025-1.img.tar.xz
+dd8cc16e8c48dd24b9d4dc344a702450cae5c94ae541407b177e12e1d2970510  kazeta-plus-2025-1.img.tar.xz
