@@ -13,7 +13,7 @@ set -e
 # Set the source directory for your Kazeta+ project files.
 SOURCE_DIR="$HOME/Programs/kazeta-plus"
 # Set the destination directory where the kit will be created.
-DEST_BASE_DIR="$HOME/Desktop/kazeta_assets/upgrade_kits/"
+DEST_BASE_DIR="$HOME/Desktop/kazeta_assets/upgrade_kits"
 
 
 # --- Main Logic ---

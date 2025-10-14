@@ -328,6 +328,18 @@ pub fn draw(
             text_with_config_color(font_cache, config, option, x_pos, y_pos_text, font_size);
         };
     }
+
+    // --- HELLO WORLD FOR UPDATE TEST ---
+    let hello_text = "Hello world!";
+    text_with_config_color(
+        font_cache,
+        config,
+        hello_text,
+        margin_x, // Use the same left margin as the menu
+        screen_height() - (300.0 * scale_factor), // Position near the bottom-left
+        font_size,
+    );
+
     // --- Draw the Flash Message if it exists ---
     if let Some(message) = flash_message {
         let font_size = (FONT_SIZE as f32 * scale_factor) as u16;

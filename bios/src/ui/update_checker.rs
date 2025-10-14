@@ -21,6 +21,7 @@ use crate::{
 // --- State Management & Structs ---
 
 pub enum UpdateCheckerScreenState {
+    Idle,
     Checking,
     UpToDate,
     UpdateAvailable(GithubRelease),
@@ -62,9 +63,16 @@ impl UpdateCheckerState {
         let (tx, rx) = channel();
         check_for_updates(tx);
         Self {
-            screen_state: UpdateCheckerScreenState::Checking,
+            screen_state: UpdateCheckerScreenState::Idle,
             rx,
         }
+    }
+
+    fn start_check(&mut self) {
+        let (tx, rx) = channel();
+        check_for_updates(tx);
+        self.screen_state = UpdateCheckerScreenState::Checking;
+        self.rx = rx; // Overwrite the old receiver
     }
 }
 
@@ -77,6 +85,7 @@ pub fn update(
 ) {
     if input_state.back {
         *current_screen = Screen::MainMenu;
+        state.screen_state = UpdateCheckerScreenState::Idle; // <-- RESET STATE
         sound_effects.play_back(config);
         return;
     }
@@ -91,6 +100,11 @@ pub fn update(
         }
     }
 
+    // If we're idle, start a check. This triggers on entering the screen.
+    if let UpdateCheckerScreenState::Idle = state.screen_state {
+        state.start_check();
+    }
+
     let mut release_to_install: Option<GithubRelease> = None;
     match &state.screen_state {
         UpdateCheckerScreenState::UpdateAvailable(release) => {
@@ -102,6 +116,7 @@ pub fn update(
         UpdateCheckerScreenState::UpToDate | UpdateCheckerScreenState::Error(_) => {
             if input_state.select {
                 *current_screen = Screen::MainMenu;
+                state.screen_state = UpdateCheckerScreenState::Idle; // <-- RESET STATE
                 sound_effects.play_select(config);
             }
         }
@@ -137,6 +152,11 @@ pub fn draw(
     let text_y_start = container_y + 40.0 * scale_factor;
 
     match &state.screen_state {
+        UpdateCheckerScreenState::Idle => {
+            let text = "Connecting to update server...";
+            let text_dims = measure_text(text, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, text, screen_width() / 2.0 - text_dims.width / 2.0, screen_height() / 2.0, font_size);
+        }
         UpdateCheckerScreenState::Checking => {
             let text = "Checking for updates...";
             let text_dims = measure_text(text, Some(font), font_size, 1.0);
@@ -264,8 +284,8 @@ fn perform_update(release_info: GithubRelease) {
 
     Command::new("sudo")
         .arg(script_path)
-        .spawn()
-        .expect("Failed to start upgrade script.");
+        .status()
+        .expect("Failed to run upgrade script.");
     exit(0);
 }
 
