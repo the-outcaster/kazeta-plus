@@ -37,18 +37,39 @@ echo "--------------------------------------------------"
 ###                  INSTALL LOCAL WI-FI PACKAGES
 ### ===================================================================
 # This step allows users without Ethernet to get Wi-Fi drivers and tools
-# installed so they can connect in the next step.
+# installed from a separate, manually downloaded zip file.
 
-echo -e "${YELLOW}Step 1: Installing essential local network packages...${NC}"
-LOCAL_PACKAGES_DIR="$SCRIPT_DIR/local_packages"
+echo -e "${YELLOW}Step 1: Checking for and installing local network packages...${NC}"
+WIFI_PACK_ZIP="kazeta-wifi-pack.zip"
+TEMP_PKG_DIR="/tmp/kazeta_wifi_pkgs"
 
-if [ -d "$LOCAL_PACKAGES_DIR" ] && [ -n "$(ls -A $LOCAL_PACKAGES_DIR/*.pkg.tar.zst 2>/dev/null)" ]; then
-    echo "  -> Found local packages. Installing..."
-    # -- CHANGED -- Use --needed to avoid reinstalling what's already there
-    pacman -U --noconfirm --needed $LOCAL_PACKAGES_DIR/*.pkg.tar.zst
-    echo -e "${GREEN}  -> Local network packages installed.${NC}"
+if [ -f "$SCRIPT_DIR/$WIFI_PACK_ZIP" ]; then
+    echo "  -> Found local Wi-Fi package bundle ($WIFI_PACK_ZIP)."
+
+    # Check for the 'unzip' command
+    if ! command -v unzip &> /dev/null; then
+        echo -e "${RED}Error: 'unzip' command is required to extract the Wi-Fi packages but it is not installed.${NC}"
+        echo -e "${RED}Please connect via Ethernet to proceed, which will install 'unzip' automatically.${NC}"
+        exit 1
+    fi
+
+    # Clean up and create a temporary directory for extraction
+    rm -rf "$TEMP_PKG_DIR"
+    mkdir -p "$TEMP_PKG_DIR"
+
+    echo "  -> Extracting packages..."
+    unzip -q "$SCRIPT_DIR/$WIFI_PACK_ZIP" -d "$TEMP_PKG_DIR"
+
+    echo "  -> Installing extracted packages..."
+    # The extracted packages might be in a subdirectory, so use a find command for robustness
+    pacman -U --noconfirm --needed $(find "$TEMP_PKG_DIR" -name "*.pkg.tar.zst")
+
+    # Clean up the temporary directory
+    rm -rf "$TEMP_PKG_DIR"
+
+    echo -e "${GREEN}  -> Local network packages installed successfully.${NC}"
 else
-    echo "  -> No local packages found. Assuming network tools are already present."
+    echo "  -> No local Wi-Fi package bundle found. Assuming network tools are present or you have an Ethernet connection."
 fi
 echo "--------------------------------------------------"
 
@@ -109,9 +130,8 @@ echo "--------------------------------------------------"
 
 echo -e "${YELLOW}Step 3: Installing/updating remaining system packages...${NC}"
 pacman -Syy
-# -- NOTE -- This list now includes the Wi-Fi packages. Pacman is smart and will
-# simply skip them if they were already installed in Step 1.
-PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg")
+# -- CHANGED -- Added 'unzip' to the list of packages to ensure it's available.
+PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg" "unzip")
 for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
     if ! pacman -Q "$pkg" &>/dev/null; then
         echo "  -> Installing $pkg..."
@@ -170,7 +190,7 @@ echo -e "${GREEN}Services enabled.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                     COPY CUSTOM ASSETS
+###                    COPY CUSTOM ASSETS
 ### ===================================================================
 
 echo -e "${YELLOW}Step 6: Copying custom user assets...${NC}"
