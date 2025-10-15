@@ -1,6 +1,7 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::process::Command;
+use std::thread;
 use macroquad::audio::{Sound, set_sound_volume};
 
 // Import things from our new modules
@@ -29,6 +30,7 @@ pub const GENERAL_SETTINGS: &[&str] = &[
     "SHOW SPLASH SCREEN",
     "TIME ZONE",
     "BRIGHTNESS",
+    "WI-FI",
     "AUDIO SETTINGS",
 ];
 
@@ -226,7 +228,8 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
             3 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
             4 => config.timezone.clone().to_uppercase(), // TIME ZONE
             5 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
-            6 => "->".to_string(),
+            6 => if config.wifi { "ON" } else { "OFF" }.to_string(), // WI-FI
+            7 => "->".to_string(),
             _ => "".to_string(),
         },
         // AUDIO SETTINGS
@@ -377,7 +380,6 @@ pub fn update(
             2 => { // FULLSCREEN
                 if input_state.left || input_state.right {
                     config.fullscreen = !config.fullscreen;
-                    //set_fullscreen(config.fullscreen); // Apply the change immediately
                     config.save();
                     sound_effects.play_cursor_move(&config);
                     *display_settings_changed = true;
@@ -426,7 +428,46 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            6 => { // GO TO AUDIO SETTINGS
+            6 => { // WI-FI
+                if input_state.left || input_state.right {
+                    // Toggle the state optimistically and save immediately.
+                    config.wifi = !config.wifi;
+                    config.save();
+                    sound_effects.play_cursor_move(&config);
+
+                    let action = if config.wifi { "on" } else { "off" };
+                    println!("[INFO] Spawning thread to turn Wi-Fi {}", action);
+
+                    // -- CHANGED -- Spawn the command in a background thread to prevent UI hangs.
+                    thread::spawn(move || {
+                        // -- CHANGED -- Use .output() to capture stdout/stderr for better debugging.
+                        let output = Command::new("sudo")
+                        .arg("nmcli")
+                        .arg("radio")
+                        .arg("wifi")
+                        .arg(action)
+                        .output();
+
+                        match output {
+                            Ok(out) => {
+                                if out.status.success() {
+                                    println!("[INFO] Background thread: Successfully turned Wi-Fi {}.", action);
+                                } else {
+                                    // If the command fails, print the error output.
+                                    let stderr = String::from_utf8_lossy(&out.stderr);
+                                    println!("[ERROR] Background thread: nmcli command failed to toggle Wi-Fi.");
+                                    println!("[ERROR] nmcli stderr: {}", stderr.trim());
+                                }
+                            }
+                            Err(e) => {
+                                // This error happens if the command couldn't even be spawned (e.g., sudo not found)
+                                println!("[ERROR] Background thread: Failed to spawn nmcli command: {}", e);
+                            }
+                        }
+                    });
+                }
+            },
+            7 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;

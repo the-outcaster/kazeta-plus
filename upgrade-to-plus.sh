@@ -34,61 +34,67 @@ echo -e "Found Kazeta installation at: ${YELLOW}$DEPLOYMENT_DIR${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
+###                  INSTALL LOCAL WI-FI PACKAGES
+### ===================================================================
+# This step allows users without Ethernet to get Wi-Fi drivers and tools
+# installed so they can connect in the next step.
+
+echo -e "${YELLOW}Step 1: Installing local network packages...${NC}"
+LOCAL_PACKAGES_DIR="$SCRIPT_DIR/local_packages"
+
+if [ -d "$LOCAL_PACKAGES_DIR" ] && [ -n "$(ls -A $LOCAL_PACKAGES_DIR/*.pkg.tar.zst 2>/dev/null)" ]; then
+    echo "  -> Found local packages. Installing..."
+    pacman -U --noconfirm $LOCAL_PACKAGES_DIR/*.pkg.tar.zst
+    echo -e "${GREEN}  -> Local network packages installed.${NC}"
+else
+    echo "  -> No local packages found. Assuming network tools are already present."
+fi
+echo "--------------------------------------------------"
+
+
+### ===================================================================
 ###                     INTERNET CONNECTIVITY
 ### ===================================================================
 
-echo -e "${YELLOW}Step 1: Establishing an internet connection...${NC}"
+echo -e "${YELLOW}Step 2: Establishing an internet connection...${NC}"
 
 check_connection() {
     ping -c 1 -W 3 8.8.8.8 &> /dev/null
 }
 
 if ! check_connection; then
-    echo -e "${YELLOW}  -> No internet connection detected. Manual Wi-Fi setup required.${NC}"
+    echo -e "${YELLOW}  -> No internet connection detected. Starting manual Wi-Fi setup...${NC}"
 
-    # 1. Verify that the necessary tools exist BEFORE trying to use them.
-    if ! command -v wpa_passphrase &> /dev/null || ! command -v wpa_supplicant &> /dev/null || ! command -v dhcpcd &> /dev/null; then
-        echo -e "${RED}Error: Critical networking tools (wpa_supplicant, dhcpcd) are missing.${NC}"
-        echo -e "${RED}Cannot set up Wi-Fi. Please connect via Ethernet to proceed.${NC}"
+    # Use iwctl for a more robust connection process
+    if ! command -v iwctl &> /dev/null; then
+        echo -e "${RED}Error: 'iwctl' command not found. Cannot set up Wi-Fi.${NC}"
+        echo -e "${RED}Please connect via Ethernet or ensure local packages were installed.${NC}"
         exit 1
     fi
 
     # Find a wireless interface automatically
-    INTERFACE=$(find /sys/class/net -name 'wl*' -printf '%f' -quit)
+    INTERFACE=$(iwctl device list | grep 'wifi' | awk '{print $1}' | head -n 1)
     if [ -z "$INTERFACE" ]; then
-        echo -e "${RED}Error: Could not find a wireless network interface (e.g., wlan0).${NC}"
+        echo -e "${RED}Error: Could not find a wireless network interface.${NC}"
         exit 1
     fi
     echo "  -> Found wireless interface: ${YELLOW}$INTERFACE${NC}"
 
+    # Scan for networks
+    echo "  -> Scanning for networks (this may take a moment)..."
+    iwctl station "$INTERFACE" scan
+    iwctl station "$INTERFACE" get-networks | head -n 10
+
     # Get network details from the user
-    read -p "  -> Enter your Wi-Fi Network Name (SSID): " SSID
+    read -p "  -> Enter your Wi-Fi Network Name (SSID) from the list above: " SSID
     read -sp "  -> Enter your Wi-Fi Password: " PSK
     echo "" # Newline after password input
 
-    echo "  -> Configuring network..."
-    # Generate a temporary config file for wpa_supplicant
-    CONF_FILE="/tmp/wpa_supplicant.conf"
-    wpa_passphrase "$SSID" "$PSK" > "$CONF_FILE"
+    echo "  -> Connecting..."
+    # Connect using iwctl. The command handles all the backend work.
+    iwctl --passphrase "$PSK" station "$INTERFACE" connect "$SSID"
 
-    echo "  -> Starting Wi-Fi services..."
-    # Ensure the interface is up, but not configured
-    ip link set "$INTERFACE" up
-
-    # Kill any old processes to ensure a clean start
-    killall wpa_supplicant &>/dev/null || true
-
-    # Start wpa_supplicant in the background
-    wpa_supplicant -B -i "$INTERFACE" -c "$CONF_FILE"
-
-    echo "  -> Authenticating (this may take a moment)..."
-    sleep 5 # Give it a moment to authenticate
-
-    echo "  -> Obtaining IP address..."
-    # Get an IP address using DHCP
-    dhcpcd "$INTERFACE"
-
-    sleep 5 # Give it a moment to get an IP
+    sleep 5 # Give it a moment to connect and get an IP
 
     if ! check_connection; then
         echo -e "${RED}Failed to establish an internet connection. Please check credentials and try again.${NC}"
@@ -100,13 +106,15 @@ else
 fi
 echo "--------------------------------------------------"
 
+
 ### ===================================================================
-###                      SYSTEM PACKAGE UPGRADE
+###                   SYSTEM PACKAGE UPGRADE
 ### ===================================================================
 
-echo -e "${YELLOW}Step 2: Installing necessary system packages...${NC}"
+echo -e "${YELLOW}Step 3: Installing necessary system packages...${NC}"
 pacman -Syy
-PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager")
+# -- ADDED ffmpeg --
+PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg")
 for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
     if ! pacman -Q "$pkg" &>/dev/null; then
         echo "  -> Installing $pkg..."
@@ -118,14 +126,13 @@ done
 echo -e "${GREEN}System packages are up to date.${NC}"
 echo "--------------------------------------------------"
 
-### ===================================================================
-###                         SYSTEM FILE COPY & SERVICES
-### ===================================================================
 
-# (The rest of the script remains exactly the same as before)
-# It will copy files and enable NetworkManager for a permanent solution.
+### ===================================================================
+###                 SYSTEM FILE COPY & SERVICES
+### ===================================================================
+# (No changes needed in the remaining sections)
 
-echo -e "${YELLOW}Step 3: Copying new system files...${NC}"
+echo -e "${YELLOW}Step 4: Copying new system files...${NC}"
 rsync -av "$SCRIPT_DIR/rootfs/etc/" "$DEPLOYMENT_DIR/etc/"
 rsync -av "$SCRIPT_DIR/rootfs/usr/share/" "$DEPLOYMENT_DIR/usr/share/"
 echo "  -> Correcting ownership and permissions for sudoers.d..."
@@ -152,12 +159,12 @@ echo -e "${GREEN}System files updated.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                         ENABLE SERVICES
+###                       ENABLE SERVICES
 ### ===================================================================
 
-echo -e "${YELLOW}Step 4: Enabling new system services...${NC}"
+echo -e "${YELLOW}Step 5: Enabling new system services...${NC}"
 # Enable NetworkManager for a robust, permanent Wi-Fi solution
-SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service")
+SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
     echo "  -> Enabling and starting $service..."
     systemctl enable --now "$service"
@@ -166,10 +173,10 @@ echo -e "${GREEN}Services enabled.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                       COPY CUSTOM ASSETS
+###                     COPY CUSTOM ASSETS
 ### ===================================================================
 
-echo -e "${YELLOW}Step 5: Copying custom user assets...${NC}"
+echo -e "${YELLOW}Step 6: Copying custom user assets...${NC}"
 DEST_ASSET_DIR="$DEPLOYMENT_DIR/home/gamer/.local/share/kazeta-plus"
 SOURCE_ASSET_DIR="$SCRIPT_DIR/custom_assets_template"
 mkdir -p "$DEST_ASSET_DIR"
@@ -183,7 +190,7 @@ echo -e "${GREEN}Custom assets processed.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                             COMPLETE
+###                           COMPLETE
 ### ===================================================================
 
 echo -e "${GREEN}Upgrade to Kazeta+ is complete!${NC}"

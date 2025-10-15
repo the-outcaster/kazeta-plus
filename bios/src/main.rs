@@ -85,7 +85,7 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/
 // CONSTANTS
 // ===================================
 
-const DEBUG_GAME_LAUNCH: bool = false;
+const DEBUG_GAME_LAUNCH: bool = true;
 const DEV_MODE: bool = false;
 
 const SCREEN_WIDTH: i32 = 640;
@@ -103,7 +103,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.15.KAZETA+";
+const VERSION_NUMBER: &str = "V1.2.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -1126,6 +1126,9 @@ async fn main() {
                 );
             },
             Screen::Debug => {
+                // Stop the BGM
+                play_new_bgm("OFF", 0.0, &music_cache, &mut current_bgm);
+
                 let messages = log_messages.lock().unwrap();
 
                 // INPUT

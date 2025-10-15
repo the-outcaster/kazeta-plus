@@ -473,6 +473,7 @@ pub fn parse_kzi_file(kzi_path: &Path) -> Result<CartInfo, SaveError> {
     }
 }
 
+// for debug game launch
 pub fn launch_game(cart_info: &CartInfo, kzi_path: &Path) -> std::io::Result<Child> {
     // 1. Get the directory of the .kzi file (e.g., /run/media/fedora/dudelings_linux/)
     let game_root = kzi_path.parent().unwrap();

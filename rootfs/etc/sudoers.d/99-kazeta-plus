@@ -7,5 +7,8 @@
 # wi-fi
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-wifi-setup
 
+# Allow passwordless execution of nmcli to manage networking
+%wheel ALL=(ALL) NOPASSWD: /usr/bin/nmcli
+
 # kazeta+ upgrade
 %wheel ALL=(ALL:ALL) NOPASSWD: /tmp/kazeta-plus-upgrade-kit-*/upgrade-to-plus.sh

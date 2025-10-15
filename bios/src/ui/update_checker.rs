@@ -1,5 +1,3 @@
-// In bios/src/ui/update_checker.rs
-
 use macroquad::prelude::*;
 use regex::Regex;
 use serde::Deserialize;
@@ -25,13 +23,22 @@ pub enum UpdateCheckerScreenState {
     Checking,
     UpToDate,
     UpdateAvailable(GithubRelease),
-    Downloading,
+    InProgress(String), // carries status message
+    UpdateComplete, // final screen before shutdown
     Error(String),
 }
 
 enum CheckerMessage {
     CheckComplete(Result<UpdateCheckResult, String>),
 }
+
+// A new message type for the update thread to send progress back to the UI.
+enum UpdateProgressMessage {
+    Status(String),
+    Complete,
+    Error(String),
+}
+
 
 enum UpdateCheckResult {
     UpToDate,
@@ -40,7 +47,8 @@ enum UpdateCheckResult {
 
 pub struct UpdateCheckerState {
     pub screen_state: UpdateCheckerScreenState,
-    rx: Receiver<CheckerMessage>,
+    rx_check: Receiver<CheckerMessage>,
+    rx_progress: Receiver<UpdateProgressMessage>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -60,11 +68,12 @@ pub struct GithubRelease {
 
 impl UpdateCheckerState {
     pub fn new() -> Self {
-        let (tx, rx) = channel();
-        check_for_updates(tx);
+        let (_tx_check, rx_check) = channel(); // Use specific names
+        let (_tx_progress, rx_progress) = channel(); // Create a dummy channel for now
         Self {
             screen_state: UpdateCheckerScreenState::Idle,
-            rx,
+            rx_check,
+            rx_progress,
         }
     }
 
@@ -72,7 +81,7 @@ impl UpdateCheckerState {
         let (tx, rx) = channel();
         check_for_updates(tx);
         self.screen_state = UpdateCheckerScreenState::Checking;
-        self.rx = rx; // Overwrite the old receiver
+        self.rx_check = rx; // Overwrite the old receiver
     }
 }
 
@@ -90,13 +99,28 @@ pub fn update(
         return;
     }
 
-    if let Ok(msg) = state.rx.try_recv() {
+    if let Ok(msg) = state.rx_check.try_recv() {
         match msg {
             CheckerMessage::CheckComplete(Ok(result)) => match result {
                 UpdateCheckResult::UpToDate => state.screen_state = UpdateCheckerScreenState::UpToDate,
                 UpdateCheckResult::UpdateAvailable(release) => state.screen_state = UpdateCheckerScreenState::UpdateAvailable(release),
             },
             CheckerMessage::CheckComplete(Err(e)) => state.screen_state = UpdateCheckerScreenState::Error(e),
+        }
+    }
+
+    // Receive messages from the update progress thread
+    if let Ok(msg) = state.rx_progress.try_recv() {
+        match msg {
+            UpdateProgressMessage::Status(text) => {
+                state.screen_state = UpdateCheckerScreenState::InProgress(text);
+            }
+            UpdateProgressMessage::Complete => {
+                state.screen_state = UpdateCheckerScreenState::UpdateComplete;
+            }
+            UpdateProgressMessage::Error(e) => {
+                state.screen_state = UpdateCheckerScreenState::Error(e);
+            }
         }
     }
 
@@ -113,6 +137,12 @@ pub fn update(
                 release_to_install = Some(release.clone());
             }
         }
+        UpdateCheckerScreenState::UpdateComplete => {
+            if input_state.select {
+                sound_effects.play_select(config);
+                exit(0); // Shut down the application
+            }
+        }
         UpdateCheckerScreenState::UpToDate | UpdateCheckerScreenState::Error(_) => {
             if input_state.select {
                 *current_screen = Screen::MainMenu;
@@ -124,9 +154,15 @@ pub fn update(
     }
 
     if let Some(release) = release_to_install {
-        state.screen_state = UpdateCheckerScreenState::Downloading;
+        // Create a new channel and pass the sender to the thread
+        let (tx_progress, rx_progress) = channel();
+        state.rx_progress = rx_progress; // Hook up the new receiver
+
+        // Start in the InProgress state
+        state.screen_state = UpdateCheckerScreenState::InProgress("Starting update...".to_string());
+
         thread::spawn(move || {
-            perform_update(release);
+            perform_update(release, tx_progress); // Pass the sender
         });
     }
 }
@@ -188,14 +224,23 @@ pub fn draw(
                 text_with_config_color(font_cache, config, line, text_x, separator_y + 40.0 * scale_factor + (i as f32 * line_height), font_size);
             }
 
-            let continue_text = "Press A to Install Update";
+            let continue_text = "Press [SELECT] to Install Update";
             let continue_dims = measure_text(continue_text, Some(font), font_size, 1.0);
             text_with_config_color(font_cache, config, continue_text, screen_width() / 2.0 - continue_dims.width / 2.0, container_y + container_h - 40.0 * scale_factor, font_size);
         }
-        UpdateCheckerScreenState::Downloading => {
-            let text = "Downloading update... The app will close automatically.";
-            let text_dims = measure_text(text, Some(font), font_size, 1.0);
-            text_with_config_color(font_cache, config, text, screen_width() / 2.0 - text_dims.width / 2.0, screen_height() / 2.0, font_size);
+        UpdateCheckerScreenState::InProgress(message) => {
+            let text_dims = measure_text(message, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, message, screen_width() / 2.0 - text_dims.width / 2.0, screen_height() / 2.0, font_size);
+        }
+        UpdateCheckerScreenState::UpdateComplete => {
+            let line1 = "Update Complete!";
+            let line2 = "Press [SELECT] to shut down.";
+
+            let dims1 = measure_text(line1, Some(font), font_size, 1.0);
+            let dims2 = measure_text(line2, Some(font), font_size, 1.0);
+
+            text_with_config_color(font_cache, config, line1, screen_width() / 2.0 - dims1.width / 2.0, screen_height() / 2.0 - line_height, font_size);
+            text_with_config_color(font_cache, config, line2, screen_width() / 2.0 - dims2.width / 2.0, screen_height() / 2.0, font_size);
         }
         UpdateCheckerScreenState::Error(msg) => {
             text_with_config_color(font_cache, config, "An error occurred:", text_x, text_y_start, font_size);
@@ -241,16 +286,27 @@ fn check_for_updates(tx: Sender<CheckerMessage>) {
     });
 }
 
-fn perform_update(release_info: GithubRelease) {
+// The function now accepts a Sender to report its progress.
+fn perform_update(release_info: GithubRelease, tx: Sender<UpdateProgressMessage>) {
     let update_asset = match release_info.assets.iter().find(|asset| asset.name.ends_with(".zip")) {
         Some(asset) => asset,
-        None => { eprintln!("Error: No .zip asset found in the latest release."); return; }
+        None => {
+            tx.send(UpdateProgressMessage::Error("No .zip asset found.".to_string())).unwrap();
+            return;
+        }
     };
+
+    tx.send(UpdateProgressMessage::Status("Downloading update...".to_string())).unwrap();
+
+    // download
     let tmp_zip_path = Path::new("/tmp/kazeta-update.zip");
 
     let response_bytes = reqwest::blocking::get(&update_asset.browser_download_url).expect("Failed to download update file.").bytes().expect("Failed to read response bytes.");
     let mut tmp_file = fs::File::create(&tmp_zip_path).expect("Failed to create temp file.");
     tmp_file.write_all(&response_bytes).expect("Failed to save update file.");
+
+    // extraction
+    tx.send(UpdateProgressMessage::Status("Extracting archive...".to_string())).unwrap();
 
     // 1. Change the extraction directory to /tmp/
     let tmp_extract_dir = Path::new("/tmp/");
@@ -282,11 +338,15 @@ fn perform_update(release_info: GithubRelease) {
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).expect("Failed to set script permissions.");
 
+    tx.send(UpdateProgressMessage::Status("Applying update... Do not turn off.".to_string())).unwrap();
+
     Command::new("sudo")
         .arg(script_path)
         .status()
         .expect("Failed to run upgrade script.");
-    exit(0);
+
+    // Instead of exiting, we send a "Complete" message and let the thread finish.
+    tx.send(UpdateProgressMessage::Complete).unwrap();
 }
 
 fn extract_archive(archive_path: &Path, destination: &Path) {
