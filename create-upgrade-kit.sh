@@ -14,12 +14,14 @@ set -e
 SOURCE_DIR="$HOME/Programs/kazeta-plus"
 # Set the destination directory where the kit will be created.
 DEST_BASE_DIR="$HOME/Desktop/kazeta_assets/upgrade_kits"
+# -- NEW -- Base URL for downloading the local packages from your GitHub repo.
+PACKAGES_BASE_URL="https://github.com/the-outcaster/kazeta-plus/raw/main/local_packages"
 
 
 # --- Main Logic ---
 
 # 1. Prompt for the version number
-read -p "Enter the version number for the new upgrade kit (e.g., 1.11): " VERSION
+read -p "Enter the version number for the new upgrade kit (e.g., 1.2): " VERSION
 
 if [ -z "$VERSION" ]; then
     echo "Error: Version number cannot be empty."
@@ -54,17 +56,41 @@ mkdir -p "$KIT_FULL_PATH/rootfs/etc/sudoers.d"
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/systemd/system"
 mkdir -p "$KIT_FULL_PATH/rootfs/usr/bin"
 mkdir -p "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles"
+# -- NEW -- Create the directory for local packages
+mkdir -p "$KIT_FULL_PATH/local_packages"
 echo "Directory structure created."
 
 # 4. Download the main upgrade script
 echo "Downloading upgrade-to-plus.sh script..."
 curl -sL "https://raw.githubusercontent.com/the-outcaster/kazeta-plus/main/upgrade-to-plus.sh" \
      -o "$KIT_FULL_PATH/upgrade-to-plus.sh"
-# Make the script executable
 chmod +x "$KIT_FULL_PATH/upgrade-to-plus.sh"
 echo "Download complete."
 
-# 5. Copy all necessary files
+# -- NEW SECTION --
+# 5. Download the local Wi-Fi packages
+echo "Downloading local Wi-Fi packages..."
+packages_to_download=(
+    "dbus-1.16.2-1-x86_64.pkg.tar.zst"
+    "iwd-3.9-1-x86_64.pkg.tar.zst"
+    "libndp-1.9-1-x86_64.pkg.tar.zst"
+    "libnm-1.54.0-1-x86_64.pkg.tar.zst"
+    "linux-firmware-20250808-1-any.pkg.tar.zst"
+    "networkmanager-1.54.0-1-x86_64.pkg.tar.zst"
+    "polkit-126-2-x86_64.pkg.tar.zst"
+    "readline-8.3.001-1-x86_64.pkg.tar.zst"
+    "wpa_supplicant-2:2.11-3-x86_64.pkg.tar.zst"
+)
+
+for pkg in "${packages_to_download[@]}"; do
+    echo "  -> Downloading $pkg..."
+    curl -sSL "$PACKAGES_BASE_URL/$pkg" -o "$KIT_FULL_PATH/local_packages/$pkg"
+done
+echo "Local packages downloaded."
+# -- END NEW SECTION --
+
+
+# 6. Copy all necessary files from your local dev environment
 echo "Copying files from rootfs..."
 
 # etc files
