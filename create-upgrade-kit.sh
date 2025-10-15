@@ -68,6 +68,7 @@ echo "Download complete."
 
 # 5. Download the complete set of local Wi-Fi packages and dependencies
 echo "Downloading local Wi-Fi packages..."
+# -- CHANGED -- Removed all linux-firmware packages from this list.
 packages_to_download=(
     "acl-2.3.2-1-x86_64.pkg.tar.zst"
     "attr-2.5.2-1-x86_64.pkg.tar.zst"
@@ -145,18 +146,6 @@ packages_to_download=(
     "libverto-0.3.2-5-x86_64.pkg.tar.zst"
     "libxcrypt-4.4.38-1-x86_64.pkg.tar.zst"
     "linux-api-headers-6.16-1-x86_64.pkg.tar.zst"
-    "linux-firmware-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-amdgpu-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-atheros-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-broadcom-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-cirrus-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-intel-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-mediatek-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-nvidia-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-other-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-radeon-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-realtek-20250808-1-any.pkg.tar.zst"
-    "linux-firmware-whence-20250808-1-any.pkg.tar.zst"
     "lmdb-0.9.33-1-x86_64.pkg.tar.zst"
     "lz4-1:1.10.0-2-x86_64.pkg.tar.zst"
     "mobile-broadband-provider-info-20250613-1-any.pkg.tar.zst"
