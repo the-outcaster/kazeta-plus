@@ -39,12 +39,13 @@ echo "--------------------------------------------------"
 # This step allows users without Ethernet to get Wi-Fi drivers and tools
 # installed so they can connect in the next step.
 
-echo -e "${YELLOW}Step 1: Installing local network packages...${NC}"
+echo -e "${YELLOW}Step 1: Installing essential local network packages...${NC}"
 LOCAL_PACKAGES_DIR="$SCRIPT_DIR/local_packages"
 
 if [ -d "$LOCAL_PACKAGES_DIR" ] && [ -n "$(ls -A $LOCAL_PACKAGES_DIR/*.pkg.tar.zst 2>/dev/null)" ]; then
     echo "  -> Found local packages. Installing..."
-    pacman -U --noconfirm $LOCAL_PACKAGES_DIR/*.pkg.tar.zst
+    # -- CHANGED -- Use --needed to avoid reinstalling what's already there
+    pacman -U --noconfirm --needed $LOCAL_PACKAGES_DIR/*.pkg.tar.zst
     echo -e "${GREEN}  -> Local network packages installed.${NC}"
 else
     echo "  -> No local packages found. Assuming network tools are already present."
@@ -65,14 +66,12 @@ check_connection() {
 if ! check_connection; then
     echo -e "${YELLOW}  -> No internet connection detected. Starting manual Wi-Fi setup...${NC}"
 
-    # Use iwctl for a more robust connection process
     if ! command -v iwctl &> /dev/null; then
         echo -e "${RED}Error: 'iwctl' command not found. Cannot set up Wi-Fi.${NC}"
         echo -e "${RED}Please connect via Ethernet or ensure local packages were installed.${NC}"
         exit 1
     fi
 
-    # Find a wireless interface automatically
     INTERFACE=$(iwctl device list | grep 'wifi' | awk '{print $1}' | head -n 1)
     if [ -z "$INTERFACE" ]; then
         echo -e "${RED}Error: Could not find a wireless network interface.${NC}"
@@ -80,21 +79,18 @@ if ! check_connection; then
     fi
     echo "  -> Found wireless interface: ${YELLOW}$INTERFACE${NC}"
 
-    # Scan for networks
     echo "  -> Scanning for networks (this may take a moment)..."
     iwctl station "$INTERFACE" scan
     iwctl station "$INTERFACE" get-networks | head -n 10
 
-    # Get network details from the user
     read -p "  -> Enter your Wi-Fi Network Name (SSID) from the list above: " SSID
     read -sp "  -> Enter your Wi-Fi Password: " PSK
-    echo "" # Newline after password input
+    echo ""
 
     echo "  -> Connecting..."
-    # Connect using iwctl. The command handles all the backend work.
     iwctl --passphrase "$PSK" station "$INTERFACE" connect "$SSID"
 
-    sleep 5 # Give it a moment to connect and get an IP
+    sleep 5
 
     if ! check_connection; then
         echo -e "${RED}Failed to establish an internet connection. Please check credentials and try again.${NC}"
@@ -111,9 +107,10 @@ echo "--------------------------------------------------"
 ###                   SYSTEM PACKAGE UPGRADE
 ### ===================================================================
 
-echo -e "${YELLOW}Step 3: Installing necessary system packages...${NC}"
+echo -e "${YELLOW}Step 3: Installing/updating remaining system packages...${NC}"
 pacman -Syy
-# -- ADDED ffmpeg --
+# -- NOTE -- This list now includes the Wi-Fi packages. Pacman is smart and will
+# simply skip them if they were already installed in Step 1.
 PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg")
 for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
     if ! pacman -Q "$pkg" &>/dev/null; then
