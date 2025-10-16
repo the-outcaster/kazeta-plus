@@ -1,7 +1,9 @@
-#!/binbash
+#!/bin/bash
 
 # Exit immediately if any command fails.
 set -e
+# Add pipefail to ensure pipeline failures are caught
+set -o pipefail
 
 # --- Color Definitions for pretty output ---
 GREEN='\033[0;32m'
@@ -47,6 +49,12 @@ if [ -d "$WIFI_PACK_DIR" ] && [ -n "$(ls -A $WIFI_PACK_DIR/*.pkg.tar.zst 2>/dev/
     echo "  -> Installing packages..."
     pacman -U --noconfirm --needed $WIFI_PACK_DIR/*.pkg.tar.zst
     echo -e "${GREEN}  -> Local network packages installed successfully.${NC}"
+
+    # Start the necessary services for nmcli to work.
+    echo "  -> Starting network services..."
+    systemctl start NetworkManager.service
+    # Some configurations of NetworkManager use iwd as a backend, so we start it too.
+    systemctl start iwd.service
 else
     echo "  -> No local Wi-Fi package folder found. Assuming network tools are present or you have an Ethernet connection."
 fi
@@ -66,29 +74,29 @@ check_connection() {
 if ! check_connection; then
     echo -e "${YELLOW}  -> No internet connection detected. Starting manual Wi-Fi setup...${NC}"
 
-    if ! command -v iwctl &> /dev/null; then
-        echo -e "${RED}Error: 'iwctl' command not found. Cannot set up Wi-Fi.${NC}"
+    if ! command -v nmcli &> /dev/null; then
+        echo -e "${RED}Error: 'nmcli' command not found. Cannot set up Wi-Fi.${NC}"
         echo -e "${RED}Please connect via Ethernet or ensure local packages were installed.${NC}"
         exit 1
     fi
 
-    INTERFACE=$(iwctl device list | grep 'wifi' | awk '{print $1}' | head -n 1)
-    if [ -z "$INTERFACE" ]; then
-        echo -e "${RED}Error: Could not find a wireless network interface.${NC}"
-        exit 1
-    fi
-    echo "  -> Found wireless interface: ${YELLOW}$INTERFACE${NC}"
+    # Give NetworkManager a moment to start and detect devices.
+    echo "  -> Waiting for Wi-Fi hardware to initialize..."
+    sleep 3
 
-    echo "  -> Scanning for networks (this may take a moment)..."
-    iwctl station "$INTERFACE" scan
-    iwctl station "$INTERFACE" get-networks | head -n 10
+    echo "  -> Scanning for networks..."
+    nmcli device wifi rescan
 
-    read -p "  -> Enter your Wi-Fi Network Name (SSID) from the list above: " SSID
+    #echo "  -> Available Networks (Top 10):"
+    nmcli --terse --fields SSID,SIGNAL device wifi list | head -n 10
+
+    read -p "  -> Enter your Wi-Fi Network Name (SSID): " SSID
     read -sp "  -> Enter your Wi-Fi Password: " PSK
     echo ""
 
     echo "  -> Connecting..."
-    iwctl --passphrase "$PSK" station "$INTERFACE" connect "$SSID"
+    # Use nmcli to connect. It's more reliable and handles existing connections better.
+    nmcli device wifi connect "$SSID" password "$PSK"
 
     sleep 5
 
@@ -109,8 +117,6 @@ echo "--------------------------------------------------"
 
 echo -e "${YELLOW}Step 3: Installing/updating remaining system packages...${NC}"
 pacman -Syy
-# -- NOTE -- This list now includes the Wi-Fi packages. Pacman is smart and will
-# simply skip them if they were already installed in Step 1.
 PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg" "unzip")
 for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
     if ! pacman -Q "$pkg" &>/dev/null; then
@@ -127,7 +133,6 @@ echo "--------------------------------------------------"
 ### ===================================================================
 ###                 SYSTEM FILE COPY & SERVICES
 ### ===================================================================
-# (No changes needed in the remaining sections)
 
 echo -e "${YELLOW}Step 4: Copying new system files...${NC}"
 rsync -av "$SCRIPT_DIR/rootfs/etc/" "$DEPLOYMENT_DIR/etc/"
@@ -160,7 +165,6 @@ echo "--------------------------------------------------"
 ### ===================================================================
 
 echo -e "${YELLOW}Step 5: Enabling new system services...${NC}"
-# Enable NetworkManager for a robust, permanent Wi-Fi solution
 SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
     echo "  -> Enabling and starting $service..."
@@ -192,3 +196,4 @@ echo "--------------------------------------------------"
 
 echo -e "${GREEN}Upgrade to Kazeta+ is complete!${NC}"
 echo -e "${YELLOW}Please reboot your system now for all changes to take effect.${NC}"
+
