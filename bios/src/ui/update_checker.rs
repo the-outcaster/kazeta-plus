@@ -49,6 +49,8 @@ pub struct UpdateCheckerState {
     pub screen_state: UpdateCheckerScreenState,
     rx_check: Receiver<CheckerMessage>,
     rx_progress: Receiver<UpdateProgressMessage>,
+    pub description_scroll_offset: usize,
+    pub max_description_scroll: usize,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -74,6 +76,8 @@ impl UpdateCheckerState {
             screen_state: UpdateCheckerScreenState::Idle,
             rx_check,
             rx_progress,
+            description_scroll_offset: 0,
+            max_description_scroll: 0,
         }
     }
 
@@ -82,6 +86,8 @@ impl UpdateCheckerState {
         check_for_updates(tx);
         self.screen_state = UpdateCheckerScreenState::Checking;
         self.rx_check = rx; // Overwrite the old receiver
+        self.description_scroll_offset = 0; // Reset scroll on new check
+        self.max_description_scroll = 0;
     }
 }
 
@@ -93,7 +99,7 @@ pub fn update(
     config: &Config,
 ) {
     if input_state.back {
-        *current_screen = Screen::MainMenu;
+        *current_screen = Screen::Extras;
         state.screen_state = UpdateCheckerScreenState::Idle; // <-- RESET STATE
         sound_effects.play_back(config);
         return;
@@ -136,11 +142,34 @@ pub fn update(
                 sound_effects.play_select(config);
                 release_to_install = Some(release.clone());
             }
+
+            // Handle up/down for scrolling the description text
+            if input_state.down {
+                // Check against the max value calculated in the previous frame
+                if state.description_scroll_offset < state.max_description_scroll {
+                    state.description_scroll_offset += 1;
+                    sound_effects.play_cursor_move(config);
+                }
+            }
+            if input_state.up {
+                if state.description_scroll_offset > 0 {
+                    state.description_scroll_offset -= 1;
+                    sound_effects.play_cursor_move(config);
+                }
+            }
         }
         UpdateCheckerScreenState::UpdateComplete => {
+            // SOUTH button for shutdown
             if input_state.select {
                 sound_effects.play_select(config);
-                exit(0); // Shut down the application
+                Command::new("sudo").arg("shutdown").arg("now").status().ok();
+                exit(0); // Fallback in case shutdown command fails
+            }
+            // WEST button for reboot
+            if input_state.secondary {
+                sound_effects.play_select(config);
+                Command::new("sudo").arg("reboot").status().ok();
+                exit(0); // Fallback in case reboot command fails
             }
         }
         UpdateCheckerScreenState::UpToDate | UpdateCheckerScreenState::Error(_) => {
@@ -168,7 +197,7 @@ pub fn update(
 }
 
 pub fn draw(
-    state: &UpdateCheckerState,
+    state: &mut UpdateCheckerState,
     background_cache: &HashMap<String, Texture2D>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
@@ -201,32 +230,73 @@ pub fn draw(
         UpdateCheckerScreenState::UpToDate => {
             text_with_config_color(font_cache, config, "You are running the latest version.", text_x, text_y_start, font_size);
             text_with_config_color(font_cache, config, &format!("Current version: {}", VERSION_NUMBER), text_x, text_y_start + line_height, font_size);
-            text_with_config_color(font_cache, config, "Press Select or Back to return.", text_x, text_y_start + line_height * 3.0, font_size);
+            text_with_config_color(font_cache, config, "Press [SOUTH] or [EAST] to return.", text_x, text_y_start + line_height * 3.0, font_size);
         }
         UpdateCheckerScreenState::UpdateAvailable(release) => {
-            // --- FIX 1: Use release.tag_name for the version number ---
             text_with_config_color(font_cache, config, &format!("New version available: {}", release.tag_name), text_x, text_y_start, font_size);
             text_with_config_color(font_cache, config, &format!("Current version: {}", VERSION_NUMBER), text_x, text_y_start + line_height, font_size);
 
             let separator_y = text_y_start + line_height * 2.5;
             draw_line(container_x, separator_y, container_x + container_w, separator_y, 2.0, Color::new(1.0, 1.0, 1.0, 0.2));
 
-            // --- FIX 2: Add a regex to strip Markdown links ---
+            // -- CHANGED -- Implemented scrolling logic
             let img_tag_regex = Regex::new(r"<img[^>]*>").unwrap();
-            let md_link_regex = Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap(); // Matches [text](url)
+            let md_link_regex = Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap();
 
             let no_images = img_tag_regex.replace_all(&release.body, "");
-            let clean_body = md_link_regex.replace_all(&no_images, "$1"); // Replaces the link with just the text part
+            let clean_body = md_link_regex.replace_all(&no_images, "$1");
 
             let wrap_width = container_w - 60.0 * scale_factor;
             let wrapped_lines = wrap_text(clean_body.trim(), font.clone(), font_size, wrap_width);
-            for (i, line) in wrapped_lines.iter().enumerate() {
-                text_with_config_color(font_cache, config, line, text_x, separator_y + 40.0 * scale_factor + (i as f32 * line_height), font_size);
+
+            let description_area_top = separator_y + 30.0 * scale_factor;
+            let description_area_bottom = container_y + container_h - 30.0 * scale_factor;
+            let visible_lines = ((description_area_bottom - description_area_top) / line_height).floor() as usize;
+
+            let max_scroll_offset = if wrapped_lines.len() > visible_lines { wrapped_lines.len() - visible_lines } else { 0 };
+
+            // Clamp the scroll offset to prevent scrolling past the end
+            state.description_scroll_offset = state.description_scroll_offset.min(max_scroll_offset);
+
+            state.max_description_scroll = max_scroll_offset;
+
+            // Draw the visible lines of text
+            for (i, line) in wrapped_lines.iter().skip(state.description_scroll_offset).take(visible_lines).enumerate() {
+                text_with_config_color(font_cache, config, line, text_x, description_area_top + (i as f32 * line_height), font_size);
             }
 
-            let continue_text = "Press [SELECT] to Install Update";
+            // Draw scroll indicators if needed
+            if max_scroll_offset > 0 {
+                let indicator_x = container_x + container_w - 20.0 * scale_factor;
+                let arrow_size = 4.0 * scale_factor;
+
+                // Calculate the vertical center of the first and last lines
+                let first_line_center_y = description_area_top + (line_height / 2.0) - 40.0;
+                let last_line_center_y = description_area_bottom - (line_height / 2.0) - 40.0;
+
+                // Up arrow - Aligned with the first line of text
+                if state.description_scroll_offset > 0 {
+                    draw_triangle(
+                        vec2(indicator_x, first_line_center_y - arrow_size),
+                        vec2(indicator_x - arrow_size, first_line_center_y + arrow_size),
+                        vec2(indicator_x + arrow_size, first_line_center_y + arrow_size),
+                        WHITE
+                    );
+                }
+                // Down arrow - Aligned with the last line of text
+                if state.description_scroll_offset < max_scroll_offset {
+                    draw_triangle(
+                        vec2(indicator_x, last_line_center_y + arrow_size),
+                        vec2(indicator_x - arrow_size, last_line_center_y - arrow_size),
+                        vec2(indicator_x + arrow_size, last_line_center_y - arrow_size),
+                        WHITE
+                    );
+                }
+            }
+
+            let continue_text = "Press [SOUTH] to Install Update";
             let continue_dims = measure_text(continue_text, Some(font), font_size, 1.0);
-            text_with_config_color(font_cache, config, continue_text, screen_width() / 2.0 - continue_dims.width / 2.0, container_y + container_h - 40.0 * scale_factor, font_size);
+            text_with_config_color(font_cache, config, continue_text, screen_width() / 2.0 - continue_dims.width / 2.0, container_y + container_h - 20.0 * scale_factor, font_size);
         }
         UpdateCheckerScreenState::InProgress(message) => {
             let text_dims = measure_text(message, Some(font), font_size, 1.0);
@@ -234,7 +304,7 @@ pub fn draw(
         }
         UpdateCheckerScreenState::UpdateComplete => {
             let line1 = "Update Complete!";
-            let line2 = "Press [SELECT] to shut down.";
+            let line2 = "Press [SOUTH] to shut down, or [WEST] to reboot.";
 
             let dims1 = measure_text(line1, Some(font), font_size, 1.0);
             let dims2 = measure_text(line2, Some(font), font_size, 1.0);
@@ -245,7 +315,7 @@ pub fn draw(
         UpdateCheckerScreenState::Error(msg) => {
             text_with_config_color(font_cache, config, "An error occurred:", text_x, text_y_start, font_size);
             text_with_config_color(font_cache, config, msg, text_x, text_y_start + line_height, font_size);
-            text_with_config_color(font_cache, config, "Press Select or Back to return.", text_x, text_y_start + line_height * 3.0, font_size);
+            text_with_config_color(font_cache, config, "Press [SOUTH] or [EAST] to return.", text_x, text_y_start + line_height * 3.0, font_size);
         }
     }
 }

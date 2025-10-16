@@ -32,7 +32,7 @@ use crate::{
     ShakeTarget,
 };
 
-pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "CONNECT TO WI-FI", "GET NEW THEMES", "CHECK FOR UPDATES", "ABOUT"];
+pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "EXTRAS", "ABOUT"];
 
 pub fn update(
     current_screen: &mut Screen,
@@ -212,19 +212,11 @@ pub fn update(
                 *current_screen = Screen::GeneralSettings;
                 sound_effects.play_select(&config);
             },
-            4 => { // WIFI
-                *current_screen = Screen::Wifi;
+            4 => { // EXTRAS
+                *current_screen = Screen::Extras;
                 sound_effects.play_select(&config);
             },
-            5 => { // THEME DOWNLOADER
-                *current_screen = Screen::ThemeDownloader;
-                sound_effects.play_select(&config);
-            },
-            6 => { // UPDATE CHECKER
-                *current_screen = Screen::UpdateChecker;
-                sound_effects.play_select(&config);
-            },
-            7 => { // ABOUT
+            5 => { // ABOUT
                 *current_screen = Screen::About;
                 sound_effects.play_select(&config);
             },

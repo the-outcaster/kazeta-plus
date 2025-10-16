@@ -56,8 +56,9 @@ pub use types::*;
 - fix D-pad reversal with some games (Godot-based games in particular)
 - per-game keyboard to gamepad mapping
 - make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
-- OTA updates
 - use OSK in-game
+- Bluetooth controller support
+- add option to safely unmount cart in main menu
 
 Hard
 - DVD functionality?
@@ -72,12 +73,8 @@ Unnecessary but cool
 // ===================================
 - setting brightness needs the brightnessctl package -- this has been added to the manifest
 - Steam Deck volume/brightness controls requires the keyd package -- this has been added to the manifest
-- added openssh as a package in manifest
 - support for multiple audio sinks requires us to replace the wireplumber file in /var/kazeta/state/ to .AUDIO_PREFERENCE_SET, as specified in the kazeta-session script
 - multi-cart support requires us to have a LAUNCH_CMD_FILE, as specified in kazeta-session, and we also have to check if a specific .kzi file was passed as an argument in "kazeta"
-- copying session logs over to SD requires us to add:
-sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
-  to the postinstallhook. We also have to replace "pkexec kazeta-mount" to "sudo kazeta-mount" in the kazeta script
 - we add a "steam-deck.yaml" device profile for InputPlumber in /usr/share/inputplumber/profiles/ and map two of the back buttons to F13 and F14 so keyd can recognize them as keyboard inputs. These then get loaded into /etc/keyd/default.conf and control the brightness level
 */
 
@@ -86,7 +83,7 @@ sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
-const DEV_MODE: bool = false;
+const DEV_MODE: bool = true;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -103,7 +100,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.21.KAZETA+";
+const VERSION_NUMBER: &str = "V1.3.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -500,6 +497,9 @@ async fn main() {
     // THEME DOWNLOADER
     let mut theme_downloader_state = ThemeDownloaderState::new();
 
+    // BLUETOOTH CONTROLLER PAIRING
+    let mut bluetooth_state = ui::bluetooth::BluetoothState::new();
+
     // UPDATE CHECKER
     let mut update_checker_state = UpdateCheckerState::new();
 
@@ -595,9 +595,6 @@ async fn main() {
 
     // apply custom resolution if user specified it
     apply_resolution(&config.resolution);
-    if config.fullscreen {
-        set_fullscreen(true);
-    }
     next_frame().await;
 
     // load custom sound pack
@@ -751,6 +748,7 @@ async fn main() {
     let mut current_screen = Screen::MainMenu;
     let mut main_menu_selection: usize = 0;
     let mut settings_menu_selection: usize = 0;
+    let mut extras_menu_selection: usize = 0;
     let mut game_selection: usize = 0; // For the new menu
     let mut available_games: Vec<(save::CartInfo, PathBuf)> = Vec::new(); // To hold the list of found games
     let mut play_option_enabled: bool = false;
@@ -809,22 +807,8 @@ async fn main() {
         error_message: None,
     }));
 
-    let mut display_settings_changed = false;
-
     // BEGINNING OF MAIN LOOP
     loop {
-        // This continuously ensures the window size matches the config when not fullscreen
-        if !config.fullscreen {
-            if let Some((w_str, h_str)) = config.resolution.split_once('x') {
-                if let (Ok(w), Ok(h)) = (w_str.parse::<f32>(), h_str.parse::<f32>()) {
-                    // If the actual size doesn't match the config, request a resize
-                    if screen_width() != w || screen_height() != h {
-                        request_new_screen_size(w, h);
-                    }
-                }
-            }
-        }
-
         let scale_factor = screen_height() / BASE_SCREEN_HEIGHT;
 
         // FLASH TIMER
@@ -1008,7 +992,7 @@ async fn main() {
                 // --- Handle input and state changes ---
                 ui::settings::update(
                     &mut current_screen, &input_state, &mut config, &sound_pack_choices, &loaded_themes, &mut settings_menu_selection,
-                    &mut sound_effects, &mut confirm_selection, &mut display_settings_changed,
+                    &mut sound_effects, &mut confirm_selection,
                     &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
                     &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
                     &background_choices, &font_choices,
@@ -1019,10 +1003,33 @@ async fn main() {
                     ui::settings::render_settings_page(
                         page_number, options, &logo_cache, &background_cache, &font_cache,
                         &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                        &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
+                        &battery_info, &current_time_str, scale_factor, system_volume, brightness,
                     );
                 }
             },
+            Screen::Extras => {
+                ui::extras_menu::update(
+                    &mut current_screen,
+                    &mut extras_menu_selection,
+                    &input_state,
+                    &mut animation_state,
+                    &sound_effects,
+                    &config,
+                );
+
+                ui::extras_menu::draw(
+                    extras_menu_selection,
+                    &animation_state,
+                    &logo_cache,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    &battery_info,
+                    &current_time_str,
+                    scale_factor,
+                );
+            }
             Screen::GameSelection => {
                 // --- Load Icons from Queue ---
                 if !game_icon_queue.is_empty() {
@@ -1213,7 +1220,7 @@ async fn main() {
                 render_settings_page(
                     1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                    &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness,
+                    &battery_info, &current_time_str, scale_factor, system_volume, brightness,
                 );
                 // Then, render the dialog box on top
                 render_dialog_box(
@@ -1234,7 +1241,7 @@ async fn main() {
                 render_settings_page(
                     1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                    &battery_info, &current_time_str, scale_factor, display_settings_changed, system_volume, brightness
+                    &battery_info, &current_time_str, scale_factor, system_volume, brightness
                 );
 
                 render_dialog_box(
@@ -1303,6 +1310,28 @@ async fn main() {
                     scale_factor,
                 );
             }
+            Screen::Bluetooth => {
+                ui::bluetooth::update(
+                    &mut bluetooth_state,
+                    &input_state,
+                    &mut current_screen,
+                    &sound_effects,
+                    &config,
+                );
+
+                ui::bluetooth::draw(
+                    &bluetooth_state,
+                    &animation_state,
+                    &logo_cache,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    &battery_info,
+                    &current_time_str,
+                    scale_factor,
+                );
+            }
             Screen::ThemeDownloader => {
                 ui::theme_downloader::update(
                     &mut theme_downloader_state,
@@ -1358,7 +1387,7 @@ async fn main() {
                     &config,
                 );
                 ui::update_checker::draw(
-                    &update_checker_state,
+                    &mut update_checker_state,
                     &background_cache,
                     &font_cache,
                     &config,

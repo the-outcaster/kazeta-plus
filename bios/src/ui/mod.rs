@@ -9,8 +9,10 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 
 pub mod about;
+pub mod bluetooth;
 pub mod data;
 pub mod dialog;
+pub mod extras_menu;
 pub mod main_menu;
 pub mod settings;
 pub mod theme_downloader;

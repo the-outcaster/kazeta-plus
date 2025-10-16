@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use crate::{
     audio::SoundEffects,
     config::Config, FONT_SIZE, SystemInfo, Screen, BackgroundState, BatteryInfo, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, InputState,
+    system::get_ip_address,
 };
 
 pub fn update(
@@ -45,6 +46,9 @@ pub fn draw(
     let start_x_values = 120.0 * scale_factor;
     let mut current_y = 100.0 * scale_factor;
 
+    // -- NEW -- Fetch the IP address dynamically every time the screen is drawn.
+    let ip_address = get_ip_address();
+
     // --- Hardware Info ---
     let info = vec![
         ("OS:", &system_info.os_name),
@@ -52,6 +56,7 @@ pub fn draw(
         ("CPU:", &system_info.cpu),
         ("GPU:", &system_info.gpu),
         ("MEMORY:", &system_info.ram_total),
+        ("IP:", &ip_address), // Display the IP address
     ];
 
     for (label, value) in info {
@@ -61,7 +66,7 @@ pub fn draw(
     }
 
     // --- Credits ---
-    current_y = screen_height() - (130.0 * scale_factor);
+    current_y = screen_height() - (100.0 * scale_factor);
 
     let credit_lines = vec![
         "Original Kazeta concept by Alkazar.",

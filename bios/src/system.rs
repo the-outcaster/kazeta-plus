@@ -201,3 +201,36 @@ pub fn get_battery_info() -> Option<BatteryInfo> {
     }
     None
 }
+
+/// Gets the current IP address of the device.
+pub fn get_ip_address() -> String {
+    let output = Command::new("ip")
+    .arg("-4")
+    .arg("addr")
+    .arg("show")
+    .arg("scope")
+    .arg("global")
+    .output();
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            // Look for a line with "inet", then parse it.
+            for line in stdout.lines() {
+                if line.trim().starts_with("inet") {
+                    let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                    if let Some(ip_with_cidr) = parts.get(1) {
+                        // The IP is usually followed by a CIDR mask, like "192.168.1.5/24".
+                        // We split by "/" and take the first part.
+                        if let Some(ip) = ip_with_cidr.split('/').next() {
+                            return ip.to_string();
+                        }
+                    }
+                }
+            }
+            // If no global IP was found after checking all lines
+            "N/A".to_string()
+        }
+        Err(_) => "N/A".to_string(),
+    }
+}

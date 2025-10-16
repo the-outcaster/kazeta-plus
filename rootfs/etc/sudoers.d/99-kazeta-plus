@@ -4,11 +4,21 @@
 # Allow running the log copy helper script without a password
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-copy-logs
 
-# wi-fi
+# Wi-Fi
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-wifi-setup
+
+# Bluetooth
+%wheel ALL=(ALL) NOPASSWD: /usr/bin/bluetoothctl
 
 # Allow passwordless execution of nmcli to manage networking
 %wheel ALL=(ALL) NOPASSWD: /usr/bin/nmcli
 
+# Allow passwordless execution of rfkill to manage wireless devices (Bluetooth specifically)
+%wheel ALL=(ALL) NOPASSWD: /usr/sbin/rfkill
+
 # kazeta+ upgrade
 %wheel ALL=(ALL:ALL) NOPASSWD: /tmp/kazeta-plus-upgrade-kit-*/upgrade-to-plus.sh
+
+# Allow passwordless reboot and shutdown
+%wheel ALL=(ALL) NOPASSWD: /usr/sbin/reboot
+%wheel ALL=(ALL) NOPASSWD: /usr/sbin/shutdown

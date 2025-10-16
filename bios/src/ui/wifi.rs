@@ -4,10 +4,8 @@ use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
-const DEV_MODE: bool = false;
-
 use crate::{
-    get_current_font, text_with_config_color, BatteryInfo,
+    get_current_font, text_with_config_color, BatteryInfo, DEV_MODE,
     audio::SoundEffects,
     config::Config, FONT_SIZE, Screen, BackgroundState, render_background, measure_text, InputState,
 };
@@ -188,7 +186,7 @@ pub fn update(
             wifi_state.password_buffer.clear();
             sound_effects.play_back(config);
         } else {
-            *current_screen = Screen::MainMenu;
+            *current_screen = Screen::Extras;
             sound_effects.play_back(config);
         }
         return;
@@ -416,9 +414,8 @@ fn prepare_wifi_system(tx: Sender<WifiMessage>) {
         let output;
 
         if DEV_MODE {
-            output = Command::new("sudo")
-            .arg("/home/fedora/Programs/kazeta-plus/rootfs/usr/bin/kazeta-wifi-setup")
-            .output();
+            tx.send(WifiMessage::PreparationComplete(Ok(()))).unwrap();
+            return;
         } else {
             output = Command::new("sudo")
             .arg("/usr/bin/kazeta-wifi-setup")

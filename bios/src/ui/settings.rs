@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
 use crate::{FONT_SIZE, MENU_PADDING};
-use crate::theme;
+use crate::{DEV_MODE, theme};
 
 // Import types/structs/constants that are still in main.rs
 use crate::{
@@ -26,11 +26,11 @@ const SETTINGS_OPTION_HEIGHT: f32 = 30.0;
 pub const GENERAL_SETTINGS: &[&str] = &[
     "RESET SETTINGS",
     "RESOLUTION",
-    "USE FULLSCREEN",
     "SHOW SPLASH SCREEN",
     "TIME ZONE",
     "BRIGHTNESS",
     "WI-FI",
+    "BLUETOOTH",
     "AUDIO SETTINGS",
 ];
 
@@ -108,7 +108,6 @@ pub fn render_settings_page(
     battery_info: &Option<BatteryInfo>,
     current_time_str: &str,
     scale_factor: f32,
-    display_settings_changed: bool,
     system_volume: f32,
     brightness: f32,
 ) {
@@ -169,21 +168,6 @@ pub fn render_settings_page(
 
         text_with_config_color(font_cache, config, label_text, left_margin, text_y, font_size);
         text_with_config_color(font_cache, config, &value_text, value_x, text_y, font_size);
-
-        if display_settings_changed {
-            let message = "RESTART REQUIRED TO APPLY CHANGES";
-            let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-            let current_font = get_current_font(font_cache, config);
-            let dims = measure_text(message, Some(current_font), font_size, 1.0);
-
-            let x = screen_width() / 2.0 - dims.width / 2.0;
-            let y = screen_height() - (40.0 * scale_factor); // Position near the bottom
-
-            // Draw a semi-transparent background for the message
-            draw_rectangle(x - (5.0 * scale_factor), y - dims.height, dims.width + (10.0 * scale_factor), dims.height + (5.0 * scale_factor), Color::new(0.0, 0.0, 0.0, 0.7));
-
-            text_with_config_color(font_cache, config, message, x, y, font_size);
-        }
     }
 
     // let the user know what page they're on
@@ -224,11 +208,11 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
         1 => match index {
             0 => "CONFIRM".to_string(), // RESET SETTINGS
             1 => config.resolution.clone(), // RESOLUTION
-            2 => if config.fullscreen { "ON" } else { "OFF" }.to_string(), // FULLSCREEN TOGGLE
-            3 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
-            4 => config.timezone.clone().to_uppercase(), // TIME ZONE
-            5 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
-            6 => if config.wifi { "ON" } else { "OFF" }.to_string(), // WI-FI
+            2 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
+            3 => config.timezone.clone().to_uppercase(), // TIME ZONE
+            4 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
+            5 => if config.wifi { "ON" } else { "OFF" }.to_string(), // WI-FI
+            6 => if config.bluetooth { "ON" } else { "OFF" }.to_string(), // BLUETOOTH
             7 => "->".to_string(),
             _ => "".to_string(),
         },
@@ -289,13 +273,11 @@ pub fn update(
     current_screen: &mut Screen,
     input_state: &InputState,
     config: &mut Config,
-    //themes: &Vec<String>,
     sound_pack_choices: &Vec<String>,
     loaded_themes: &HashMap<String, theme::Theme>,
     settings_menu_selection: &mut usize,
     sound_effects: &mut SoundEffects,
     confirm_selection: &mut usize,
-    display_settings_changed: &mut bool,
     brightness: &mut f32,
     system_volume: &mut f32,
     available_sinks: &Vec<AudioSink>,
@@ -377,22 +359,14 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            2 => { // FULLSCREEN
-                if input_state.left || input_state.right {
-                    config.fullscreen = !config.fullscreen;
-                    config.save();
-                    sound_effects.play_cursor_move(&config);
-                    *display_settings_changed = true;
-                }
-            },
-            3 => { // SPLASH SCREEN
+            2 => { // SPLASH SCREEN
                 if input_state.left || input_state.right {
                     config.show_splash_screen = !config.show_splash_screen;
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            4 => { // TIME ZONE
+            3 => { // TIME ZONE
                 let mut change_occurred = false;
 
                 // Find the current index of the timezone in our array
@@ -416,7 +390,7 @@ pub fn update(
                     config.save();
                 }
             },
-            5 => { // BRIGHTNESS
+            4 => { // BRIGHTNESS
                 if input_state.left {
                     set_brightness(*brightness - 0.1); // Decrease by 10%
                     *brightness = get_current_brightness().unwrap_or(*brightness); // Refresh the value
@@ -428,7 +402,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            6 => { // WI-FI
+            5 => { // WI-FI
                 if input_state.left || input_state.right {
                     // Toggle the state optimistically and save immediately.
                     config.wifi = !config.wifi;
@@ -436,35 +410,72 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
 
                     let action = if config.wifi { "on" } else { "off" };
-                    println!("[INFO] Spawning thread to turn Wi-Fi {}", action);
 
-                    // -- CHANGED -- Spawn the command in a background thread to prevent UI hangs.
-                    thread::spawn(move || {
-                        // -- CHANGED -- Use .output() to capture stdout/stderr for better debugging.
-                        let output = Command::new("sudo")
-                        .arg("nmcli")
-                        .arg("radio")
-                        .arg("wifi")
-                        .arg(action)
-                        .output();
+                    if !DEV_MODE {
+                        println!("[INFO] Spawning thread to turn networking {}", action);
 
-                        match output {
-                            Ok(out) => {
-                                if out.status.success() {
-                                    println!("[INFO] Background thread: Successfully turned Wi-Fi {}.", action);
-                                } else {
-                                    // If the command fails, print the error output.
-                                    let stderr = String::from_utf8_lossy(&out.stderr);
-                                    println!("[ERROR] Background thread: nmcli command failed to toggle Wi-Fi.");
-                                    println!("[ERROR] nmcli stderr: {}", stderr.trim());
+                        thread::spawn(move || {
+                            let output = Command::new("sudo")
+                            .arg("nmcli")
+                            .arg("networking")
+                            .arg(action)
+                            .output();
+
+                            match output {
+                                Ok(out) => {
+                                    if out.status.success() {
+                                        println!("[INFO] Background thread: Successfully turned networking {}.", action);
+                                    } else {
+                                        let stderr = String::from_utf8_lossy(&out.stderr);
+                                        println!("[ERROR] Background thread: nmcli command failed to toggle networking.");
+                                        println!("[ERROR] nmcli stderr: {}", stderr.trim());
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("[ERROR] Background thread: Failed to spawn nmcli command: {}", e);
                                 }
                             }
-                            Err(e) => {
-                                // This error happens if the command couldn't even be spawned (e.g., sudo not found)
-                                println!("[ERROR] Background thread: Failed to spawn nmcli command: {}", e);
+                        });
+                    } else {
+                        println!("[DEV_MODE] Skipping sudo command to turn networking {}.", action);
+                    }
+                }
+            },
+            6 => { // BLUETOOTH
+                if input_state.left || input_state.right {
+                    config.bluetooth = !config.bluetooth;
+                    config.save();
+                    sound_effects.play_cursor_move(&config);
+
+                    let action = if config.bluetooth { "unblock" } else { "block" };
+
+                    if !DEV_MODE {
+                        println!("[INFO] Spawning thread to {} Bluetooth", action);
+                        thread::spawn(move || {
+                            let output = Command::new("sudo")
+                            .arg("rfkill")
+                            .arg(action)
+                            .arg("bluetooth")
+                            .output();
+
+                            match output {
+                                Ok(out) => {
+                                    if out.status.success() {
+                                        println!("[INFO] Background thread: Successfully {}ed Bluetooth.", action);
+                                    } else {
+                                        let stderr = String::from_utf8_lossy(&out.stderr);
+                                        println!("[ERROR] Background thread: rfkill command failed to toggle Bluetooth.");
+                                        println!("[ERROR] rfkill stderr: {}", stderr.trim());
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("[ERROR] Background thread: Failed to spawn rfkill command: {}", e);
+                                }
                             }
-                        }
-                    });
+                        });
+                    } else {
+                        println!("[DEV_MODE] Skipping sudo command to {} Bluetooth.", action);
+                    }
                 }
             },
             7 => { // GO TO AUDIO SETTINGS
@@ -575,11 +586,9 @@ pub fn update(
                 if input_state.left || input_state.right {
                     if loaded_themes.is_empty() { return; } // Prevent panic if no themes are loaded
 
-                    // --- THIS IS THE FIX ---
                     // 1. Get a fresh, sorted list of theme names directly from the live data.
                     let mut theme_names: Vec<_> = loaded_themes.keys().cloned().collect();
                     theme_names.sort();
-                    // --- END FIX ---
 
                     // Now, use this up-to-date 'theme_names' vector for the rest of the logic
                     let current_index = theme_names.iter().position(|t| *t == config.theme).unwrap_or(0);

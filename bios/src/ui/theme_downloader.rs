@@ -120,8 +120,8 @@ pub fn update(
     if input_state.back {
         sound_effects.play_back(config);
         match &state.screen_state {
-            DownloaderState::DisplayingList => { // <-- CHANGED this block
-                *current_screen = Screen::MainMenu;
+            DownloaderState::DisplayingList => {
+                *current_screen = Screen::Extras;
                 state.screen_state = DownloaderState::Idle; // Reset for next time
             }
             _ => { // For any sub-menu, go back to the list and reset page

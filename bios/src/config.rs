@@ -19,10 +19,10 @@ fn get_config_path() -> Result<PathBuf, Box<dyn Error>> {
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub resolution: String,
-    pub fullscreen: bool,
     pub show_splash_screen: bool,
     pub timezone: String,
     pub wifi: bool,
+    pub bluetooth: bool,
     pub bgm_volume: f32,
     pub sfx_volume: f32,
     pub audio_output: String,
@@ -43,10 +43,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             resolution: "640x360".to_string(),
-            fullscreen: false,
             show_splash_screen: true,
             timezone: "UTC".to_string(),
             wifi: true,
+            bluetooth: true,
             bgm_volume: 0.7,
             sfx_volume: 0.7,
             audio_output: "Auto".to_string(),
@@ -66,7 +66,7 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Loads the configuration from kazeta.toml, or returns a default if it fails.
+    /// Loads the configuration from config.toml, or returns a default if it fails.
     pub fn load() -> Self {
         if let Ok(config_path) = get_config_path() {
             if let Ok(content) = fs::read_to_string(config_path) {
@@ -78,7 +78,7 @@ impl Config {
         Self::default()
     }
 
-    /// Saves the current configuration to kazeta.toml.
+    /// Saves the current configuration to config.toml.
     pub fn save(&self) {
         if let Ok(config_path) = get_config_path() {
             if let Ok(toml_string) = toml::to_string_pretty(self) {
