@@ -87,7 +87,6 @@ if ! check_connection; then
     echo "  -> Scanning for networks..."
     nmcli device wifi rescan
 
-    #echo "  -> Available Networks (Top 10):"
     nmcli --terse --fields SSID,SIGNAL device wifi list | head -n 10
 
     read -p "  -> Enter your Wi-Fi Network Name (SSID): " SSID
@@ -95,7 +94,6 @@ if ! check_connection; then
     echo ""
 
     echo "  -> Connecting..."
-    # Use nmcli to connect. It's more reliable and handles existing connections better.
     nmcli device wifi connect "$SSID" password "$PSK"
 
     sleep 5
@@ -117,7 +115,8 @@ echo "--------------------------------------------------"
 
 echo -e "${YELLOW}Step 3: Installing/updating remaining system packages...${NC}"
 pacman -Syy
-PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg" "unzip")
+# -- CHANGED -- Added "bluez" and "bluez-utils" for Bluetooth functionality
+PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg" "unzip" "bluez" "bluez-utils")
 for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
     if ! pacman -Q "$pkg" &>/dev/null; then
         echo "  -> Installing $pkg..."
@@ -165,7 +164,8 @@ echo "--------------------------------------------------"
 ### ===================================================================
 
 echo -e "${YELLOW}Step 5: Enabling new system services...${NC}"
-SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service")
+# -- CHANGED -- Added "bluetooth.service"
+SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
     echo "  -> Enabling and starting $service..."
     systemctl enable --now "$service"
