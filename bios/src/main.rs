@@ -57,8 +57,8 @@ pub use types::*;
 - per-game keyboard to gamepad mapping
 - make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
 - use OSK in-game
-- Bluetooth controller support
-- add option to safely unmount cart in main menu
+- Bluetooth controller support -- IN PROGRESS
+- add option to safely unmount cart in main menu -- IN PROGRESS
 
 Hard
 - DVD functionality?
@@ -66,7 +66,7 @@ Hard
 
 Unnecessary but cool
 - GCC overclocking support?
-- add storage space left on game selection screen
+- Slippi/Project+ support
 
 // ===================================
 // NOTES
@@ -83,7 +83,7 @@ Unnecessary but cool
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
-const DEV_MODE: bool = true;
+const DEV_MODE: bool = false;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;

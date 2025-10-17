@@ -2,8 +2,8 @@
 
 # ---
 # Script to automate the creation of a Kazeta+ upgrade kit.
-# It prompts for a version number, creates the necessary directory structure,
-# and copies all required files from the development environment.
+# It checks for debug flags, creates the directory structure, copies all
+# required files, and zips the final kit for release.
 # ---
 
 # Exit immediately if a command exits with a non-zero status.
@@ -14,11 +14,29 @@ set -e
 SOURCE_DIR="$HOME/Programs/kazeta-plus"
 # Set the destination directory where the kit will be created.
 DEST_BASE_DIR="$HOME/Desktop/kazeta_assets/upgrade_kits"
+# Path to the main.rs file to check for debug flags.
+MAIN_RS_PATH="$SOURCE_DIR/bios/src/main.rs"
+
+
+# --- Pre-flight Checks ---
+echo "Performing pre-flight checks..."
+
+# 1. Check if debug flags are set to true in main.rs
+if grep -q "const DEBUG_GAME_LAUNCH: bool = true;" "$MAIN_RS_PATH" || grep -q "const DEV_MODE: bool = true;" "$MAIN_RS_PATH"; then
+    echo "-----------------------------------------------------"
+    echo "ERROR: A debug flag is set to 'true' in main.rs."
+    echo "Please set DEBUG_GAME_LAUNCH and DEV_MODE to 'false' before creating a release kit."
+    echo "-----------------------------------------------------"
+    exit 1
+fi
+
+echo "Checks passed. Proceeding with kit creation."
+echo "-----------------------------------------------------"
 
 
 # --- Main Logic ---
 
-# 1. Prompt for the version number
+# 2. Prompt for the version number
 read -p "Enter the version number for the new upgrade kit (e.g., 1.2): " VERSION
 
 if [ -z "$VERSION" ]; then
@@ -26,11 +44,10 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# 2. Define kit directory and paths
+# 3. Define kit directory and paths
 KIT_DIR_NAME="kazeta-plus-upgrade-kit-$VERSION"
 KIT_FULL_PATH="$DEST_BASE_DIR/$KIT_DIR_NAME"
 
-echo "-----------------------------------------------------"
 echo "Creating Kazeta+ Upgrade Kit v$VERSION"
 echo "Source: $SOURCE_DIR"
 echo "Destination: $KIT_FULL_PATH"
@@ -47,24 +64,23 @@ if [ -d "$KIT_FULL_PATH" ]; then
     rm -rf "$KIT_FULL_PATH"
 fi
 
-# 3. Create the directory structure
+# 4. Create the directory structure
 echo "Creating directory structure..."
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/keyd"
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/sudoers.d"
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/systemd/system"
 mkdir -p "$KIT_FULL_PATH/rootfs/usr/bin"
 mkdir -p "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles"
-# No longer creating local_packages directory
 echo "Directory structure created."
 
-# 4. Download the main upgrade script
+# 5. Download the main upgrade script
 echo "Downloading upgrade-to-plus.sh script..."
 curl -sL "https://raw.githubusercontent.com/the-outcaster/kazeta-plus/main/upgrade-to-plus.sh" \
      -o "$KIT_FULL_PATH/upgrade-to-plus.sh"
 chmod +x "$KIT_FULL_PATH/upgrade-to-plus.sh"
 echo "Download complete."
 
-# 5. Copy all necessary files from your local dev environment
+# 6. Copy all necessary files from your local dev environment
 echo "Copying files from rootfs..."
 
 # etc files
@@ -95,10 +111,21 @@ echo "Copying inputplumber profile..."
 cp "$SOURCE_DIR/rootfs/usr/share/inputplumber/profiles/steam-deck.yaml" "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles/"
 
 echo "All files copied successfully."
+
+# 7. Create the ZIP archive
+echo "Creating ZIP archive..."
+(
+    cd "$KIT_FULL_PATH" && \
+    zip -r "../$KIT_DIR_NAME.zip" .
+)
+echo "ZIP archive created."
+
 echo "-----------------------------------------------------"
 echo "Success! Upgrade kit created at:"
 echo "$KIT_FULL_PATH"
+echo "and"
+echo "$KIT_FULL_PATH.zip"
 echo "-----------------------------------------------------"
-echo "Reminder: Manually zip the 'kazeta-wifi-pack' folder and upload it to the release page."
+echo "Reminder: Manually create and upload 'kazeta-wifi-pack.zip' to the release page."
 echo "Users will need to place the unzipped 'kazeta-wifi-pack' folder next to the upgrade script."
 echo "-----------------------------------------------------"

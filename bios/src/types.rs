@@ -1,4 +1,5 @@
 use crate::{Color, Vec2, Config, string_to_color, HashMap};
+use macroquad::prelude::*;
 use serde::{Serialize, Deserialize};
 use std::str::FromStr;
 
@@ -35,6 +36,7 @@ pub enum ShakeTarget {
     Dialog,
     PlayOption,
     CopyLogOption,
+    UnmountOption,
 }
 
 // SPLASH SCREEN
@@ -266,6 +268,11 @@ impl AnimationState {
 
     pub fn trigger_copy_log_option_shake(&mut self) {
         self.shake_target = ShakeTarget::CopyLogOption;
+        self.shake_time = Self::SHAKE_DURATION;
+    }
+
+    pub fn trigger_unmount_option_shake(&mut self) {
+        self.shake_target = ShakeTarget::UnmountOption;
         self.shake_time = Self::SHAKE_DURATION;
     }
 
