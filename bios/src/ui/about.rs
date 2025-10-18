@@ -32,9 +32,8 @@ pub fn draw(
 ) {
     render_background(&background_cache, &config, background_state);
 
-    // --- NEW: Dim the background to improve text readability ---
+    // Dim the background to improve text readability
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
-    // ---
 
     render_ui_overlay(&logo_cache, &font_cache, &config, &battery_info, &current_time_str, scale_factor);
 
@@ -44,7 +43,7 @@ pub fn draw(
 
     let start_x_labels = 50.0 * scale_factor;
     let start_x_values = 120.0 * scale_factor;
-    let mut current_y = 100.0 * scale_factor;
+    let mut current_y = 120.0 * scale_factor;
 
     // -- NEW -- Fetch the IP address dynamically every time the screen is drawn.
     let ip_address = get_ip_address();
@@ -66,7 +65,7 @@ pub fn draw(
     }
 
     // --- Credits ---
-    current_y = screen_height() - (100.0 * scale_factor);
+    current_y = screen_height() - (80.0 * scale_factor);
 
     let credit_lines = vec![
         "Original Kazeta concept by Alkazar.",

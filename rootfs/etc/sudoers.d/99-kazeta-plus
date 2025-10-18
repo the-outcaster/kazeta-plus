@@ -1,19 +1,27 @@
-# Allow passwordless management of system services and networking tools
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/systemctl
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/nmcli
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/bluetoothctl
-
-# Allow passwordless execution of rfkill to manage wireless devices
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/sbin/rfkill
-
-# Allow passwordless execution for shutdown and reboot
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/sbin/reboot, /usr/sbin/shutdown
-
-# Allow passwordless execution for Kazeta+ helper scripts
+# Allow the gamer user to run the overlayfs mount helper without a password
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount -u
+
+# unmount
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount -u *
+
+# Allow running the log copy helper script without a password
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-copy-logs
+
+# Wi-Fi
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-wifi-setup
 
-# Rule for the OTA upgrade script
+# Bluetooth
+%wheel ALL=(ALL) NOPASSWD: /usr/bin/bluetoothctl
+
+# Allow passwordless execution of nmcli to manage networking
+%wheel ALL=(ALL) NOPASSWD: /usr/bin/nmcli
+
+# Allow passwordless execution of rfkill to manage wireless devices (Bluetooth specifically)
+%wheel ALL=(ALL) NOPASSWD: /usr/sbin/rfkill
+
+# kazeta+ upgrade
 %wheel ALL=(ALL:ALL) NOPASSWD: /tmp/kazeta-plus-upgrade-kit-*/upgrade-to-plus.sh
+
+# Allow passwordless reboot and shutdown
+%wheel ALL=(ALL) NOPASSWD: /usr/sbin/reboot
+%wheel ALL=(ALL) NOPASSWD: /usr/sbin/shutdown

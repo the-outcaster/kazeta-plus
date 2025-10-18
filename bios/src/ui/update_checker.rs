@@ -404,9 +404,16 @@ fn perform_update(release_info: GithubRelease, tx: Sender<UpdateProgressMessage>
 
     if !script_path.exists() { eprintln!("Error: upgrade-to-plus.sh not found in the archive."); return; }
 
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).expect("Failed to set script permissions.");
+    // Manually set the executable permission for the script.
+    println!("[INFO] Setting executable permission on upgrade script...");
+    if let Ok(mut perms) = fs::metadata(&script_path).map(|m| m.permissions()) {
+        // Set permissions to rwxr-xr-x (0755)
+        perms.set_mode(0o755);
+        if let Err(e) = fs::set_permissions(&script_path, perms) {
+            tx.send(UpdateProgressMessage::Error(format!("Failed to set permissions: {}", e))).unwrap();
+            return;
+        }
+    }
 
     tx.send(UpdateProgressMessage::Status("Applying update... Do not turn off.".to_string())).unwrap();
 

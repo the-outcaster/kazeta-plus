@@ -781,6 +781,9 @@ async fn main() {
     // Create thread-safe storage media state
     let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
 
+    // unmount cart
+    let unmount_requested = Arc::new(AtomicBool::new(false));
+
     // Initialize storage media list
     if let Ok(mut state) = storage_state.lock() {
         state.update_media();
@@ -904,6 +907,7 @@ async fn main() {
                     &mut play_option_enabled,
                     &mut copy_logs_option_enabled,
                     &cart_connected,
+                    &unmount_requested,
                     &mut input_state,
                     &mut animation_state,
                     &sound_effects,
@@ -946,6 +950,7 @@ async fn main() {
                     &mut play_option_enabled,
                     &mut copy_logs_option_enabled,
                     &cart_connected,
+                    &unmount_requested,
                     &mut input_state,
                     &mut animation_state,
                     &sound_effects,

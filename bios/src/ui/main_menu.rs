@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 // Items from your new modules
@@ -40,6 +40,7 @@ pub fn update(
     play_option_enabled: &mut bool,
     copy_logs_option_enabled: &mut bool,
     cart_connected: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    unmount_requested: &Arc<AtomicBool>,
     input_state: &mut InputState,
     animation_state: &mut AnimationState,
     sound_effects: &SoundEffects,
@@ -215,6 +216,9 @@ pub fn update(
                     *flash_message = Some((format!("CARTRIDGE UNMOUNTED SAFELY"), FLASH_MESSAGE_DURATION));
                     cart_connected.store(false, Ordering::Relaxed);
 
+                    // Signal the main loop to stop polling for this card.
+                    unmount_requested.store(true, Ordering::Relaxed);
+
                     // Perform the actual unmount in the background
                     thread::spawn(move || {
                         println!("[INFO] Unmounting cartridge...");
@@ -282,7 +286,7 @@ pub fn draw(
         MenuPosition::BottomLeft => (margin_x, screen_height() - (MAIN_MENU_OPTIONS.len() as f32 * menu_option_height) - margin_y, false),
         MenuPosition::BottomRight => (screen_width() - margin_x, screen_height() - (MAIN_MENU_OPTIONS.len() as f32 * menu_option_height) - margin_y,
         false),
-        MenuPosition::Center => (screen_width() / 2.0, screen_height() * 0.25, true),
+        MenuPosition::Center => (screen_width() / 2.0, screen_height() * 0.3, true),
     };
 
     // Draw menu options
