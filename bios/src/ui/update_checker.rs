@@ -387,13 +387,6 @@ fn perform_update_logic(release_info: GithubRelease, tx: Sender<UpdateProgressMe
 
     let tmp_extract_dir = Path::new("/tmp/");
 
-    // Instead of deleting a folder, let's just delete the old script if it exists.
-    let old_script_path = tmp_extract_dir.join("upgrade-to-plus.sh");
-    if old_script_path.exists() {
-        fs::remove_file(&old_script_path)
-        .map_err(|e| format!("Failed to remove old script: {}", e))?;
-    }
-
     // Call the new, safer extract_archive function
     extract_archive(&tmp_zip_path, &tmp_extract_dir)?;
 
