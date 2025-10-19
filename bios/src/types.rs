@@ -271,11 +271,6 @@ impl AnimationState {
         self.shake_time = Self::SHAKE_DURATION;
     }
 
-    pub fn trigger_unmount_option_shake(&mut self) {
-        self.shake_target = ShakeTarget::UnmountOption;
-        self.shake_time = Self::SHAKE_DURATION;
-    }
-
     pub fn trigger_transition(&mut self) {
         self.cursor_transition_time = Self::CURSOR_TRANSITION_DURATION;
     }

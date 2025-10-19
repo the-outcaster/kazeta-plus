@@ -100,7 +100,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.31j.KAZETA+";
+const VERSION_NUMBER: &str = "V1.31.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -532,8 +532,7 @@ async fn main() {
 
     // AUDIO SINKS
     let available_sinks = get_available_sinks();
-    println!("[Debug] Sinks loaded at startup: {:#?}", available_sinks); // <-- ADD THIS
-    //let mut config: Config = load_config(); // Or your existing config loading
+    println!("[Debug] Sinks loaded at startup: {:#?}", available_sinks);
 
     // If the saved sink isn't available, reset to "Auto"
     if !available_sinks.iter().any(|s| s.name == config.audio_output) {
@@ -781,9 +780,6 @@ async fn main() {
     // Create thread-safe storage media state
     let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
 
-    // unmount cart
-    let unmount_requested = Arc::new(AtomicBool::new(false));
-
     // Initialize storage media list
     if let Ok(mut state) = storage_state.lock() {
         state.update_media();
@@ -908,7 +904,6 @@ async fn main() {
                     &mut play_option_enabled,
                     &mut copy_logs_option_enabled,
                     &cart_connected,
-                    &unmount_requested,
                     &mut input_state,
                     &mut animation_state,
                     &sound_effects,
@@ -951,7 +946,6 @@ async fn main() {
                     &mut play_option_enabled,
                     &mut copy_logs_option_enabled,
                     &cart_connected,
-                    &unmount_requested,
                     &mut input_state,
                     &mut animation_state,
                     &sound_effects,
@@ -1357,7 +1351,6 @@ async fn main() {
                 );
             }
             Screen::ReloadingThemes => {
-                // ... (drawing "Reloading themes..." text)
                 next_frame().await;
 
                 // 1. Re-run the theme loading function

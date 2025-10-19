@@ -38,12 +38,14 @@ pub enum BluetoothScreenState {
     Connecting(String),
     Connected(String),
     Error(String),
+    ForgetConfirm(BluetoothDevice),
 }
 
 enum BluetoothMessage {
     ScanResult(StdResult<Vec<BluetoothDevice>, String>),
     PairingSuccess(String),
     ConnectionUpdate(String),
+    ForgetSuccess(String),
     Error(String),
 }
 
@@ -115,6 +117,11 @@ pub fn update(
                 println!("[UI_UPDATE] Received ConnectionUpdate for {}", device_name);
                 state.screen_state = BluetoothScreenState::Connected(device_name);
             }
+            BluetoothMessage::ForgetSuccess(device_name) => {
+                println!("[UI_UPDATE] Received ForgetSuccess for {}. List will refresh.", device_name);
+                // The device list will update automatically from the agent's
+                // DeviceRemoved event or the next poll.
+            }
         }
     }
 
@@ -136,11 +143,31 @@ pub fn update(
 
                     let _ = state.tx_cmd.send(format!("pair {}", device.mac_address));
                 }
+                if input_state.secondary {
+                    let device = state.devices[state.selected_index].clone();
+                    println!("[UI_UPDATE] Forget button pressed for {}", device.name);
+                    state.screen_state = BluetoothScreenState::ForgetConfirm(device);
+                    sound_effects.play_select(config); // Or a different sound
+                }
             }
 
             if input_state.back {
                 println!("[UI_UPDATE] Back pressed on DeviceList - Navigating to Extras.");
                 *current_screen = Screen::Extras;
+                sound_effects.play_back(config);
+            }
+        }
+        BluetoothScreenState::ForgetConfirm(device) => {
+            if input_state.select { // "Yes"
+                println!("[UI_UPDATE] Confirmed forget for {}", device.name);
+                // Send the command to the agent
+                let _ = state.tx_cmd.send(format!("forget {}", device.mac_address));
+                state.screen_state = BluetoothScreenState::DeviceList; // Go back to list
+                state.selected_index = 0; // Reset cursor
+                sound_effects.play_select(config);
+            } else if input_state.back { // "No"
+                println!("[UI_UPDATE] Canceled forget for {}", device.name);
+                state.screen_state = BluetoothScreenState::DeviceList;
                 sound_effects.play_back(config);
             }
         }
@@ -210,6 +237,15 @@ pub fn draw(
                     text_with_config_color(font_cache, config, &device.name, x_pos, y_pos, font_size);
                 }
             }
+        }
+        BluetoothScreenState::ForgetConfirm(device) => {
+            let text = format!("Remove {}?", device.name);
+            let dims = measure_text(&text, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, &text, center_x - dims.width / 2.0, center_y - line_height, font_size);
+
+            let prompt = "Select = Yes / Back = No";
+            let prompt_dims = measure_text(prompt, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, prompt, center_x - prompt_dims.width / 2.0, center_y + line_height, font_size);
         }
         BluetoothScreenState::Pairing(name) => {
             let text = format!("Pairing with {}...", name);
@@ -404,6 +440,44 @@ async fn run_bluetooth_agent(
 
                     println!("[BT_AGENT] Discovery stream resumed.");
                     poll_timer = Box::pin(sleep(Duration::from_secs(0))); // Reset timer
+                } else if cmd.starts_with("forget") {
+                    let mac = cmd.split_whitespace().nth(1).unwrap_or_default();
+                    println!("[BT_AGENT] Handling forget command for: {}", mac);
+
+                    let addr = match mac.parse() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            eprintln!("[BT_AGENT] Invalid MAC address {}: {}", mac, e);
+                            tx.send(BluetoothMessage::Error(format!("Invalid MAC: {}", e))).ok();
+                            continue; // Wait for next command
+                        }
+                    };
+
+                    let device_name = ui_devices.get(mac).map(|d| d.name.clone()).unwrap_or_else(|| mac.to_string());
+
+                    // Pause discovery stream, just like we do for pairing
+                    println!("[BT_AGENT] Pausing discovery for device removal...");
+                    drop(discover_stream);
+                    sleep(Duration::from_millis(250)).await;
+
+                    match adapter.remove_device(addr).await {
+                        Ok(_) => {
+                            println!("[BT_AGENT] Successfully removed device {}", mac);
+                            tx.send(BluetoothMessage::ForgetSuccess(device_name)).ok();
+                            // The DeviceRemoved event will fire, which updates the UI.
+                            // We'll also force a poll just to be safe.
+                            poll_timer = Box::pin(sleep(Duration::from_secs(0)));
+                        }
+                        Err(e) => {
+                            eprintln!("[BT_AGENT] Failed to remove device {}: {}", mac, e);
+                            tx.send(BluetoothMessage::Error(format!("Failed to remove: {}", e))).ok();
+                        }
+                    }
+
+                    // --- Resume Discovery Stream ---
+                    println!("[BT_AGENT] Resuming discovery stream...");
+                    discover_stream = adapter.discover_devices().await?;
+                    println!("[BT_AGENT] Discovery stream resumed.");
                 }
             },
 

@@ -1,9 +1,6 @@
 # Allow the gamer user to run the overlayfs mount helper without a password
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount
 
-# unmount
-%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount -u *
-
 # Allow running the log copy helper script without a password
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-copy-logs
 

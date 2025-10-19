@@ -1,10 +1,8 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::sync::atomic::Ordering;
 
 // Items from your new modules
 use crate::audio::SoundEffects;
@@ -32,7 +30,7 @@ use crate::{
     ShakeTarget,
 };
 
-pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "UNMOUNT CARTRIDGE", "SETTINGS", "EXTRAS", "ABOUT"];
+pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "EXTRAS", "ABOUT"];
 
 pub fn update(
     current_screen: &mut Screen,
@@ -40,7 +38,6 @@ pub fn update(
     play_option_enabled: &mut bool,
     copy_logs_option_enabled: &mut bool,
     cart_connected: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    unmount_requested: &Arc<AtomicBool>,
     input_state: &mut InputState,
     animation_state: &mut AnimationState,
     sound_effects: &SoundEffects,
@@ -193,7 +190,7 @@ pub fn update(
                     match copy_session_logs_to_sd() {
                         Ok(path) => {
                             *flash_message = Some((
-                                format!("LOGS COPIED TO {}", path),
+                                format!("SUCCESS: {}", path),
                                 FLASH_MESSAGE_DURATION
                             ));
                         }
@@ -209,40 +206,15 @@ pub fn update(
                     animation_state.trigger_copy_log_option_shake();
                 }
             },
-            3 => { // UNMOUNT CARTRIDGE
-                if *play_option_enabled {
-                    sound_effects.play_select(config);
-                    // Optimistically update the UI
-                    *flash_message = Some((format!("CARTRIDGE UNMOUNTED SAFELY"), FLASH_MESSAGE_DURATION));
-                    cart_connected.store(false, Ordering::Relaxed);
-
-                    // Signal the main loop to stop polling for this card.
-                    unmount_requested.store(true, Ordering::Relaxed);
-
-                    // Perform the actual unmount in the background
-                    thread::spawn(move || {
-                        println!("[INFO] Unmounting cartridge...");
-                        let output = Command::new("sudo").args(&["/usr/bin/kazeta-mount", "-u"]).output();
-                        match output {
-                            Ok(out) if out.status.success() => println!("[INFO] Cartridge unmounted successfully."),
-                                  Ok(out) => println!("[ERROR] Failed to unmount: {}", String::from_utf8_lossy(&out.stderr)),
-                                  Err(e) => println!("[ERROR] Failed to spawn unmount command: {}", e),
-                        }
-                    });
-                } else {
-                    sound_effects.play_reject(&config);
-                    animation_state.trigger_unmount_option_shake();
-                }
-            },
-            4 => { // SETTINGS
+            3 => { // SETTINGS
                 *current_screen = Screen::GeneralSettings;
                 sound_effects.play_select(&config);
             },
-            5 => { // EXTRAS
+            4 => { // EXTRAS
                 *current_screen = Screen::Extras;
                 sound_effects.play_select(&config);
             },
-            6 => { // ABOUT
+            5 => { // ABOUT
                 *current_screen = Screen::About;
                 sound_effects.play_select(&config);
             },
@@ -310,10 +282,6 @@ pub fn draw(
         if i == 2 && !copy_logs_option_enabled && i == selected_option {
             x_pos += animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption);
         }
-        // -- NEW -- Shake effect for unmount option
-        if i == 3 && !play_option_enabled && i == selected_option {
-            x_pos += animation_state.calculate_shake_offset(ShakeTarget::UnmountOption);
-        }
 
         // --- Draw selected option highlight ---
         if i == selected_option {
@@ -343,8 +311,7 @@ pub fn draw(
         let slot_center_y = y_pos + (menu_option_height / 2.0);
         let y_pos_text = slot_center_y + (text_dims.offset_y / 2.0);
 
-        // -- CHANGED -- Grey out the unmount option if no cart is present
-        let is_cart_option = i == 1 || i == 2 || i == 3;
+        let is_cart_option = i == 1 || i == 2;
         if is_cart_option && !play_option_enabled {
             text_disabled(font_cache, config, option, x_pos, y_pos_text, font_size);
         } else {
