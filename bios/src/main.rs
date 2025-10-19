@@ -100,7 +100,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.31e.KAZETA+";
+const VERSION_NUMBER: &str = "V1.31j.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -836,6 +836,7 @@ async fn main() {
         }
 
         // Update input state from both keyboard and controller
+        input_state.reset();
         input_state.update_keyboard();
         input_state.update_controller(&mut gilrs);
 

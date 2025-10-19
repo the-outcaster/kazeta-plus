@@ -37,6 +37,20 @@ impl InputState {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.up = false;
+        self.down = false;
+        self.left = false;
+        self.right = false;
+        self.select = false;
+        self.next = false;
+        self.prev = false;
+        self.cycle = false;
+        self.back = false;
+        self.secondary = false;
+        // Note: We do NOT reset analog_was_neutral or ui_focus
+    }
+
     pub fn update_keyboard(&mut self) {
         self.up = is_key_pressed(KeyCode::Up);
         self.down = is_key_pressed(KeyCode::Down);
@@ -55,57 +69,67 @@ impl InputState {
         while let Some(ev) = gilrs.next_event() {
             match ev.event {
                 gilrs::EventType::ButtonPressed(Button::DPadUp, _) => self.up = true,
-                gilrs::EventType::ButtonReleased(Button::DPadUp, _) => self.up = false,
                 gilrs::EventType::ButtonPressed(Button::DPadDown, _) => self.down = true,
-                gilrs::EventType::ButtonReleased(Button::DPadDown, _) => self.down = false,
                 gilrs::EventType::ButtonPressed(Button::DPadLeft, _) => self.left = true,
-                gilrs::EventType::ButtonReleased(Button::DPadLeft, _) => self.left = false,
                 gilrs::EventType::ButtonPressed(Button::DPadRight, _) => self.right = true,
-                gilrs::EventType::ButtonReleased(Button::DPadRight, _) => self.right = false,
                 gilrs::EventType::ButtonPressed(Button::South, _) => self.select = true,
-                gilrs::EventType::ButtonReleased(Button::South, _) => self.select = false,
-                gilrs::EventType::ButtonPressed(Button::RightTrigger, _) => self.next = true,
-                gilrs::EventType::ButtonReleased(Button::RightTrigger, _) => self.next = false,
-                gilrs::EventType::ButtonPressed(Button::LeftTrigger, _) => self.prev = true,
-                gilrs::EventType::ButtonReleased(Button::LeftTrigger, _) => self.prev = false,
                 gilrs::EventType::ButtonPressed(Button::East, _) => self.back = true,
-                gilrs::EventType::ButtonReleased(Button::East, _) => self.back = false,
                 gilrs::EventType::ButtonPressed(Button::West, _) => self.secondary = true,
-                gilrs::EventType::ButtonReleased(Button::West, _) => self.secondary = false,
+                gilrs::EventType::ButtonPressed(Button::RightTrigger, _) => self.next = true,
+                gilrs::EventType::ButtonPressed(Button::LeftTrigger, _) => self.prev = true,
                 _ => {}
             }
         }
 
-        // Handle analog stick input
+        // --- Handle analog stick input (New, correct logic) ---
+
+        let mut any_stick_active = false;
+        let was_neutral = self.analog_was_neutral;
+
+        // Iterate through all gamepads to find the first active one
         for (_, gamepad) in gilrs.gamepads() {
-            let x = gamepad.value(Axis::LeftStickX);
-            let y = gamepad.value(Axis::LeftStickY);
+            let raw_x = gamepad.value(Axis::LeftStickX);
+            let raw_y = gamepad.value(Axis::LeftStickY);
 
-            // Apply deadzone to analog values
-            let apply_deadzone = |value: f32| {
-                if value.abs() < Self::ANALOG_DEADZONE {
-                    0.0
-                } else {
-                    value
+            let is_currently_neutral = raw_x.abs() < Self::ANALOG_DEADZONE &&
+            raw_y.abs() < Self::ANALOG_DEADZONE;
+
+            // Is this stick active?
+            if !is_currently_neutral {
+                // Yes. This is the only stick we care about.
+                any_stick_active = true;
+
+                // Was the system neutral before this frame?
+                if was_neutral {
+                    // Yes. This is a "just pushed" event. Fire it.
+                    // Prioritize dominant axis
+                    if raw_y.abs() > raw_x.abs() {
+                        // Vertical is stronger
+                        if raw_y > -Self::ANALOG_DEADZONE {       // -Y is UP
+                            self.up = true;
+                        } else if raw_y < Self::ANALOG_DEADZONE { // +Y is DOWN
+                            self.down = true;
+                        }
+                    } else {
+                        // Horizontal is stronger
+                        if raw_x < -Self::ANALOG_DEADZONE {       // -X is LEFT
+                            self.left = true;
+                        } else if raw_x > Self::ANALOG_DEADZONE { // +X is RIGHT
+                            self.right = true;
+                        }
+                    }
                 }
-            };
 
-            let x = apply_deadzone(x);
-            let y = apply_deadzone(y);
-
-            // Check if stick is in neutral position
-            let is_neutral = x.abs() < Self::ANALOG_DEADZONE && y.abs() < Self::ANALOG_DEADZONE;
-
-            // Only trigger movement if stick was in neutral position last frame
-            if self.analog_was_neutral {
-                self.up = self.up || y > Self::ANALOG_DEADZONE;
-                self.down = self.down || y < -Self::ANALOG_DEADZONE;
-                self.left = self.left || x < -Self::ANALOG_DEADZONE;
-                self.right = self.right || x > Self::ANALOG_DEADZONE;
+                // We found our active stick. Stop processing other gamepads
+                // to prevent them from interfering.
+                break;
             }
-
-            // Update neutral state for next frame
-            self.analog_was_neutral = is_neutral;
+            // If the stick is neutral, we ignore it and check the next one.
         }
+
+        // Update the global neutral state.
+        // If we found an active stick, the system is "non-neutral".
+        // If the loop finished and found no active sticks, all are neutral.
+        self.analog_was_neutral = !any_stick_active;
     }
 }
