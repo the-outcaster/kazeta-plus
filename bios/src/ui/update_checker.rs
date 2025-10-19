@@ -191,7 +191,12 @@ pub fn update(
         state.screen_state = UpdateCheckerScreenState::InProgress("Starting update...".to_string());
 
         thread::spawn(move || {
-            perform_update(release, tx_progress); // Pass the sender
+            // We now check the result of the update logic.
+            // If it fails, we send the error string back to the UI.
+            if let Err(e) = perform_update_logic(release, tx_progress.clone()) {
+                // Use unwrap_or_default() in case the UI is already closed
+                tx_progress.send(UpdateProgressMessage::Error(e)).unwrap_or_default();
+            }
         });
     }
 }
@@ -356,87 +361,115 @@ fn check_for_updates(tx: Sender<CheckerMessage>) {
     });
 }
 
-// The function now accepts a Sender to report its progress.
-fn perform_update(release_info: GithubRelease, tx: Sender<UpdateProgressMessage>) {
+// This function now returns a Result, so we can catch all errors
+fn perform_update_logic(release_info: GithubRelease, tx: Sender<UpdateProgressMessage>) -> Result<(), String> {
     let update_asset = match release_info.assets.iter().find(|asset| asset.name.ends_with(".zip")) {
         Some(asset) => asset,
-        None => {
-            tx.send(UpdateProgressMessage::Error("No .zip asset found.".to_string())).unwrap();
-            return;
-        }
+        None => return Err("No .zip asset found in the release.".to_string()),
     };
 
-    tx.send(UpdateProgressMessage::Status("Downloading update...".to_string())).unwrap();
+    tx.send(UpdateProgressMessage::Status("Downloading update...".to_string())).map_err(|e| e.to_string())?;
 
     // download
     let tmp_zip_path = Path::new("/tmp/kazeta-update.zip");
 
-    let response_bytes = reqwest::blocking::get(&update_asset.browser_download_url).expect("Failed to download update file.").bytes().expect("Failed to read response bytes.");
-    let mut tmp_file = fs::File::create(&tmp_zip_path).expect("Failed to create temp file.");
-    tmp_file.write_all(&response_bytes).expect("Failed to save update file.");
+    let response = reqwest::blocking::get(&update_asset.browser_download_url)
+    .map_err(|e| format!("Download failed: {}", e))?;
+    let response_bytes = response.bytes().map_err(|e| format!("Failed to read bytes: {}", e))?;
+
+    let mut tmp_file = fs::File::create(&tmp_zip_path)
+    .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    tmp_file.write_all(&response_bytes)
+    .map_err(|e| format!("Failed to save update file: {}", e))?;
 
     // extraction
-    tx.send(UpdateProgressMessage::Status("Extracting archive...".to_string())).unwrap();
+    tx.send(UpdateProgressMessage::Status("Extracting archive...".to_string())).map_err(|e| e.to_string())?;
 
-    // 1. Change the extraction directory to /tmp/
     let tmp_extract_dir = Path::new("/tmp/");
 
-    // 2. Get the kit's directory name *before* extraction
-    let root_dir_name = update_asset.name.strip_suffix(".zip").unwrap_or(&update_asset.name);
-
-    // 3. Define the *full path* to the kit directory
-    let kit_path = tmp_extract_dir.join(root_dir_name);
-
-    // 4. SAFELY remove the *specific* kit directory if it already exists
-    if kit_path.exists() {
-        fs::remove_dir_all(&kit_path).unwrap_or_else(|e| {
-            eprintln!("Failed to remove old kit directory: {}", e);
-        });
+    // Instead of deleting a folder, let's just delete the old script if it exists.
+    let old_script_path = tmp_extract_dir.join("upgrade-to-plus.sh");
+    if old_script_path.exists() {
+        fs::remove_file(&old_script_path)
+        .map_err(|e| format!("Failed to remove old script: {}", e))?;
     }
 
-    // 5. We no longer create_dir_all, since /tmp/ exists
-    //    and the extractor will create the nested folder.
-    extract_archive(&tmp_zip_path, &tmp_extract_dir);
+    // Call the new, safer extract_archive function
+    extract_archive(&tmp_zip_path, &tmp_extract_dir)?;
 
-    // 6. This line now correctly resolves to the new path:
-    //    e.g., /tmp/kazeta-plus-upgrade-kit-1.11/upgrade-to-plus.sh
-    let script_path = tmp_extract_dir.join(root_dir_name).join("upgrade-to-plus.sh");
+    let script_path = tmp_extract_dir.join("upgrade-to-plus.sh");
 
-    if !script_path.exists() { eprintln!("Error: upgrade-to-plus.sh not found in the archive."); return; }
+    // Add a log to see the exact path being checked
+    println!("[UPDATE_AGENT] Checking for script at: {}", script_path.display());
+
+    // Send an error instead of silently returning
+    if !script_path.exists() {
+        let error_msg = format!("Script not found at: {}", script_path.display());
+        eprintln!("[UPDATE_AGENT] {}", error_msg);
+        return Err(error_msg);
+    }
 
     // Manually set the executable permission for the script.
-    println!("[INFO] Setting executable permission on upgrade script...");
-    if let Ok(mut perms) = fs::metadata(&script_path).map(|m| m.permissions()) {
-        // Set permissions to rwxr-xr-x (0755)
-        perms.set_mode(0o755);
-        if let Err(e) = fs::set_permissions(&script_path, perms) {
-            tx.send(UpdateProgressMessage::Error(format!("Failed to set permissions: {}", e))).unwrap();
-            return;
-        }
+    println!("[UPDATE_AGENT] Setting executable permission on upgrade script...");
+
+    // Check metadata and set permissions safely
+    let metadata = fs::metadata(&script_path)
+    .map_err(|e| format!("Failed to read script metadata: {}", e))?;
+    let mut perms = metadata.permissions();
+
+    // Set permissions to rwxr-xr-x (0755)
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms)
+    .map_err(|e| format!("Failed to set permissions: {}", e))?;
+
+    println!("[UPDATE_AGENT] Permissions set. Executing script...");
+    tx.send(UpdateProgressMessage::Status("Applying update... Do not turn off.".to_string())).map_err(|e| e.to_string())?;
+
+    let status = Command::new("sudo")
+    .arg(script_path)
+    .status()
+    .map_err(|e| format!("Failed to run upgrade script: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("Upgrade script failed with status: {}", status));
     }
 
-    tx.send(UpdateProgressMessage::Status("Applying update... Do not turn off.".to_string())).unwrap();
+    // Send "Complete" message and let the thread finish
+    tx.send(UpdateProgressMessage::Complete).map_err(|e| e.to_string())?;
 
-    Command::new("sudo")
-        .arg(script_path)
-        .status()
-        .expect("Failed to run upgrade script.");
-
-    // Instead of exiting, we send a "Complete" message and let the thread finish.
-    tx.send(UpdateProgressMessage::Complete).unwrap();
+    Ok(())
 }
 
-fn extract_archive(archive_path: &Path, destination: &Path) {
-    let file = fs::File::open(archive_path).unwrap();
-    let mut archive = zip::ZipArchive::new(file).unwrap();
+fn extract_archive(archive_path: &Path, destination: &Path) -> Result<(), String> {
+    let file = fs::File::open(archive_path)
+    .map_err(|e| format!("Failed to open zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+    .map_err(|e| format!("Failed to read zip: {}", e))?;
+
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).unwrap();
-        let outpath = destination.join(file.enclosed_name().unwrap());
-        if (*file.name()).ends_with('/') { fs::create_dir_all(&outpath).unwrap(); }
-        else {
-            if let Some(p) = outpath.parent() { if !p.exists() { fs::create_dir_all(&p).unwrap(); } }
-            let mut outfile = fs::File::create(&outpath).unwrap();
-            io::copy(&mut file, &mut outfile).unwrap();
+        let mut file = archive.by_index(i)
+        .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
+
+        let outpath = match file.enclosed_name() {
+            Some(path) => destination.join(path),
+            None => return Err(format!("Invalid file path in zip entry {}", i)),
+        };
+
+        if (*file.name()).ends_with('/') {
+            fs::create_dir_all(&outpath)
+            .map_err(|e| format!("Failed to create dir: {}", e))?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(&p)
+                    .map_err(|e| format!("Failed to create parent dir: {}", e))?;
+                }
+            }
+            let mut outfile = fs::File::create(&outpath)
+            .map_err(|e| format!("Failed to create file: {}", e))?;
+            io::copy(&mut file, &mut outfile)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
         }
     }
+    Ok(())
 }
