@@ -5,40 +5,29 @@ edition = "2021"
 
 [dependencies]
 macroquad = { version = "0.4.7", features = ["audio"] }
-gilrs = "0.10.6"
+gilrs = "0.11.0" # gamepad input library
 futures = "0.3.30"
-dirs = "5.0.1"
+dirs = "6.0.0"
 whoami = "1.4.1"
-sysinfo = "0.30.5"
+sysinfo = "0.37.2"
 tar = "0.4.40"
 walkdir = "2.4.0"
-
-# clock
-chrono = { version = "0.4", features = ["serde"] }
-
-# for checking the splash screen setting
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# loading custom themes
-toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] } # clock
+serde = { version = "1.0", features = ["derive"] } # for checking the splash screen setting
+serde_json = "1.0" # I don't think I need this...
+toml = "0.9.8" # loading custom themes (and for config.toml)
 tokio = { version = "1.47.1", features = ["full"] }
+rand = "0.9.2" # for generating a random message every time the BIOS loads
+regex = "1" # parsing command output for fetching audio sinks
+home = "0.5" # reliably find user's home directory
+reqwest = { version = "0.12.24", features = ["blocking", "json"] } # handle HTTP requests
+zip = "6.0.0" # handle zip extraction
+bluer = { version = "0.17.4", features = ["bluetoothd"] } # bluetooth
 
-# for generating a random message every time the BIOS loads
-rand = "0.8"
-
-# parsing command output for fetching audio sinks
-regex = "1"
-
-# reliably find user's home directory
-home = "0.5"
-
-# handle HTTP requests
-reqwest = { version = "0.11", features = ["blocking", "json"] }
-
-# handle zip extraction
-zip = "0.6"
-
-# bluetooth
-bluer = { version = "0.17.4", features = ["bluetoothd"] }
-crossbeam-channel = "0.5.15"
+# OLDER DEPENDENCIES
+#dirs = "5.0.1"
+#rand = "0.8"
+#sysinfo = "0.30.5"
+#reqwest = { version = "0.11", features = ["blocking", "json"] }
+#toml = "0.8"
+#zip = "0.6"

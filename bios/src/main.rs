@@ -100,7 +100,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.3.KAZETA+";
+const VERSION_NUMBER: &str = "V1.31e.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -544,8 +544,8 @@ async fn main() {
     let mut flash_message: Option<(String, f32)> = None; // (Message, time_remaining)
 
     // Generate a random message on startup
-    let mut rng = ::rand::thread_rng();
-    let loading_text = KAZETA_LOADING_MESSAGES[rng.gen_range(0..KAZETA_LOADING_MESSAGES.len())];
+    let mut rng = ::rand::rng();
+    let loading_text = KAZETA_LOADING_MESSAGES[rng.random_range(0..KAZETA_LOADING_MESSAGES.len())];
 
     // FONT
     // pre-load user's custom font if they have one so we can display it in the loading screen

@@ -1,10 +1,14 @@
-use bluer::{Device, Result, Session}; // Updated use
+use bluer::{AdapterEvent, Result, Session, DiscoveryFilter};
+use bluer::agent::{
+    Agent, RequestAuthorization, RequestConfirmation, RequestPasskey, RequestPinCode,
+};
+use futures::StreamExt;
 use macroquad::prelude::*;
 use std::collections::HashMap;
-use std::result::Result as StdResult; // Use StdResult for our enum
+use std::result::Result as StdResult; // Good, keep this
 use std::thread;
 use tokio::runtime::Runtime;
-use tokio::time::{sleep, Duration}; // Use tokio's sleep
+use tokio::time::{sleep, Duration};
 use tokio::sync::mpsc::{
     unbounded_channel as tokio_channel, UnboundedReceiver as TokioReceiver,
     UnboundedSender as TokioSender,
@@ -18,7 +22,9 @@ use crate::{
     FONT_SIZE, InputState,
 };
 
-// --- Structs and Enums ---
+// ===================================
+// STRUCTS/ENUMS
+// ===================================
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BluetoothDevice {
@@ -34,7 +40,6 @@ pub enum BluetoothScreenState {
     Error(String),
 }
 
-// -- FIX -- This enum is now fully utilized.
 enum BluetoothMessage {
     ScanResult(StdResult<Vec<BluetoothDevice>, String>),
     PairingSuccess(String),
@@ -50,7 +55,9 @@ pub struct BluetoothState {
     tx_cmd: TokioSender<String>,
 }
 
-// --- Implementation ---
+// ===================================
+// IMPLEMENTATIONS
+// ===================================
 
 impl BluetoothState {
     pub fn new() -> Self {
@@ -77,6 +84,9 @@ impl Drop for BluetoothState {
     }
 }
 
+// ===================================
+// FUNCTIONS
+// ===================================
 
 pub fn update(
     state: &mut BluetoothState,
@@ -97,11 +107,12 @@ pub fn update(
             BluetoothMessage::ScanResult(Err(e)) | BluetoothMessage::Error(e) => {
                 state.screen_state = BluetoothScreenState::Error(e);
             }
-            // -- FIX -- This now correctly handles the message from the agent.
             BluetoothMessage::PairingSuccess(device_name) => {
+                println!("[UI_UPDATE] Received PairingSuccess for {}", device_name);
                 state.screen_state = BluetoothScreenState::Connecting(device_name);
             }
             BluetoothMessage::ConnectionUpdate(device_name) => {
+                println!("[UI_UPDATE] Received ConnectionUpdate for {}", device_name);
                 state.screen_state = BluetoothScreenState::Connected(device_name);
             }
         }
@@ -125,14 +136,17 @@ pub fn update(
 
                     let _ = state.tx_cmd.send(format!("pair {}", device.mac_address));
                 }
-                if input_state.back {
-                    *current_screen = Screen::Extras;
-                    sound_effects.play_back(config);
-                }
+            }
+
+            if input_state.back {
+                println!("[UI_UPDATE] Back pressed on DeviceList - Navigating to Extras.");
+                *current_screen = Screen::Extras;
+                sound_effects.play_back(config);
             }
         }
         BluetoothScreenState::Error(_) | BluetoothScreenState::Connected(_) => {
             if input_state.select || input_state.back {
+                println!("[UI_UPDATE] Back/Select pressed on Error/Connected - Navigating to DeviceList."); // Add log
                 state.screen_state = BluetoothScreenState::DeviceList;
                 state.selected_index = 0; // Reset cursor to the top
                 sound_effects.play_select(config);
@@ -141,6 +155,7 @@ pub fn update(
         // "Back" from a waiting screen should also go to the list
         BluetoothScreenState::Pairing(_) | BluetoothScreenState::Connecting(_) => {
             if input_state.back {
+                println!("[UI_UPDATE] Back pressed on Pairing/Connecting - Navigating to DeviceList."); // Add log
                 state.screen_state = BluetoothScreenState::DeviceList;
                 state.selected_index = 0;
                 sound_effects.play_back(config);
@@ -223,37 +238,134 @@ pub fn draw(
 // --- Background Thread Function ---
 
 async fn run_bluetooth_agent(
-    tx: TokioSender<BluetoothMessage>, // This is now a tokio channel
-    mut rx_cmd: TokioReceiver<String>, // This is now a tokio channel
+    tx: TokioSender<BluetoothMessage>,
+    mut rx_cmd: TokioReceiver<String>,
 ) -> Result<()> {
+    println!("[BT_AGENT] Initializing D-Bus...");
     let session = Session::new().await?;
     let adapter = session.default_adapter().await?;
-    adapter.set_powered(true).await?;
 
-    let mut discover = Some(adapter.discover_devices().await?);
-    println!("[BT_AGENT] D-Bus session started. Discovery enabled.");
+    println!("[BT_AGENT] Registering auto-accept pairing agent...");
+
+    // Agent is a struct. We create it and fill its fields with closures.
+    let agent = Agent {
+        // This closure is called for "Just Works" pairing or passkey confirmation.
+        request_confirmation: Some(Box::new(|req: RequestConfirmation| {
+            println!(
+                "[BT_AGENT] Auto-accepting pairing confirmation (Passkey: {})",
+                     req.passkey
+            );
+            // We return a Pinned Future that resolves to Ok(())
+            Box::pin(async { Ok(()) })
+        })),
+
+        // This closure is called when the device requests a passkey (e.g., a mouse).
+        request_passkey: Some(Box::new(|_req: RequestPasskey| {
+            println!("[BT_AGENT] Auto-providing default passkey '0000'");
+            Box::pin(async { Ok(0000) })
+        })),
+
+        // This closure is called when the device requests a legacy PIN code.
+        request_pin_code: Some(Box::new(|_req: RequestPinCode| {
+            println!("[BT_AGENT] Auto-providing default PIN '0000'");
+            Box::pin(async { Ok("0000".to_string()) })
+        })),
+
+        // This closure is called to authorize the connection.
+        request_authorization: Some(Box::new(|_req: RequestAuthorization| {
+            println!("[BT_AGENT] Auto-authorizing connection");
+            Box::pin(async { Ok(()) })
+        })),
+
+        // Use default handlers for all other events.
+        ..Default::default()
+    };
+
+    // We must keep the handle alive, or the agent gets unregistered.
+    let _agent_handle = session.register_agent(agent).await?;
+    println!("[BT_AGENT] Agent registered.");
+
+    adapter.set_powered(true).await?;
+    println!("[BT_AGENT] D-Bus ready. Adapter: {}", adapter.name());
+
+    // This tells the adapter to scan for all transport types (Classic and LE).
+    println!("[BT_AGENT] Setting discovery filter...");
+    let filter = DiscoveryFilter::default();
+
+    // We are intentionally NOT setting filter.transport.
+    // The default value (None) will cause BlueZ to use "auto" transport,
+    // which scans for both Classic and LE devices. This is what we want.
+
+    if let Err(e) = adapter.set_discovery_filter(filter).await {
+        eprintln!("[BT_AGENT] Warning: Could not set discovery filter: {}. May only see known devices.", e);
+        tx.send(BluetoothMessage::Error(format!("Filter failed: {}", e))).ok();
+    }
+    println!("[BT_AGENT] Filter set.");
+
+    // Keep the stream active, as it works initially
+    let mut discover_stream = adapter.discover_devices().await?;
+    println!("[BT_AGENT] Discovery stream started. Entering main loop.");
 
     let mut ui_devices: HashMap<String, BluetoothDevice> = HashMap::new();
     let mut poll_timer = Box::pin(sleep(Duration::from_secs(3)));
 
     loop {
         tokio::select! {
-            // --- Branch 1: Handle commands from the UI ---
-            // FIX: This now correctly awaits the tokio channel
+            // --- Branch 1: Handle discovery events ---
+            Some(evt) = discover_stream.next() => {
+                let mut list_changed = false;
+                match evt {
+                    AdapterEvent::DeviceAdded(addr) => {
+                        match adapter.device(addr) { // Sync
+                            Ok(device) => {
+                                if let Ok(Some(name)) = device.name().await {
+                                    if !name.is_empty() && !ui_devices.contains_key(&addr.to_string()) {
+                                        println!("[BT_AGENT] Discovered new device (event): {} ({})", name, addr);
+                                        ui_devices.insert(addr.to_string(), BluetoothDevice { mac_address: addr.to_string(), name: name.clone() });
+                                        list_changed = true;
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("[BT_AGENT] Error getting device object {}: {}", addr, e),
+                        }
+                    }
+                    AdapterEvent::DeviceRemoved(addr) => {
+                        if ui_devices.remove(&addr.to_string()).is_some() {
+                            println!("[BT_AGENT] Device removed (event): {}", addr);
+                            list_changed = true;
+                        }
+                    }
+                    AdapterEvent::PropertyChanged(_prop) => {
+                        // We primarily rely on polling for updates now, but could add name checks here if needed
+                    }
+                }
+
+                if list_changed {
+                    println!("[BT_AGENT] Device list changed via event, updating UI ({} devices).", ui_devices.len());
+                    let device_list: Vec<BluetoothDevice> = ui_devices.values().cloned().collect();
+                    if tx.send(BluetoothMessage::ScanResult(Ok(device_list))).is_err() {
+                        println!("[BT_AGENT] UI channel closed during event update. Exiting.");
+                        break;
+                    }
+                }
+            }
+
+            // --- Branch 2: Handle commands ---
             Some(cmd) = rx_cmd.recv() => {
+                println!("[BT_AGENT] Received command: {}", cmd);
                 if cmd.starts_with("pair") {
                     let mac = cmd.split_whitespace().nth(1).unwrap_or_default();
-                    println!("[BT_AGENT] Received pair command for: {}", mac);
+                    println!("[BT_AGENT] Handling pair command for: {}", mac);
 
+                    // --- Pairing Logic ---
                     println!("[BT_AGENT] Pausing discovery for pairing...");
-                    if let Some(discover_stream) = discover.take() {
-                        drop(discover_stream);
-                    }
+                    drop(discover_stream); // Stop listening to events
+
                     sleep(Duration::from_millis(500)).await;
 
                     if let Some(device_info) = ui_devices.get(mac) {
                         let addr = device_info.mac_address.parse()?;
-                        let device: Device = adapter.device(addr)?;
+                        let device = adapter.device(addr)?; // Sync
 
                         if device.is_paired().await? {
                             println!("[BT_AGENT] Device already paired. Removing to re-pair...");
@@ -268,67 +380,85 @@ async fn run_bluetooth_agent(
                         println!("[BT_AGENT] Attempting to pair...");
                         if let Err(e) = device.pair().await {
                             tx.send(BluetoothMessage::Error(format!("Pairing Failed: {}", e))).ok();
+                            println!("[BT_AGENT] Pairing failed.");
                         } else {
                             println!("[BT_AGENT] Pairing successful. Attempting to connect...");
                             tx.send(BluetoothMessage::PairingSuccess(device_info.name.clone())).ok();
 
                             if let Err(e) = device.connect().await {
                                 tx.send(BluetoothMessage::Error(format!("Connection Failed: {}", e))).ok();
+                                println!("[BT_AGENT] Connection failed.");
                             } else {
                                 println!("[BT_AGENT] Connection successful.");
                                 tx.send(BluetoothMessage::ConnectionUpdate(device_info.name.clone())).ok();
                             }
                         }
                     } else {
+                        println!("[BT_AGENT] Device {} not found in known list.", mac);
                         tx.send(BluetoothMessage::Error(format!("Device not found: {}", mac))).ok();
                     }
 
-                    discover = Some(adapter.discover_devices().await?);
-                    println!("[BT_AGENT] Discovery resumed.");
+                    // --- Resume Discovery Stream ---
+                    println!("[BT_AGENT] Resuming discovery stream and scan...");
+                    discover_stream = adapter.discover_devices().await?;
 
+                    println!("[BT_AGENT] Discovery stream resumed.");
                     poll_timer = Box::pin(sleep(Duration::from_secs(0))); // Reset timer
                 }
             },
 
-            // --- Branch 2: Periodically scan for devices ---
+            // --- Branch 3: Poll devices periodically ---
             _ = &mut poll_timer => {
-                let mut new_devices_map = HashMap::new();
-                let all_addresses = adapter.device_addresses().await?;
-                for addr in all_addresses {
-                    let device = adapter.device(addr)?;
-                    if let Ok(Some(name)) = device.name().await {
-                        if !name.is_empty() {
-                            let addr_str = device.address().to_string();
-                            new_devices_map.insert(addr_str.clone(), BluetoothDevice { mac_address: addr_str, name });
+                match adapter.device_addresses().await {
+                    Ok(all_addresses) => {
+                        let mut new_devices_map = HashMap::new();
+                        for addr in all_addresses {
+                            match adapter.device(addr) { // Sync call
+                                Ok(device) => {
+                                    if let Ok(Some(name)) = device.name().await {
+                                        if !name.is_empty() {
+                                            let addr_str = device.address().to_string();
+                                            new_devices_map.insert(addr_str.clone(), BluetoothDevice { mac_address: addr_str, name });
+                                        }
+                                    }
+                                }
+                                Err(e) => eprintln!("[BT_AGENT] Error getting device object {}: {}", addr, e),
+                            }
                         }
+
+                        if new_devices_map != ui_devices {
+                            println!("[BT_AGENT] Device list changed via poll ({} devices), updating UI.", new_devices_map.len());
+                            ui_devices = new_devices_map;
+                            let device_list: Vec<BluetoothDevice> = ui_devices.values().cloned().collect();
+                            if tx.send(BluetoothMessage::ScanResult(Ok(device_list))).is_err() {
+                                println!("[BT_AGENT] UI channel closed during poll update. Exiting.");
+                                break;
+                            }
+                        }
+                        // else { println!("[BT_AGENT] Polling found no changes."); } // Keep commented
+                    }
+                    Err(e) => {
+                        eprintln!("[BT_AGENT] Error polling device addresses: {}", e);
+                        tx.send(BluetoothMessage::Error(format!("Polling failed: {}", e))).ok();
                     }
                 }
-
-                if new_devices_map != ui_devices {
-                    println!("[BT_AGENT] Found {} named devices, updating UI.", new_devices_map.len());
-                    ui_devices = new_devices_map;
-                    let device_list: Vec<BluetoothDevice> = ui_devices.values().cloned().collect();
-                    if tx.send(BluetoothMessage::ScanResult(Ok(device_list))).is_err() {
-                        break;
-                    }
-                }
-
-                poll_timer = Box::pin(sleep(Duration::from_secs(10)));
+                // Reset the timer for the next poll
+                poll_timer = Box::pin(sleep(Duration::from_secs(3)));
             },
 
-            // --- Branch 3: Handle UI shutting down ---
+            // --- Branch 4: Handle UI closing ---
             else => {
-                // This happens if the tx_cmd channel closes
-                // (because BluetoothState was dropped)
-                println!("[BT_AGENT] UI channel closed. Shutting down.");
+                println!("[BT_AGENT] UI channel closed or select! broke. Shutting down.");
                 break;
             }
         }
+        // println!("[BT_AGENT] End of select! loop iteration."); // Keep commented
     }
+    println!("[BT_AGENT] Exiting run_bluetooth_agent.");
     Ok(())
 }
 
-// This wrapper function just spawns the thread and runs the async agent
+
 fn manage_bluetooth_agent(
     tx: TokioSender<BluetoothMessage>,
     rx_cmd: TokioReceiver<String>,
@@ -337,8 +467,10 @@ fn manage_bluetooth_agent(
         println!("[BT_AGENT] Starting Bluetooth agent thread...");
         let rt = Runtime::new().expect("Failed to create Tokio runtime");
 
-        if let Err(e) = rt.block_on(run_bluetooth_agent(tx.clone(), rx_cmd)) {
-            tx.send(BluetoothMessage::Error(format!("Agent failed: {}", e))).ok();
+        let tx_err = tx.clone();
+        if let Err(e) = rt.block_on(run_bluetooth_agent(tx, rx_cmd)) {
+            eprintln!("[BT_AGENT] run_bluetooth_agent failed: {}", e);
+            tx_err.send(BluetoothMessage::Error(format!("Agent failed: {}", e))).ok();
         }
         println!("[BT_AGENT] Bluetooth agent thread finished.");
     });
