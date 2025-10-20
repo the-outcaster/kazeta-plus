@@ -147,12 +147,39 @@ if [ -d "$GC_MODULE_SRC_DIR" ] && [ -f "$GC_MODULE_SRC_DIR/PKGBUILD" ]; then
     # Use pushd/popd to safely change directory and return
     pushd "$GC_MODULE_SRC_DIR" > /dev/null
 
-    # Build and install the package using makepkg.
-    # -s: Syncs dependencies (runtime deps, should be minimal for a kmod)
-    # -i: Installs the package after building
-    # Since the whole script runs as root, makepkg will install system-wide.
-    echo "  -> Running makepkg..."
-    makepkg -si --noconfirm
+    # Temporarily change ownership so 'gamer' can build
+    # Assuming gamer's user ID and group ID are both 1000 (standard for first user)
+    echo "  -> Temporarily changing ownership to build..."
+    chown -R 1000:1000 .
+
+    # Build the package as the 'gamer' user
+    echo "  -> Running makepkg as user 'gamer'..."
+    # -s: Syncs dependencies (build deps)
+    # -f: Force build even if package exists
+    # We don't use -i here, we install separately
+    sudo -u gamer makepkg -sf --noconfirm
+
+    # Find the built package file (makepkg outputs the name)
+    # Assuming only one .zst file is created
+    PACKAGE_FILE=$(find . -maxdepth 1 -name "*.pkg.tar.zst" -print -quit)
+
+    if [ -z "$PACKAGE_FILE" ]; then
+        echo -e "${RED}  -> ERROR: Could not find built package file.${NC}"
+        popd > /dev/null
+        exit 1
+    fi
+
+    echo "  -> Built package: $PACKAGE_FILE"
+
+    # Install the built package using pacman (already running as root)
+    echo "  -> Installing built package..."
+    pacman -U --noconfirm --needed "$PACKAGE_FILE"
+
+    # (Optional: Clean up built package file after install)
+    # rm -f "$PACKAGE_FILE"
+
+    # (Optional: Change ownership back, though it's in /tmp so maybe not critical)
+    # chown -R 0:0 .
 
     popd > /dev/null
     echo -e "${GREEN}  -> GCC overclocking module installed successfully.${NC}"
@@ -229,4 +256,3 @@ echo "--------------------------------------------------"
 
 echo -e "${GREEN}Upgrade to Kazeta+ is complete!${NC}"
 echo -e "${YELLOW}Please reboot your system now for all changes to take effect.${NC}"
-
