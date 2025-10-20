@@ -21,6 +21,7 @@ use regex::Regex; // fetching audio sinks
 // Import our new modules
 mod audio;
 mod config;
+mod gcc_adapter;
 mod input;
 mod memory;
 mod save;
@@ -33,6 +34,7 @@ mod utils;
 use crate::audio::{SoundEffects, play_new_bgm};
 use crate::config::{Config, get_user_data_dir};
 use crate::dialog::Dialog;
+use crate::gcc_adapter::start_gcc_adapter_polling;
 use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
@@ -101,7 +103,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.32a.KAZETA+";
+const VERSION_NUMBER: &str = "V1.33.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -476,7 +478,7 @@ async fn load_all_assets(
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    env::set_var("RUST_BACKTRACE", "full");
+    env::set_var("RUST_BACKTRACE", "full"); // allow backtracing for debugging panics
 
     let mut dialogs: Vec<Dialog> = Vec::new();
     let mut dialog_state = DialogState::None;
@@ -754,6 +756,15 @@ async fn main() {
     let mut play_option_enabled: bool = false;
     let mut copy_logs_option_enabled = false; // new button to copy session logs over to SD card
 
+    // GCC ADAPTER
+    let mut app_state = AppState {
+        gcc_adapter_poll_rate: None,
+    };
+
+    // Create channel and start the polling thread
+    let (tx_gcc, rx_gcc) = std::sync::mpsc::channel();
+    start_gcc_adapter_polling(tx_gcc);
+
     // icon cache for multiple game detection screen
     let mut game_icon_cache: HashMap<String, Texture2D> = HashMap::new();
     let mut game_icon_queue: Vec<(String, PathBuf)> = Vec::new();
@@ -832,6 +843,19 @@ async fn main() {
             last_battery_check = get_time();
         }
 
+        // GCC
+        // Check for messages from the GCC adapter thread
+        if let Ok(msg) = rx_gcc.try_recv() {
+            match msg {
+                GccMessage::RateUpdate(rate) => {
+                    app_state.gcc_adapter_poll_rate = Some(rate);
+                }
+                GccMessage::Disconnected => {
+                    app_state.gcc_adapter_poll_rate = None;
+                }
+            }
+        }
+
         // Update input state from both keyboard and controller
         input_state.reset();
         input_state.update_keyboard();
@@ -893,6 +917,7 @@ async fn main() {
                     &mut background_state,
                     &battery_info,
                     &current_time_str,
+                    &app_state.gcc_adapter_poll_rate,
                     scale_factor,
                 );
             }
@@ -976,6 +1001,7 @@ async fn main() {
                     &mut background_state,
                     &battery_info,
                     &current_time_str,
+                    &app_state.gcc_adapter_poll_rate,
                     scale_factor,
                     flash_message.as_ref().map(|(msg, _)| msg.as_str()),
                 );
@@ -1004,7 +1030,8 @@ async fn main() {
                     ui::settings::render_settings_page(
                         page_number, options, &logo_cache, &background_cache, &font_cache,
                         &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                        &battery_info, &current_time_str, scale_factor, system_volume, brightness,
+                        &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate,
+                        scale_factor, system_volume, brightness,
                     );
                 }
             },
@@ -1028,6 +1055,7 @@ async fn main() {
                     &mut background_state,
                     &battery_info,
                     &current_time_str,
+                    &app_state.gcc_adapter_poll_rate,
                     scale_factor,
                 );
             }
@@ -1130,7 +1158,7 @@ async fn main() {
                 render_game_selection_menu(
                     &available_games, &game_icon_cache, &placeholder, game_selection, &animation_state, &logo_cache,
                     &background_cache, &font_cache, &config, &mut background_state,
-                    &battery_info, &current_time_str, scale_factor
+                    &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate, scale_factor
                 );
             },
             Screen::Debug => {
@@ -1221,7 +1249,8 @@ async fn main() {
                 render_settings_page(
                     1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                    &battery_info, &current_time_str, scale_factor, system_volume, brightness,
+                    &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate,
+                    scale_factor, system_volume, brightness,
                 );
                 // Then, render the dialog box on top
                 render_dialog_box(
@@ -1242,7 +1271,8 @@ async fn main() {
                 render_settings_page(
                     1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
-                    &battery_info, &current_time_str, scale_factor, system_volume, brightness
+                    &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate,
+                    scale_factor, system_volume, brightness
                 );
 
                 render_dialog_box(
@@ -1330,6 +1360,7 @@ async fn main() {
                     &mut background_state,
                     &battery_info,
                     &current_time_str,
+                    &app_state.gcc_adapter_poll_rate,
                     scale_factor,
                 );
             }

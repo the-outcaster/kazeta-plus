@@ -112,6 +112,7 @@ pub fn render_ui_overlay(
     config: &Config,
     battery_info: &Option<BatteryInfo>,
     current_time_str: &str,
+    gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
 ) {
     const BASE_LOGO_WIDTH: f32 = 200.0;
@@ -193,6 +194,29 @@ pub fn render_ui_overlay(
         );
     }
 
+    // GCC Adapter Poll Rate
+    if let Some(rate) = gcc_adapter_poll_rate {
+        let gcc_text = format!("GCC: {}Hz", rate);
+        let gcc_dims = measure_text(&gcc_text, Some(current_font), font_size, 1.0);
+
+        // Position it in the same corner as the battery/clock
+        let gcc_x = if config.menu_position == MenuPosition::TopRight {
+            20.0 * scale_factor
+        } else {
+            screen_width() - gcc_dims.width - (20.0 * scale_factor)
+        };
+
+        // Draw it below the battery line
+        text_with_config_color(
+            font_cache,
+            config,
+            &gcc_text,
+            gcc_x,
+            60.0 * scale_factor, // Below the battery's 40.0
+            font_size,
+        );
+    }
+
     // --- Version Number Drawing (now fully dynamic) ---
     let version_dims = measure_text(VERSION_NUMBER, Some(current_font), font_size, 1.0);
 
@@ -226,10 +250,11 @@ pub fn render_game_selection_menu(
     background_state: &mut BackgroundState,
     battery_info: &Option<BatteryInfo>,
     current_time_str: &str,
+    gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
 ) {
     render_background(background_cache, config, background_state);
-    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
+    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, gcc_adapter_poll_rate, scale_factor);
 
     const TILE_SIZE: f32 = 60.0;
     const PADDING: f32 = 10.0;

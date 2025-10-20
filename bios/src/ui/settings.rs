@@ -107,6 +107,7 @@ pub fn render_settings_page(
     background_state: &mut BackgroundState,
     battery_info: &Option<BatteryInfo>,
     current_time_str: &str,
+    gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
     system_volume: f32,
     brightness: f32,
@@ -127,7 +128,7 @@ pub fn render_settings_page(
     // dim the background for easier legibility
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
 
-    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, scale_factor);
+    render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, gcc_adapter_poll_rate, scale_factor);
 
     //render_debug_info(config);
 

@@ -87,9 +87,20 @@ pub enum UIFocus {
     StorageRight,
 }
 
+// A simple message for our new thread
+pub enum GccMessage {
+    RateUpdate(u32),
+    Disconnected,
+}
+
 // ===================================
 // STRUCTS
 // ===================================
+
+pub struct AppState {
+    // ... your other state fields like input_state, screen_state, etc.
+    pub gcc_adapter_poll_rate: Option<u32>, // Store rate in Hz
+}
 
 pub struct CopyOperationState {
     pub progress: u16,

@@ -110,22 +110,55 @@ echo "--------------------------------------------------"
 
 
 ### ===================================================================
-###                   SYSTEM PACKAGE UPGRADE
+###         SYSTEM PACKAGE UPGRADE & BUILD TOOLS
 ### ===================================================================
 
-echo -e "${YELLOW}Step 3: Installing/updating remaining system packages...${NC}"
+echo -e "${YELLOW}Step 3: Installing/updating system packages and build tools...${NC}"
 pacman -Syy
-# -- CHANGED -- Added "bluez" and "bluez-utils" for Bluetooth functionality
-PACKAGES_TO_INSTALL=("brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager" "ffmpeg" "unzip" "bluez" "bluez-utils")
+
+# -- ADDED -- base-devel, dkms, linux-headers are needed for the DKMS module
+# NOTE: Ensure 'linux-headers' matches the kernel Kazeta+ uses. If it's a custom
+# kernel, you might need a different headers package.
+PACKAGES_TO_INSTALL=(
+    "brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager"
+    "ffmpeg" "unzip" "bluez" "bluez-utils"
+    "base-devel" "dkms" "linux-headers"
+)
+
+# Install required packages (including build dependencies)
 for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
-    if ! pacman -Q "$pkg" &>/dev/null; then
-        echo "  -> Installing $pkg..."
-        pacman -S --noconfirm "$pkg"
-    else
-        echo "  -> $pkg is already installed."
-    fi
+    # Using --needed ensures we don't reinstall if already present & up-to-date
+    echo "  -> Ensuring $pkg is installed..."
+    pacman -S --noconfirm --needed "$pkg"
 done
 echo -e "${GREEN}System packages are up to date.${NC}"
+echo "--------------------------------------------------"
+
+
+### ===================================================================
+###         BUILD AND INSTALL GC ADAPTER OVERCLOCK MODULE (DKMS)
+### ===================================================================
+
+echo -e "${YELLOW}Step 4: Building and installing GCC overclocking module...${NC}"
+GC_MODULE_SRC_DIR="$SCRIPT_DIR/aur-pkgs/gcadapter-oc-dkms"
+
+if [ -d "$GC_MODULE_SRC_DIR" ] && [ -f "$GC_MODULE_SRC_DIR/PKGBUILD" ]; then
+    echo "  -> Found source directory for gcadapter-oc-dkms."
+    # Use pushd/popd to safely change directory and return
+    pushd "$GC_MODULE_SRC_DIR" > /dev/null
+
+    # Build and install the package using makepkg.
+    # -s: Syncs dependencies (runtime deps, should be minimal for a kmod)
+    # -i: Installs the package after building
+    # Since the whole script runs as root, makepkg will install system-wide.
+    echo "  -> Running makepkg..."
+    makepkg -si --noconfirm
+
+    popd > /dev/null
+    echo -e "${GREEN}  -> GCC overclocking module installed successfully.${NC}"
+else
+    echo -e "${YELLOW}  -> Source directory for gcadapter-oc-dkms not found. Skipping module installation.${NC}"
+fi
 echo "--------------------------------------------------"
 
 
@@ -133,7 +166,7 @@ echo "--------------------------------------------------"
 ###                 SYSTEM FILE COPY & SERVICES
 ### ===================================================================
 
-echo -e "${YELLOW}Step 4: Copying new system files...${NC}"
+echo -e "${YELLOW}Step 5: Copying new system files...${NC}"
 rsync -av "$SCRIPT_DIR/rootfs/etc/" "$DEPLOYMENT_DIR/etc/"
 rsync -av "$SCRIPT_DIR/rootfs/usr/share/" "$DEPLOYMENT_DIR/usr/share/"
 echo "  -> Correcting ownership and permissions for sudoers.d..."
@@ -163,7 +196,7 @@ echo "--------------------------------------------------"
 ###                       ENABLE SERVICES
 ### ===================================================================
 
-echo -e "${YELLOW}Step 5: Enabling new system services...${NC}"
+echo -e "${YELLOW}Step 6: Enabling new system services...${NC}"
 # -- CHANGED -- Added "bluetooth.service"
 SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
@@ -177,7 +210,7 @@ echo "--------------------------------------------------"
 ###                    COPY CUSTOM ASSETS
 ### ===================================================================
 
-echo -e "${YELLOW}Step 6: Copying custom user assets...${NC}"
+echo -e "${YELLOW}Step 7: Copying custom user assets...${NC}"
 DEST_ASSET_DIR="$DEPLOYMENT_DIR/home/gamer/.local/share/kazeta-plus"
 SOURCE_ASSET_DIR="$SCRIPT_DIR/custom_assets_template"
 mkdir -p "$DEST_ASSET_DIR"
