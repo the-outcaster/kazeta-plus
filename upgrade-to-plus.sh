@@ -123,6 +123,7 @@ PACKAGES_TO_INSTALL=(
     "brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager"
     "ffmpeg" "unzip" "bluez" "bluez-utils"
     "base-devel" "dkms" "linux-headers"
+    "noto-fonts" "ttf-dejavu" "ttf-liberation" "noto-fonts-emoji"
 )
 
 # Install required packages (including build dependencies)
@@ -196,6 +197,18 @@ echo "--------------------------------------------------"
 echo -e "${YELLOW}Step 5: Copying new system files...${NC}"
 rsync -av "$SCRIPT_DIR/rootfs/etc/" "$DEPLOYMENT_DIR/etc/"
 rsync -av "$SCRIPT_DIR/rootfs/usr/share/" "$DEPLOYMENT_DIR/usr/share/"
+
+# udev rule for GCC adapter
+UDEV_RULES_SRC="$SCRIPT_DIR/rootfs/etc/udev/rules.d/51-gcadapter.rules"
+UDEV_RULES_DEST_DIR="$DEPLOYMENT_DIR/etc/udev/rules.d"
+if [ -f "$UDEV_RULES_SRC" ]; then
+    echo "  -> Copying udev rule for GameCube adapter..."
+    mkdir -p "$UDEV_RULES_DEST_DIR" # Ensure destination directory exists
+    cp "$UDEV_RULES_SRC" "$UDEV_RULES_DEST_DIR/"
+else
+    echo -e "${YELLOW}  -> WARNING: 51-gcadapter.rules not found in kit. Skipping.${NC}"
+fi
+
 echo "  -> Correcting ownership and permissions for sudoers.d..."
 SUDOERS_D_DIR="$DEPLOYMENT_DIR/etc/sudoers.d"
 if [ -d "$SUDOERS_D_DIR" ]; then
@@ -203,6 +216,14 @@ if [ -d "$SUDOERS_D_DIR" ]; then
     chmod 755 "$SUDOERS_D_DIR"
     find "$SUDOERS_D_DIR" -type f -exec chmod 440 {} \;
 fi
+
+# udev permissions
+if [ -d "$UDEV_RULES_DEST_DIR" ]; then
+    chown -R root:root "$UDEV_RULES_DEST_DIR"
+    chmod 755 "$UDEV_RULES_DEST_DIR"
+    find "$UDEV_RULES_DEST_DIR" -type f -exec chmod 644 {} \; # Udev rules need read permission for all
+fi
+
 backup_and_copy() {
     local source_file=$1
     local dest_file=$2
@@ -212,6 +233,7 @@ backup_and_copy() {
     cp "$source_file" "$dest_file"
     chmod +x "$dest_file"
 }
+
 DEST_BIN_DIR="$DEPLOYMENT_DIR/usr/bin"
 for executable in "$SCRIPT_DIR/rootfs/usr/bin/"*; do
     backup_and_copy "$executable" "$DEST_BIN_DIR/$(basename "$executable")"
@@ -220,10 +242,19 @@ echo -e "${GREEN}System files updated.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
+###                       RELOAD UDEV RULES
+### ===================================================================
+
+echo -e "${YELLOW}Step 6: Reloading udev rules...${NC}"
+udevadm control --reload-rules && udevadm trigger
+echo -e "${GREEN}Udev rules reloaded.${NC}"
+echo "--------------------------------------------------"
+
+### ===================================================================
 ###                       ENABLE SERVICES
 ### ===================================================================
 
-echo -e "${YELLOW}Step 6: Enabling new system services...${NC}"
+echo -e "${YELLOW}Step 7: Enabling new system services...${NC}"
 # -- CHANGED -- Added "bluetooth.service"
 SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
@@ -237,7 +268,7 @@ echo "--------------------------------------------------"
 ###                    COPY CUSTOM ASSETS
 ### ===================================================================
 
-echo -e "${YELLOW}Step 7: Copying custom user assets...${NC}"
+echo -e "${YELLOW}Step 8: Copying custom user assets...${NC}"
 DEST_ASSET_DIR="$DEPLOYMENT_DIR/home/gamer/.local/share/kazeta-plus"
 SOURCE_ASSET_DIR="$SCRIPT_DIR/custom_assets_template"
 mkdir -p "$DEST_ASSET_DIR"

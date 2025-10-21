@@ -56,11 +56,10 @@ echo "Creating directory structure..."
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/keyd"
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/sudoers.d"
 mkdir -p "$KIT_FULL_PATH/rootfs/etc/systemd/system"
+mkdir -p "$KIT_FULL_PATH/rootfs/etc/udev/rules.d"
 mkdir -p "$KIT_FULL_PATH/rootfs/usr/bin"
 mkdir -p "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles"
-# --- ADDED ---
 mkdir -p "$KIT_FULL_PATH/aur-pkgs"
-# --- END ADDED ---
 echo "Directory structure created."
 
 # 5. Download the main upgrade script
@@ -75,6 +74,7 @@ echo "Copying files from rootfs..."
 cp "$SOURCE_DIR/rootfs/etc/keyd/default.conf" "$KIT_FULL_PATH/rootfs/etc/keyd/"
 cp "$SOURCE_DIR/rootfs/etc/sudoers.d/99-kazeta-plus" "$KIT_FULL_PATH/rootfs/etc/sudoers.d/"
 cp "$SOURCE_DIR/rootfs/etc/systemd/system/kazeta-profile-loader.service" "$KIT_FULL_PATH/rootfs/etc/systemd/system/"
+cp "$SOURCE_DIR/rootfs/etc/udev/rules.d/51-gcadapter.rules" "$KIT_FULL_PATH/rootfs/etc/udev/rules.d/"
 
 echo "Copying shell scripts..."
 scripts_to_copy=( "ethernet-connect" "kazeta" "kazeta-copy-logs" "kazeta-mount" "kazeta-session" "kazeta-wifi-setup" )
@@ -91,15 +91,12 @@ else
     echo "WARNING: Release binary not found, copying debug binary."
     cp "$SOURCE_DIR/bios/target/debug/kazeta-bios" "$KIT_FULL_PATH/rootfs/usr/bin/"
 fi
-# --- END CHANGE ---
 
 echo "Copying inputplumber profile..."
 cp "$SOURCE_DIR/rootfs/usr/share/inputplumber/profiles/steam-deck.yaml" "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles/"
 
-# --- ADDED ---
 echo "Copying gcadapter-oc-dkms source..."
 cp -r "$SOURCE_DIR/aur-pkgs/gcadapter-oc-dkms" "$KIT_FULL_PATH/aur-pkgs/"
-# --- END ADDED ---
 
 echo "All files copied successfully."
 
