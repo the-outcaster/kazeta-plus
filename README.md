@@ -9,6 +9,9 @@ Fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that a
 - customization of the BIOS, from the fonts, backgrounds, logos, and everything in-between
 - theme support; users can download themes from a [community-oriented repo](https://github.com/the-outcaster/kazeta-plus-themes) directly from the BIOS, or [make their own](https://github.com/the-outcaster/kazeta-plus-theme-creator)
 - Steam Deck volume control and brightness control support
+- Bluetooth controller support
+- native GameCube controller adapter support, overclocked to 1,000 Hz
+- fixes for missing fonts in certain applications (and may even fix apps that only had a black screen)
 
 ![Kazeta+ About page](https://i.imgur.com/kQiAVvc.png)
 

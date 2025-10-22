@@ -387,10 +387,21 @@ fn perform_update_logic(release_info: GithubRelease, tx: Sender<UpdateProgressMe
 
     let tmp_extract_dir = Path::new("/tmp/");
 
-    // Call the new, safer extract_archive function
+    // Get the expected kit directory name from the asset name
+    let root_dir_name = update_asset.name.strip_suffix(".zip").unwrap_or(&update_asset.name);
+    let kit_path = tmp_extract_dir.join(root_dir_name); // e.g., /tmp/kazeta-plus-upgrade-kit-1.34
+
+    // Clean up previous attempt if it exists (run before extraction)
+    if kit_path.exists() {
+        fs::remove_dir_all(&kit_path)
+        .map_err(|e| format!("Failed to remove old kit dir: {}", e))?;
+    }
+
+    // Extract the archive (which creates the kit_path directory)
     extract_archive(&tmp_zip_path, &tmp_extract_dir)?;
 
-    let script_path = tmp_extract_dir.join("upgrade-to-plus.sh");
+    // Build the script path INSIDE the kit directory
+    let script_path = kit_path.join("upgrade-to-plus.sh"); // e.g., /tmp/kazeta-plus-upgrade-kit-1.34/upgrade-to-plus.sh
 
     // Add a log to see the exact path being checked
     println!("[UPDATE_AGENT] Checking for script at: {}", script_path.display());

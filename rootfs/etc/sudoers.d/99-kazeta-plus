@@ -17,7 +17,7 @@
 %wheel ALL=(ALL) NOPASSWD: /usr/sbin/rfkill
 
 # kazeta+ upgrade
-%wheel ALL=(ALL:ALL) NOPASSWD: /tmp/upgrade-to-plus.sh
+%wheel ALL=(ALL:ALL) NOPASSWD: /tmp/kazeta-plus-upgrade-kit-*/upgrade-to-plus.sh
 
 # Allow passwordless reboot and shutdown
 %wheel ALL=(ALL) NOPASSWD: /usr/sbin/reboot
