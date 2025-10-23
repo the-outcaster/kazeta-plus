@@ -55,21 +55,19 @@ pub use types::*;
 // ===================================
 - gamepad tester
 - add system debugger in the event the game crashed
-- fix D-pad reversal with some games (Godot-based games in particular)
+- fix D-pad reversal with some native Linux games (Godot-based games in particular)
 - per-game keyboard to gamepad mapping
 - make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
 - use OSK in-game
-- Bluetooth controller support -- IN PROGRESS
-- add option to safely unmount cart in main menu -- IN PROGRESS
+- add option to safely unmount cart in main menu
 - apply scale factor to loading screen after downloading/deleting a theme
 
 Hard
 - DVD functionality?
 - MP4 support for background videos?
 
-Unnecessary but cool
-- GCC overclocking support?
-- Slippi/Project+ support
+Maybe
+- built-in AppImage updater for things like RetroArch, Slippi, Project+, Ship of Harkinian, etc.
 
 // ===================================
 // NOTES
@@ -103,7 +101,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.33.KAZETA+";
+const VERSION_NUMBER: &str = "V1.36.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;

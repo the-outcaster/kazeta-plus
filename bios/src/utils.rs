@@ -175,6 +175,7 @@ pub fn trim_extension(filename: &str) -> &str {
 
 pub fn string_to_color(color_str: &str) -> Color {
     match color_str {
+        "BLACK" => BLACK,
         "PINK" => PINK,
         "RED" => RED,
         "ORANGE" => ORANGE,

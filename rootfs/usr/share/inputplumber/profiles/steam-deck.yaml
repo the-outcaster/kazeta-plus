@@ -17,3 +17,17 @@ mapping:
         button: RightPaddle1
     target_events:
       - keyboard: KeyF14
+
+  - name: Escape
+    source_event:
+      gamepad:
+        button: LeftPaddle2
+    target_events:
+      - keyboard: KeyEsc
+
+  - name: F1
+    source_event:
+      gamepad:
+        button: RightPaddle2
+    target_events:
+      - keyboard: KeyF1

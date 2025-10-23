@@ -65,6 +65,7 @@ pub const CUSTOM_ASSET_SETTINGS: &[&str] = &[
 
 pub const FONT_COLORS: &[&str] = &[
     "WHITE",
+    "BLACK",
     "PINK",
     "RED",
     "ORANGE",

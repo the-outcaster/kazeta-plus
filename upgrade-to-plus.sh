@@ -116,14 +116,12 @@ echo "--------------------------------------------------"
 echo -e "${YELLOW}Step 3: Installing/updating system packages and build tools...${NC}"
 pacman -Syy
 
-# -- ADDED -- base-devel, dkms, linux-headers are needed for the DKMS module
-# NOTE: Ensure 'linux-headers' matches the kernel Kazeta+ uses. If it's a custom
-# kernel, you might need a different headers package.
 PACKAGES_TO_INSTALL=(
     "brightnessctl" "keyd" "rsync" "xxhash" "iwd" "networkmanager"
     "ffmpeg" "unzip" "bluez" "bluez-utils"
     "base-devel" "dkms" "linux-headers"
     "noto-fonts" "ttf-dejavu" "ttf-liberation" "noto-fonts-emoji"
+    "pipewire-alsa" "alsa-utils"
 )
 
 # Install required packages (including build dependencies)
