@@ -209,6 +209,9 @@ pub fn draw(
     render_background(background_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, gcc_adapter_poll_rate, scale_factor);
 
+    // dim the background for easier legibility
+    draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
+
     let font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
     let line_height = font_size as f32 * 1.8;
@@ -290,7 +293,7 @@ async fn run_bluetooth_agent(
         request_confirmation: Some(Box::new(|req: RequestConfirmation| {
             println!(
                 "[BT_AGENT] Auto-accepting pairing confirmation (Passkey: {})",
-                     req.passkey
+                    req.passkey
             );
             // We return a Pinned Future that resolves to Ok(())
             Box::pin(async { Ok(()) })
@@ -532,7 +535,6 @@ async fn run_bluetooth_agent(
     println!("[BT_AGENT] Exiting run_bluetooth_agent.");
     Ok(())
 }
-
 
 fn manage_bluetooth_agent(
     tx: TokioSender<BluetoothMessage>,

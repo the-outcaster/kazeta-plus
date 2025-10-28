@@ -101,7 +101,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.36.KAZETA+";
+const VERSION_NUMBER: &str = "V1.37.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -341,6 +341,7 @@ async fn load_all_assets(
     logo_files: &[PathBuf],
     font_files: &[PathBuf],
     music_files: &[PathBuf],
+    scale_factor: f32,
 ) -> (
     HashMap<String, Texture2D>, // background cache
     HashMap<String, Texture2D>, // logo cache
@@ -349,8 +350,8 @@ async fn load_all_assets(
     SoundEffects, // sfx
 ) {
     let draw_loading_screen = |status_message: &str, progress: f32| {
-        let font_size = 16.0 as u16;
-        let line_spacing = 10.0;
+        let font_size = (16.0 * scale_factor) as u16;
+        let line_spacing = 10.0 * scale_factor;
         let lines: Vec<&str> = display_message.lines().collect();
 
         let total_text_height = (lines.len() as f32 * font_size as f32) + ((lines.len() - 1) as f32 * line_spacing);
@@ -364,16 +365,16 @@ async fn load_all_assets(
         }
 
         // --- Scale and draw the progress bar ---
-        let bar_height = 10.0;
-        let bar_width = screen_width() - 20.0; // Change to full screen width
-        let bar_x = 10.0; // Start at the far left
-        let bar_y = screen_height() - 20.0; // Position at the very bottom
+        let bar_height = 10.0 * scale_factor;
+        let bar_width = screen_width() - (20.0 * scale_factor); // Change to full screen width
+        let bar_x = 10.0 * scale_factor; // Start at the far left
+        let bar_y = screen_height() - (20.0 * scale_factor); // Position at the very bottom
 
         // The border is now a background fill
         draw_rectangle(bar_x, bar_y, bar_width, bar_height, WHITE);
 
         // Inset the red fill rectangle to create a border effect
-        let inset = 1.0; // The thickness of the border
+        let inset = 1.0 * scale_factor; // The thickness of the border
         draw_rectangle(
             bar_x + inset,
             bar_y + inset,
@@ -383,14 +384,14 @@ async fn load_all_assets(
         );
 
         // loading status
-        let status_font_size = 12 as u16;
+        let status_font_size = (12.0 * scale_factor) as u16;
         // Measure the status text to position it on the left, above the bar
         let status_dims = measure_text(status_message, Some(font), status_font_size, 1.0);
-        let status_y = screen_height() - bar_height - status_dims.height - (5.0); // 5px gap
+        let status_y = screen_height() - bar_height - status_dims.height - (5.0 * scale_factor); // 5px gap
 
         draw_text_ex(
             status_message,
-            10.0, // A small margin from the left
+            10.0 * scale_factor, // A small margin from the left
             status_y,
             TextParams { font: Some(font), font_size: status_font_size, color: WHITE, ..Default::default() },
         );
@@ -573,6 +574,10 @@ async fn main() {
     // find all asset files
     let (background_files, logo_files, font_files, music_files) = find_all_asset_files();
 
+    // Wait one frame for screen dimensions to be available for scaling
+    next_frame().await;
+    let scale_factor = screen_height() / BASE_SCREEN_HEIGHT;
+
     // load them
     let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) =
     load_all_assets(
@@ -582,7 +587,8 @@ async fn main() {
         &background_files,
         &logo_files,
         &font_files,
-        &music_files
+        &music_files,
+        scale_factor
     ).await;
 
     // --- SET THE ACTIVE THEME ---
@@ -1401,7 +1407,8 @@ async fn main() {
                     &background_files,
                     &logo_files,
                     &font_files,
-                    &music_files
+                    &music_files,
+                    scale_factor,
                 ).await;
 
                 // 4. After reloading, go back to the downloader screen

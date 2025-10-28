@@ -70,7 +70,7 @@ pub fn draw(
 
     let credit_lines = vec![
         "Original Kazeta concept by Alkazar.",
-        "Kazeta+ forked and developed by Linux Gaming Central.",
+        "\"Overly Complex\" Kazeta+ forked and developed by Linux Gaming Central.",
         "Kazeta website: kazeta.org",
         "Linux Gaming Central website: linuxgamingcentral.org",
     ];

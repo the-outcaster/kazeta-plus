@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+version: 1
+kind: DeviceProfile
+name: Steam Deck D-pad Reverse Fix
+description: Reverses D-pad direction AND keeps paddle brightness controls
+mapping:
+  - name: Brightness down
+    source_event:
+      gamepad: { button: LeftPaddle1 }
+    target_events:
+      - keyboard: KeyF13
+  - name: Brightness up
+    source_event:
+      gamepad: { button: RightPaddle1 }
+    target_events:
+      - keyboard: KeyF14
+  - name: Escape
+    source_event:
+      gamepad: { button: LeftPaddle2 }
+    target_events:
+      - keyboard: KeyEsc
+  - name: F1
+    source_event:
+      gamepad: { button: RightPaddle2 }
+    target_events:
+      - keyboard: KeyF1
+
+  # D-pad reversal fix
+  - name: D-Up -> D-Down
+    source_event:
+      gamepad: { button: DPadUp }
+    target_events:
+      - gamepad: { button: DPadDown }
+  - name: D-Down -> D-Up
+    source_event:
+      gamepad: { button: DPadDown }
+    target_events:
+      - gamepad: { button: DPadUp }
+  - name: D-Left -> D-Right
+    source_event:
+      gamepad: { button: DPadLeft }
+    target_events:
+      - gamepad: { button: DPadRight }
+  - name: D-Right -> D-Left
+    source_event:
+      gamepad: { button: DPadRight }
+    target_events:
+      - gamepad: { button: DPadLeft }

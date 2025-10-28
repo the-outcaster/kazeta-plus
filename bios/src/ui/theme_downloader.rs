@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{fs, io, path::{Path, PathBuf}, process::Command, thread};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use toml;
@@ -29,8 +29,13 @@ pub enum DownloaderState {
         theme_display_name: String,
         selection: usize,
     },
+    ConfirmRedownload {
+        theme: RemoteTheme,
+        selection: usize, // 0=Yes, 1=No
+    },
     ConfirmConvertToWav { selection: usize }, // 0=Yes, 1=No
     ConfirmConvertToOgg { selection: usize }, // 0=Yes, 1=No
+    ConfirmDeleteAllBGM { selection: usize },
     Converting(String), // Shows progress message, e.g., "Converting files..."
 }
 
@@ -47,6 +52,8 @@ pub struct RemoteTheme {
     pub author: String,
     pub description: String,
     pub download_url: String,
+    #[serde(default)]
+    pub is_installed: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -134,11 +141,27 @@ pub fn update(
 
     if let Ok(msg) = state.rx.try_recv() {
         match msg {
-            DownloaderMessage::ThemeList(Ok(themes)) => { state.themes = themes; state.screen_state = DownloaderState::DisplayingList; }
+            DownloaderMessage::ThemeList(Ok(mut themes)) => { // Make themes mutable
+                // Get a list of folders currently installed
+                let installed_themes = get_installed_theme_folders();
+
+                // Check each remote theme against the installed list
+                for theme in themes.iter_mut() {
+                    if installed_themes.contains(&theme.folder_name) {
+                        theme.is_installed = true;
+                    }
+                }
+
+                state.themes = themes;
+                state.screen_state = DownloaderState::DisplayingList;
+            }
             DownloaderMessage::ThemeList(Err(e)) => { state.screen_state = DownloaderState::Error(e); }
             DownloaderMessage::InstallResult(Ok(theme_name)) => { state.screen_state = DownloaderState::Success(format!("'{}' installed!", theme_name)); *current_screen = Screen::ReloadingThemes; }
             DownloaderMessage::InstallResult(Err(e)) => { state.screen_state = DownloaderState::Error(e); }
-            DownloaderMessage::ConversionResult(Ok(msg)) => { state.screen_state = DownloaderState::Success(msg); }
+            DownloaderMessage::ConversionResult(Ok(msg)) => {
+                state.screen_state = DownloaderState::Success(msg);
+                *current_screen = Screen::ReloadingThemes; // reload assets whenever we delete or convert BGM tracks
+            }
             DownloaderMessage::ConversionResult(Err(e)) => { state.screen_state = DownloaderState::Error(e); }
         }
     }
@@ -150,12 +173,11 @@ pub fn update(
 
     match &mut state.screen_state {
         DownloaderState::DisplayingList => {
-            let total_options = state.themes.len() + if state.has_audio_tools_option { 2 } else { 0 };
+            let total_options = state.themes.len() + if state.has_audio_tools_option { 3 } else { 0 };
             if total_options == 0 { return; }
 
             let total_pages = (total_options + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
 
-            // -- CHANGED -- Updated navigation logic for pagination
             if input_state.down {
                 if state.selected_index < total_options - 1 {
                     state.selected_index += 1;
@@ -190,29 +212,45 @@ pub fn update(
             if input_state.select {
                 sound_effects.play_select(config);
                 if state.selected_index < state.themes.len() {
-                    let theme_to_download = state.themes[state.selected_index].clone();
-                    state.screen_state = DownloaderState::Downloading(theme_to_download.name.clone());
-                    download_and_extract_theme(theme_to_download, state.tx.clone());
+                    let theme = state.themes[state.selected_index].clone();
+
+                    if theme.is_installed {
+                        // Theme is already installed, show confirmation
+                        state.screen_state = DownloaderState::ConfirmRedownload {
+                            theme: theme,
+                            selection: 1, // Default to "NO"
+                        };
+                    } else {
+                        // Not installed, download immediately
+                        state.screen_state = DownloaderState::Downloading(theme.name.clone());
+                        download_and_extract_theme(theme, state.tx.clone());
+                    }
                 } else {
+                    // This is the existing logic for audio tools
                     let tool_index = state.selected_index - state.themes.len();
                     if tool_index == 0 {
                         state.screen_state = DownloaderState::ConfirmConvertToWav { selection: 1 };
                     } else if tool_index == 1 {
                         state.screen_state = DownloaderState::ConfirmConvertToOgg { selection: 1 };
+                    } else if tool_index == 2 { // New option
+                        state.screen_state = DownloaderState::ConfirmDeleteAllBGM { selection: 1 };
                     }
                 }
             }
             // Handle delete
             if input_state.secondary && state.selected_index < state.themes.len() {
                 let theme_to_delete = &state.themes[state.selected_index];
-                if theme_to_delete.name != "Default" {
-                    sound_effects.play_select(config);
+
+                // Only allow deletion if the theme is installed AND it's not the "Default" theme
+                if theme_to_delete.is_installed && theme_to_delete.name != "Default" {
+                    sound_effects.play_select(config); // Or a "delete" sound
                     state.screen_state = DownloaderState::ConfirmDelete {
                         theme_folder_name: theme_to_delete.folder_name.clone(),
                         theme_display_name: theme_to_delete.name.clone(),
-                        selection: 1,
+                        selection: 1, // Default to "NO"
                     };
                 } else {
+                    // Play reject sound if theme is not installed or is "Default"
                     sound_effects.play_reject(config);
                 }
             }
@@ -234,6 +272,30 @@ pub fn update(
                     state.screen_state = DownloaderState::DisplayingList;
                 }
             }
+            if input_state.back {
+                sound_effects.play_back(config);
+                state.screen_state = DownloaderState::DisplayingList;
+            }
+        }
+        DownloaderState::ConfirmRedownload { theme, selection } => {
+            if input_state.left || input_state.right {
+                *selection = 1 - *selection; // Flips between 0 (Yes) and 1 (No)
+                sound_effects.play_cursor_move(config);
+            }
+            if input_state.select {
+                sound_effects.play_select(config);
+                if *selection == 0 { // User selected YES
+                    // Clone the theme *before* changing the state,
+                    // so we are not using the borrowed `theme` variable after the state change.
+                    let theme_to_download = theme.clone();
+
+                    state.screen_state = DownloaderState::Downloading(theme_to_download.name.clone());
+                    download_and_extract_theme(theme_to_download, state.tx.clone());
+                } else { // User selected NO
+                    state.screen_state = DownloaderState::DisplayingList;
+                }
+            }
+            // Back button also cancels
             if input_state.back {
                 sound_effects.play_back(config);
                 state.screen_state = DownloaderState::DisplayingList;
@@ -261,6 +323,22 @@ pub fn update(
                 } else { // NO
                     state.screen_state = DownloaderState::DisplayingList;
                 }
+            }
+        }
+        DownloaderState::ConfirmDeleteAllBGM { selection } => {
+            if input_state.left || input_state.right { *selection = 1 - *selection; sound_effects.play_cursor_move(config); }
+            if input_state.select {
+                sound_effects.play_select(config);
+                if *selection == 0 { // YES
+                    state.screen_state = DownloaderState::Converting("Deleting all BGM files...".to_string());
+                    delete_all_bgm_files(state.tx.clone()); // Call the new function
+                } else { // NO
+                    state.screen_state = DownloaderState::DisplayingList;
+                }
+            }
+            if input_state.back {
+                sound_effects.play_back(config);
+                state.screen_state = DownloaderState::DisplayingList;
             }
         }
         DownloaderState::Success(_) | DownloaderState::Error(_) => {
@@ -312,8 +390,7 @@ pub fn draw(
             text_with_config_color(font_cache, config, text, screen_width() / 2.0 - text_dims.width / 2.0, screen_height() / 2.0, font_size);
         }
         DownloaderState::DisplayingList => {
-            // -- REWRITTEN -- Pagination logic
-            let total_options = state.themes.len() + if state.has_audio_tools_option { 2 } else { 0 };
+            let total_options = state.themes.len() + if state.has_audio_tools_option { 3 } else { 0 };
             if total_options == 0 {
                 text_with_config_color(font_cache, config, "No themes or tools available.", text_x, text_y_start, font_size);
                 return;
@@ -333,11 +410,14 @@ pub fn draw(
                 }
 
                 let display_text = if i < state.themes.len() {
-                    format!("{} by {}", state.themes[i].name, state.themes[i].author)
+                    let theme = &state.themes[i];
+                    let installed_flag = if theme.is_installed { " [INSTALLED]" } else { "" };
+                    format!("{} by {}{}", theme.name, theme.author, installed_flag)
                 } else {
                     let tool_index = i - state.themes.len();
                     if tool_index == 0 { "Audio Tools: Convert .OGG to .WAV".to_string() }
-                    else { "Audio Tools: Convert .WAV to .OGG".to_string() }
+                    else if tool_index == 1 { "Audio Tools: Convert .WAV to .OGG".to_string() }
+                    else { "Audio Tools: Delete All BGM Tracks".to_string() } // New option
                 };
                 text_with_config_color(font_cache, config, &display_text, text_x, y_pos, font_size);
             }
@@ -359,8 +439,11 @@ pub fn draw(
                 let tool_index = state.selected_index - state.themes.len();
                 if tool_index == 0 {
                     "Converts space-saving .ogg files into faster-loading .wav files.\n\nThis uses more disk space.".to_string()
-                } else {
+                } else if tool_index == 1 {
                     "Converts large .wav files into space-saving .ogg files.\n\nThis may increase theme loading times.".to_string()
+                } else {
+                    // New description
+                    "Deletes all .wav and .ogg BGM files from all theme and bgm folders.\n\nThis will NOT delete sound effects (SFX) packs.".to_string()
                 }
             };
 
@@ -416,6 +499,39 @@ pub fn draw(
             let cursor_color = animation_state.get_cursor_color(config);
             draw_rectangle_lines(cursor_x - 5.0, options_y - font_size as f32, cursor_w + 10.0, line_height, 3.0, cursor_color);
         }
+        DownloaderState::ConfirmRedownload { theme, selection } => {
+            let dialog_w = 500.0 * scale_factor; // Made dialog wider for new text
+            let dialog_h = 170.0 * scale_factor; // Made dialog taller
+            let dialog_x = screen_width() / 2.0 - dialog_w / 2.0;
+            let dialog_y = screen_height() / 2.0 - dialog_h / 2.0;
+            draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::new(0.1, 0.1, 0.1, 0.9));
+            draw_rectangle_lines(dialog_x, dialog_y, dialog_w, dialog_h, 3.0, WHITE);
+
+            // Line 1
+            let question = format!("'{}' is already installed.", theme.name);
+            let question_dims = measure_text(&question, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, &question, screen_width() / 2.0 - question_dims.width / 2.0, dialog_y + 40.0 * scale_factor, font_size);
+
+            // Line 2
+            let question2 = "Re-download and overwrite?";
+            let question_dims2 = measure_text(question2, Some(font), font_size, 1.0);
+            text_with_config_color(font_cache, config, question2, screen_width() / 2.0 - question_dims2.width / 2.0, dialog_y + 40.0 * scale_factor + line_height, font_size);
+
+            let yes_text = "YES";
+            let no_text = "NO";
+            let yes_dims = measure_text(yes_text, Some(font), font_size, 1.0);
+            let no_dims = measure_text(no_text, Some(font), font_size, 1.0);
+            let yes_x = screen_width() / 2.0 - yes_dims.width - 20.0 * scale_factor;
+            let no_x = screen_width() / 2.0 + 20.0 * scale_factor;
+            let options_y = dialog_y + dialog_h - 50.0 * scale_factor;
+            text_with_config_color(font_cache, config, yes_text, yes_x, options_y, font_size);
+            text_with_config_color(font_cache, config, no_text, no_x, options_y, font_size);
+
+            let cursor_x = if *selection == 0 { yes_x } else { no_x };
+            let cursor_w = if *selection == 0 { yes_dims.width } else { no_dims.width };
+            let cursor_color = animation_state.get_cursor_color(config);
+            draw_rectangle_lines(cursor_x - 5.0, options_y - font_size as f32, cursor_w + 10.0, line_height, 3.0, cursor_color);
+        }
         DownloaderState::ConfirmConvertToWav { selection } => {
             // -- FIX -- Pass `font` directly without cloning
             draw_conversion_dialog(
@@ -438,6 +554,20 @@ pub fn draw(
                     "This will convert all .wav BGM files to .ogg format.",
                     "Benefits: Frees up a lot of disk space.",
                     "Drawbacks: Slower theme loading times.",
+                ],
+                *selection
+            );
+        }
+        DownloaderState::ConfirmDeleteAllBGM { selection } => {
+            draw_conversion_dialog(
+                font_cache, config, font, font_size, line_height, scale_factor, animation_state,
+                "Delete All BGM Tracks?",
+                &[
+                    "This will delete all .wav and .ogg files from:",
+                    "  - /themes/...",
+                    "  - /bgm/...",
+                    "\nSound effect packs (SFX) will NOT be touched.",
+                    "This cannot be undone.",
                 ],
                 *selection
             );
@@ -516,6 +646,7 @@ fn fetch_theme_list(tx: Sender<DownloaderMessage>) {
                                 author,
                                 description: release.body,
                                 download_url: asset.browser_download_url.clone(),
+                                is_installed: false,
                             }
                         })
                     }).collect();
@@ -656,4 +787,80 @@ fn update_theme_toml(audio_path: &Path, new_ext: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Scans the user's themes directory and returns a HashSet of installed theme folder names.
+fn get_installed_theme_folders() -> HashSet<String> {
+    if let Some(themes_dir) = get_user_data_dir().map(|d| d.join("themes")) {
+        if let Ok(entries) = fs::read_dir(themes_dir) {
+            // Use flatten() to filter out any read errors on individual entries
+            return entries.flatten()
+            .filter_map(|entry| {
+                // Check if it's a directory
+                if entry.path().is_dir() {
+                    // Try to convert the file/folder name to a String
+                    entry.file_name().into_string().ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        }
+    }
+    // Return an empty set if any step failed
+    HashSet::new()
+}
+
+fn delete_all_bgm_files(tx: Sender<DownloaderMessage>) {
+    thread::spawn(move || {
+        let result = (|| -> Result<String, String> {
+            let wav_files = find_files_by_extension(".wav")?;
+            let ogg_files = find_files_by_extension(".ogg")?;
+
+            if wav_files.is_empty() && ogg_files.is_empty() {
+                return Ok("No BGM files found to delete.".to_string());
+            }
+
+            let mut delete_count = 0;
+            let mut toml_paths = HashSet::new();
+
+            // Iterate over all files, delete them, and collect their parent toml paths
+            for path in wav_files.iter().chain(ogg_files.iter()) {
+                // Find the theme.toml file *before* deleting the file
+                if let Some(parent) = path.parent() {
+                    let toml_path = parent.join("theme.toml");
+                    if toml_path.exists() {
+                        toml_paths.insert(toml_path);
+                    }
+                }
+
+                // Delete the file
+                if fs::remove_file(path).is_ok() {
+                    delete_count += 1;
+                } else {
+                    eprintln!("[WARN] Failed to delete file: {}", path.display());
+                }
+            }
+
+            // Now, update all collected theme.toml files
+            for toml_path in toml_paths {
+                if let Ok(content) = fs::read_to_string(&toml_path) {
+                    if let Ok(mut theme_data) = toml::from_str::<ThemeToml>(&content) {
+                        // Set bgm_track to None (which serializes as it being removed or null)
+                        theme_data.bgm_track = None;
+
+                        // Reserialize and write back
+                        if let Ok(new_content) = toml::to_string(&theme_data) {
+                            let _ = fs::write(toml_path, new_content);
+                        }
+                    }
+                }
+            }
+
+            Ok(format!("Successfully deleted {} BGM file(s)!", delete_count))
+        })();
+
+        // Send the result back, whether Ok or Err
+        tx.send(DownloaderMessage::ConversionResult(result)).unwrap_or_default();
+    });
 }

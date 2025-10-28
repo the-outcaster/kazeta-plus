@@ -496,7 +496,14 @@ pub fn draw(
             if !state.media.is_empty() {
                 // Draw storage info text (NOW in the correct, scaled box)
                 text_with_config_color(font_cache, config, &state.media[state.selected].id.to_uppercase(), storage_info_x + (2.0 * scale_factor), storage_info_y + (17.0 * scale_factor), font_size);
-                let free_space_text = format!("{} MB Free", state.media[state.selected].free as f32).to_uppercase();
+
+                // Get free space in MB
+                let free_mb = state.media[state.selected].free as f32;
+                // Convert MB to GB
+                let free_gb = free_mb / 1024.0;
+
+                // Format to show GB with one decimal place
+                let free_space_text = format!("{:.1} GB Free", free_gb).to_uppercase();
                 text_with_config_color(font_cache, config, &free_space_text, storage_info_x + (2.0 * scale_factor), storage_info_y + (33.0 * scale_factor), font_size);
 
                 // Draw left arrow background

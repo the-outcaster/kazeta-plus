@@ -10,18 +10,18 @@ use crate::audio::{SoundEffects, play_new_bgm};
 use crate::config::Config;
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
-use crate::{FONT_SIZE, MENU_PADDING};
-use crate::{DEV_MODE, theme};
 
 // Import types/structs/constants that are still in main.rs
 use crate::{
     AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen,
     render_background, render_ui_overlay, get_current_font, measure_text,
-    text_with_config_color,
+    text_with_config_color, DEV_MODE, theme
 };
 
+const FONT_SIZE: u16 = 12;
+const MENU_PADDING: f32 = 6.0;
 const SETTINGS_START_Y: f32 = 80.0;
-const SETTINGS_OPTION_HEIGHT: f32 = 30.0;
+const SETTINGS_OPTION_HEIGHT: f32 = 25.0;
 
 pub const GENERAL_SETTINGS: &[&str] = &[
     "RESET SETTINGS",

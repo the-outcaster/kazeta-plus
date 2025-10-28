@@ -1,5 +1,5 @@
 # Kazeta+
-Fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that adds several features:
+The "overly complex" fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that adds several features:
 - multi-cart support
 - multi-resolution support
 - multi-audio sink support, with adjustable volume controls
@@ -12,6 +12,7 @@ Fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that a
 - Bluetooth controller support
 - native GameCube controller adapter support, overclocked to 1,000 Hz
 - fixes for missing fonts in certain applications (and may even fix apps that only had a black screen)
+- D-pad reversal fix for native Linux games
 
 ![Kazeta+ About page](https://i.imgur.com/kQiAVvc.png)
 

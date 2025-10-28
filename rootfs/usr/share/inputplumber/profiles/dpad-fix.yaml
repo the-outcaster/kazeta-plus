@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+version: 1
+kind: DeviceProfile
+name: D-pad Reverse Fix
+description: Reverses D-pad direction
+mapping:
+  - name: D-Up -> D-Down
+    source_event:
+      gamepad: { button: DPadUp }
+    target_events:
+      - gamepad: { button: DPadDown }
+  - name: D-Down -> D-Up
+    source_event:
+      gamepad: { button: DPadDown }
+    target_events:
+      - gamepad: { button: DPadUp }
+  - name: D-Left -> D-Right
+    source_event:
+      gamepad: { button: DPadLeft }
+    target_events:
+      - gamepad: { button: DPadRight }
+  - name: D-Right -> D-Left
+    source_event:
+      gamepad: { button: DPadRight }
+    target_events:
+      - gamepad: { button: DPadLeft }
