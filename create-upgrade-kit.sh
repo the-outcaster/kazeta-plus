@@ -92,8 +92,8 @@ else
     cp "$SOURCE_DIR/bios/target/debug/kazeta-bios" "$KIT_FULL_PATH/rootfs/usr/bin/"
 fi
 
-echo "Copying inputplumber profile..."
-cp "$SOURCE_DIR/rootfs/usr/share/inputplumber/profiles/steam-deck.yaml" "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles/"
+echo "Copying inputplumber profiles..."
+cp "$SOURCE_DIR/rootfs/usr/share/inputplumber/profiles/"*.yaml "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles/"
 
 echo "Copying gcadapter-oc-dkms source..."
 cp -r "$SOURCE_DIR/aur-pkgs/gcadapter-oc-dkms" "$KIT_FULL_PATH/aur-pkgs/"
