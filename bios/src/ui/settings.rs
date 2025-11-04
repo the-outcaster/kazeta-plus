@@ -31,6 +31,7 @@ pub const GENERAL_SETTINGS: &[&str] = &[
     "BRIGHTNESS",
     "WI-FI",
     "BLUETOOTH",
+    "AUTOBOOT",
     "AUDIO SETTINGS",
 ];
 
@@ -215,7 +216,8 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
             4 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
             5 => if config.wifi { "ON" } else { "OFF" }.to_string(), // WI-FI
             6 => if config.bluetooth { "ON" } else { "OFF" }.to_string(), // BLUETOOTH
-            7 => "->".to_string(),
+            7 => if config.autoboot { "ON" } else { "OFF" }.to_string(), // AUTOBOOT
+            8 => "->".to_string(),
             _ => "".to_string(),
         },
         // AUDIO SETTINGS
@@ -480,7 +482,14 @@ pub fn update(
                     }
                 }
             },
-            7 => { // GO TO AUDIO SETTINGS
+            7 => { // AUTOBOOT
+                if input_state.left || input_state.right {
+                    config.autoboot = !config.autoboot;
+                    config.save();
+                    sound_effects.play_cursor_move(&config);
+                }
+            },
+            8 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;

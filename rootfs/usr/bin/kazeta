@@ -13,6 +13,19 @@ if [ "$1" == "--bios" ]; then
     exit 0
 fi
 
+# check for autoboot disabled
+BIOS_CONFIG_FILE="$HOME/.local/share/kazeta-plus/config.toml"
+
+if [ -f "$BIOS_CONFIG_FILE" ]; then
+    # Check if autoboot is set to false.
+    # We use a regex to ignore whitespace around the = sign.
+    if grep -q "^\s*autoboot\s*=\s*false\s*$" "$BIOS_CONFIG_FILE"; then
+        echo "DEBUG: Autoboot disabled in $BIOS_CONFIG_FILE. Booting to BIOS."
+        gamescope --filter pixel -- kazeta-bios
+        exit 0
+    fi
+fi
+
 BASE_DIR="$HOME/.local/share/kazeta"
 if [[ ! -d "${BASE_DIR}" ]]; then
 	mkdir -p "${BASE_DIR}"
@@ -41,6 +54,8 @@ function start_playtime_capture {
 	done
 }
 
+# old cart logic
+<<COMMENT
 # Check if a specific .kzi file was passed as an argument
 if [ -n "$1" ] && [ -f "$1" ]; then
     cart_info="$1"
@@ -55,9 +70,46 @@ else
         fi
     done
 fi
+COMMENT
+
+# Check if a specific .kzi file was passed as an argument
+# this new method checks to see if there are any .kzi files that have the default game boot option
+if [ -n "$1" ] && [ -f "$1" ]; then
+    cart_info="$1"
+else
+    # If not, wait up to 2 seconds for any cart
+    for i in $(seq 1 20); do
+        # First, try to find a "default" cart.
+        # We use -exec grep -l ... {} + which is efficient.
+        # It finds all *.kzi, greps them, and lists files that match.
+        # We pipe to head -1 to just get the first match (in case multiple are set).
+        # We also add 2>/dev/null to hide "Permission denied" errors.
+        cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" -exec grep -l "^SetAsDefaultGame=true$" {} + 2>/dev/null | head -1)
+
+        if [ -f "$cart_info" ]; then
+            # Found a default cart. Break the loop.
+            echo "DEBUG: Found default cart: $cart_info"
+            break
+        fi
+
+        # If no default cart was found, try to find *any* cart (original behavior)
+        cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" 2>/dev/null | head -1)
+
+        if [ -f "$cart_info" ]; then
+            # Found *a* cart (just not a default). Break the loop.
+            echo "DEBUG: Found first available cart: $cart_info"
+            break
+        else
+            # No .kzi files found at all. Sleep and try again.
+            sleep 0.1
+        fi
+    done
+fi
 
 if [[ ! -f "${cart_info}" ]]; then
 	# no cart found, start bios/memory management app
+	echo "DEBUG: No valid cart_info, launching BIOS."
+
 	gamescope --filter pixel -- kazeta-bios
 	exit 0
 fi

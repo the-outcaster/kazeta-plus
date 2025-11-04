@@ -147,7 +147,25 @@ pub fn render_ui_overlay(
         }
     }
 
-    // Battery and Clock
+    // Clock
+    let time_dims = measure_text(current_time_str, Some(current_font), font_size, 1.0);
+
+    // If the menu is in the top-right, move the clock to the top-left.
+    let time_x = if config.menu_position == MenuPosition::TopRight {
+        20.0 * scale_factor
+    } else {
+        screen_width() - time_dims.width - (20.0 * scale_factor)
+    };
+    text_with_config_color(
+        font_cache,
+        config,
+        current_time_str,
+        time_x,
+        20.0 * scale_factor,
+        font_size,
+    );
+
+    // Battery
     if let Some(info) = battery_info {
         let status_symbol = match info.status.as_str() {
             "Charging" => "+",
@@ -155,24 +173,6 @@ pub fn render_ui_overlay(
             "Full" => "✓",
             _ => " ", // For "Unknown" or other statuses
         };
-
-        // print clock
-        let time_dims = measure_text(current_time_str, Some(current_font), font_size, 1.0);
-
-        // If the menu is in the top-right, move the clock to the top-left.
-        let time_x = if config.menu_position == MenuPosition::TopRight {
-            20.0 * scale_factor
-        } else {
-            screen_width() - time_dims.width - (20.0 * scale_factor)
-        };
-        text_with_config_color(
-            font_cache,
-            config,
-            current_time_str,
-            time_x,
-            20.0 * scale_factor,
-            font_size,
-        );
 
         // print battery
         let battery_text = format!("BATTERY: {}% {}", info.percentage, status_symbol);
@@ -463,7 +463,7 @@ pub fn render_dialog_box(
         text_with_config_color(font_cache, config, opt2, no_x, option_y, font_size);
 
     } else { // No options, just an "OK" implied for the Reset Complete screen
-        let ok_text = "PRESS A TO SHUT DOWN";
+        let ok_text = "PRESS [SOUTH] TO RESTART";
         let text_dims = measure_text(ok_text, Some(current_font), font_size, 1.0);
         let text_x = screen_width() / 2.0 - text_dims.width / 2.0;
         let text_y = box_y + box_height - 40.0 * scale_factor;

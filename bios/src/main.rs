@@ -55,12 +55,9 @@ pub use types::*;
 // ===================================
 - gamepad tester
 - add system debugger in the event the game crashed
-- fix D-pad reversal with some native Linux games (Godot-based games in particular)
-- per-game keyboard to gamepad mapping
-- make the multi-cart selector UI similar to that of the SM3D All Stars Deluxe
-- use OSK in-game
 - add option to safely unmount cart in main menu
-- apply scale factor to loading screen after downloading/deleting a theme
+- add autoboot option in Settings
+- let user decide which game should autoboot in game selection menu
 
 Hard
 - DVD functionality?
@@ -101,7 +98,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.37.KAZETA+";
+const VERSION_NUMBER: &str = "V1.38f.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -533,12 +530,16 @@ async fn main() {
     let mut config = Config::load();
 
     // AUDIO SINKS
+    // Load the list of sinks so the Settings menu can use it.
+    // We will NOT try to set a default here.
     let available_sinks = get_available_sinks();
     println!("[Debug] Sinks loaded at startup: {:#?}", available_sinks);
 
-    // If the saved sink isn't available, reset to "Auto"
-    if !available_sinks.iter().any(|s| s.name == config.audio_output) {
+    // If the saved sink isn't available, reset the config value to "Auto"
+    if !available_sinks.iter().any(|s| s.name == config.audio_output) && config.audio_output != "Auto" {
+        println!("[WARN] Saved audio sink '{}' not found. Reverting to 'Auto'.", config.audio_output);
         config.audio_output = "Auto".to_string();
+        config.save();
     }
 
     // FLASH MESSENGER
