@@ -56,8 +56,6 @@ pub use types::*;
 - gamepad tester
 - add system debugger in the event the game crashed
 - add option to safely unmount cart in main menu
-- add autoboot option in Settings
-- let user decide which game should autoboot in game selection menu
 
 Hard
 - DVD functionality?
