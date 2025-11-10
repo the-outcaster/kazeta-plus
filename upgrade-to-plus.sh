@@ -36,7 +36,7 @@ echo -e "Found Kazeta installation at: ${YELLOW}$DEPLOYMENT_DIR${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                  INSTALL LOCAL WI-FI PACKAGES
+###                 INSTALL LOCAL WI-FI PACKAGES
 ### ===================================================================
 # This step allows users without Ethernet to get Wi-Fi drivers and tools
 # installed from a separate, manually placed folder.
@@ -110,7 +110,7 @@ echo "--------------------------------------------------"
 
 
 ### ===================================================================
-###         SYSTEM PACKAGE UPGRADE & BUILD TOOLS
+###                 SYSTEM PACKAGE UPGRADE & BUILD TOOLS
 ### ===================================================================
 
 echo -e "${YELLOW}Step 3: Installing/updating system packages and build tools...${NC}"
@@ -136,7 +136,7 @@ echo "--------------------------------------------------"
 
 
 ### ===================================================================
-###         BUILD AND INSTALL GC ADAPTER OVERCLOCK MODULE (DKMS)
+###           BUILD AND INSTALL GC ADAPTER OVERCLOCK MODULE (DKMS)
 ### ===================================================================
 
 echo -e "${YELLOW}Step 4: Building and installing GCC overclocking module...${NC}"
@@ -175,12 +175,6 @@ if [ -d "$GC_MODULE_SRC_DIR" ] && [ -f "$GC_MODULE_SRC_DIR/PKGBUILD" ]; then
     echo "  -> Installing built package..."
     pacman -U --noconfirm --needed "$PACKAGE_FILE"
 
-    # (Optional: Clean up built package file after install)
-    # rm -f "$PACKAGE_FILE"
-
-    # (Optional: Change ownership back, though it's in /tmp so maybe not critical)
-    # chown -R 0:0 .
-
     popd > /dev/null
     echo -e "${GREEN}  -> GCC overclocking module installed successfully.${NC}"
 else
@@ -193,18 +187,17 @@ echo "--------------------------------------------------"
 ### ===================================================================
 
 echo -e "${YELLOW}Step 5: Copying new system files...${NC}"
+# This rsync will now ALSO copy the new optical drive files from the kit.
+echo "  -> Copying /etc files (sudoers, systemd, udev, etc)..."
 rsync -av "$SCRIPT_DIR/rootfs/etc/" "$DEPLOYMENT_DIR/etc/"
+echo "  -> Copying /usr/share files (inputplumber)..."
 rsync -av "$SCRIPT_DIR/rootfs/usr/share/" "$DEPLOYMENT_DIR/usr/share/"
 
-# udev rule for GCC adapter
+# Note: The '51-gcadapter.rules' is now handled by the rsync above,
+# but we'll keep this check just in case it's missing, as it's not critical.
 UDEV_RULES_SRC="$SCRIPT_DIR/rootfs/etc/udev/rules.d/51-gcadapter.rules"
-UDEV_RULES_DEST_DIR="$DEPLOYMENT_DIR/etc/udev/rules.d"
-if [ -f "$UDEV_RULES_SRC" ]; then
-    echo "  -> Copying udev rule for GameCube adapter..."
-    mkdir -p "$UDEV_RULES_DEST_DIR" # Ensure destination directory exists
-    cp "$UDEV_RULES_SRC" "$UDEV_RULES_DEST_DIR/"
-else
-    echo -e "${YELLOW}  -> WARNING: 51-gcadapter.rules not found in kit. Skipping.${NC}"
+if [ ! -f "$UDEV_RULES_SRC" ]; then
+    echo -e "${YELLOW}  -> WARNING: 51-gcadapter.rules not found in kit. This is non-critical.${NC}"
 fi
 
 echo "  -> Correcting ownership and permissions for sudoers.d..."
@@ -215,7 +208,8 @@ if [ -d "$SUDOERS_D_DIR" ]; then
     find "$SUDOERS_D_DIR" -type f -exec chmod 440 {} \;
 fi
 
-# udev permissions
+echo "  -> Correcting ownership and permissions for udev rules..."
+UDEV_RULES_DEST_DIR="$DEPLOYMENT_DIR/etc/udev/rules.d"
 if [ -d "$UDEV_RULES_DEST_DIR" ]; then
     chown -R root:root "$UDEV_RULES_DEST_DIR"
     chmod 755 "$UDEV_RULES_DEST_DIR"
@@ -239,6 +233,7 @@ done
 echo -e "${GREEN}System files updated.${NC}"
 echo "--------------------------------------------------"
 
+
 ### ===================================================================
 ###                       RELOAD UDEV RULES
 ### ===================================================================
@@ -253,7 +248,11 @@ echo "--------------------------------------------------"
 ### ===================================================================
 
 echo -e "${YELLOW}Step 7: Enabling new system services...${NC}"
-# -- CHANGED -- Added "bluetooth.service"
+
+# Reload systemd so it sees the new services (like optical-mount)
+echo "  -> Reloading systemd daemon..."
+systemctl daemon-reload
+
 SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
     echo "  -> Enabling and starting $service..."
@@ -263,8 +262,8 @@ echo -e "${GREEN}Services enabled.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                    COPY CUSTOM ASSETS
-### ===================================================================
+###                       COPY CUSTOM ASSETS
+### =================================S==================================
 
 echo -e "${YELLOW}Step 8: Copying custom user assets...${NC}"
 DEST_ASSET_DIR="$DEPLOYMENT_DIR/home/gamer/.local/share/kazeta-plus"
@@ -280,7 +279,7 @@ echo -e "${GREEN}Custom assets processed.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
-###                           COMPLETE
+###                             COMPLETE
 ### ===================================================================
 
 echo -e "${GREEN}Upgrade to Kazeta+ is complete!${NC}"

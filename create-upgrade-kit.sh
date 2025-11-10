@@ -73,8 +73,15 @@ echo "Download complete."
 echo "Copying files from rootfs..."
 cp "$SOURCE_DIR/rootfs/etc/keyd/default.conf" "$KIT_FULL_PATH/rootfs/etc/keyd/"
 cp "$SOURCE_DIR/rootfs/etc/sudoers.d/99-kazeta-plus" "$KIT_FULL_PATH/rootfs/etc/sudoers.d/"
+
+echo "Copying systemd services..."
 cp "$SOURCE_DIR/rootfs/etc/systemd/system/kazeta-profile-loader.service" "$KIT_FULL_PATH/rootfs/etc/systemd/system/"
+cp "$SOURCE_DIR/rootfs/etc/systemd/system/optical-mount@.service" "$KIT_FULL_PATH/rootfs/etc/systemd/system/"
+cp "$SOURCE_DIR/rootfs/etc/systemd/system/optical-unmount@.service" "$KIT_FULL_PATH/rootfs/etc/systemd/system/"
+
+echo "Copying udev rules..."
 cp "$SOURCE_DIR/rootfs/etc/udev/rules.d/51-gcadapter.rules" "$KIT_FULL_PATH/rootfs/etc/udev/rules.d/"
+cp "$SOURCE_DIR/rootfs/etc/udev/rules.d/99-optical-automount.rules" "$KIT_FULL_PATH/rootfs/etc/udev/rules.d/"
 
 echo "Copying shell scripts..."
 scripts_to_copy=( "ethernet-connect" "kazeta" "kazeta-copy-logs" "kazeta-mount" "kazeta-session" "kazeta-wifi-setup" )
