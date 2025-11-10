@@ -62,12 +62,11 @@ mkdir -p "$KIT_FULL_PATH/rootfs/usr/share/inputplumber/profiles"
 mkdir -p "$KIT_FULL_PATH/aur-pkgs"
 echo "Directory structure created."
 
-# 5. Download the main upgrade script
-echo "Downloading upgrade-to-plus.sh script..."
-curl -sL "https://raw.githubusercontent.com/the-outcaster/kazeta-plus/main/upgrade-to-plus.sh" \
-     -o "$KIT_FULL_PATH/upgrade-to-plus.sh"
+# 5. Copy the main upgrade script
+echo "Copying upgrade-to-plus.sh script from local source..."
+cp "$SOURCE_DIR/upgrade-to-plus.sh" "$KIT_FULL_PATH/upgrade-to-plus.sh"
 chmod +x "$KIT_FULL_PATH/upgrade-to-plus.sh"
-echo "Download complete."
+echo "Copy complete."
 
 # 6. Copy all necessary files from your local dev environment
 echo "Copying files from rootfs..."
