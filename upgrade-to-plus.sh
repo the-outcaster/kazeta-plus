@@ -122,7 +122,7 @@ PACKAGES_TO_INSTALL=(
     "base-devel" "dkms" "linux-headers"
     "noto-fonts" "ttf-dejavu" "ttf-liberation" "noto-fonts-emoji"
     "pipewire-alsa" "alsa-utils"
-    "steam" "mangohud" "lib32-mangohud" "gamemode" "lib32-gamemode" "openssh"
+    "mangohud" "lib32-mangohud" "gamemode" "lib32-gamemode" "openssh" "nano"
 )
 
 # Install required packages (including build dependencies)
@@ -253,29 +253,12 @@ echo -e "${YELLOW}Step 7: Enabling new system services...${NC}"
 echo "  -> Reloading systemd daemon..."
 systemctl daemon-reload
 
-SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service")
+SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service" "sshd.service" "pipewire-pulse.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
     echo "  -> Enabling and starting $service..."
     systemctl enable --now "$service"
 done
 echo -e "${GREEN}Services enabled.${NC}"
-echo "--------------------------------------------------"
-
-### ===================================================================
-###                       COPY CUSTOM ASSETS
-### =================================S==================================
-
-echo -e "${YELLOW}Step 8: Copying custom user assets...${NC}"
-DEST_ASSET_DIR="$DEPLOYMENT_DIR/home/gamer/.local/share/kazeta-plus"
-SOURCE_ASSET_DIR="$SCRIPT_DIR/custom_assets_template"
-mkdir -p "$DEST_ASSET_DIR"
-if [ -z "$(ls -A $SOURCE_ASSET_DIR 2>/dev/null)" ]; then
-    echo "  -> No custom assets found. Skipping."
-else
-    cp -ruv "$SOURCE_ASSET_DIR/"* "$DEST_ASSET_DIR/"
-fi
-chown -R 1000:1000 "$DEST_ASSET_DIR"
-echo -e "${GREEN}Custom assets processed.${NC}"
 echo "--------------------------------------------------"
 
 ### ===================================================================
