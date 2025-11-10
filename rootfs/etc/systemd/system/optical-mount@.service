@@ -1,0 +1,7 @@
+[Unit]
+Description=Mount Optical Media (%i)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mkdir -p /run/media/%I
+ExecStart=/usr/bin/mount /dev/%I /run/media/%I

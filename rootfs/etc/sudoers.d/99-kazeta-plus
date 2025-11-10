@@ -19,6 +19,10 @@
 # kazeta+ upgrade
 %wheel ALL=(ALL:ALL) NOPASSWD: /tmp/kazeta-plus-upgrade-kit-*/upgrade-to-plus.sh
 
+# Allow the gamer user to run rm on the kazeta work and save cache dirs
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/rm -rf /home/gamer/.local/share/kazeta/run/work
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/rm -rf /home/gamer/.local/share/kazeta/saves/default/*/.kazeta/share
+
 # Allow passwordless reboot and shutdown
 %wheel ALL=(ALL) NOPASSWD: /usr/sbin/reboot
 %wheel ALL=(ALL) NOPASSWD: /usr/sbin/shutdown

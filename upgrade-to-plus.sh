@@ -122,6 +122,7 @@ PACKAGES_TO_INSTALL=(
     "base-devel" "dkms" "linux-headers"
     "noto-fonts" "ttf-dejavu" "ttf-liberation" "noto-fonts-emoji"
     "pipewire-alsa" "alsa-utils"
+    "steam" "mangohud" "lib32-mangohud" "gamemode" "lib32-gamemode" "openssh"
 )
 
 # Install required packages (including build dependencies)
@@ -186,7 +187,6 @@ else
     echo -e "${YELLOW}  -> Source directory for gcadapter-oc-dkms not found. Skipping module installation.${NC}"
 fi
 echo "--------------------------------------------------"
-
 
 ### ===================================================================
 ###                 SYSTEM FILE COPY & SERVICES

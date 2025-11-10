@@ -1,0 +1,7 @@
+[Unit]
+Description=Unmount Optical Media (%i)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/umount /run/media/%I
+ExecStart=/usr/bin/rmdir /run/media/%I

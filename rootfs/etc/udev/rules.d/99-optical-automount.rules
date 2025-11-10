@@ -1,0 +1,3 @@
+KERNEL=="sr[0-9]*", ACTION=="add",     RUN+="/usr/bin/systemctl --no-block start optical-mount@%k.service"
+KERNEL=="sr[0-9]*", ACTION=="change", ENV{ID_CDROM_MEDIA}=="?*",     RUN+="/usr/bin/systemctl --no-block start optical-mount@%k.service"
+KERNEL=="sr[0-9]*", ACTION=="remove",  RUN+="/usr/bin/systemctl --no-block start optical-unmount@%k.service"
