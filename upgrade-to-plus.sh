@@ -60,7 +60,6 @@ else
 fi
 echo "--------------------------------------------------"
 
-
 ### ===================================================================
 ###                     INTERNET CONNECTIVITY
 ### ===================================================================
@@ -107,7 +106,6 @@ else
     echo -e "${GREEN}  -> Internet connection is already active.${NC}"
 fi
 echo "--------------------------------------------------"
-
 
 ### ===================================================================
 ###                 SYSTEM PACKAGE UPGRADE & BUILD TOOLS
@@ -237,7 +235,6 @@ done
 echo -e "${GREEN}System files updated.${NC}"
 echo "--------------------------------------------------"
 
-
 ### ===================================================================
 ###                       RELOAD UDEV RULES
 ### ===================================================================
@@ -263,9 +260,25 @@ for service in "${SERVICES_TO_ENABLE[@]}"; do
     systemctl enable --now "$service"
 done
 
-# this might be needed in the event the user doesn't have sound, but it works temporarily when they reset the Settings in the BIOS
-echo -e "${GREEN}Enabling pipewire-pulse.service for user..."
-systemctl --user enable pipewire-pulse.service
+# this might be needed in the event the user doesn't have sound, but works temporarily when they reset the Settings in the BIOS
+echo -e "${GREEN}  -> Enabling pipewire-pulse.service for user 'gamer'...${NC}"
+
+# Define the user's systemd config path inside the deployment
+USER_SERVICE_DIR="$DEPLOYMENT_DIR/home/gamer/.config/systemd/user/default.target.wants"
+
+# Define the path to the service file we are linking to
+SERVICE_FILE_PATH="/usr/lib/systemd/user/pipewire-pulse.service"
+
+# Create the target directory if it doesn't exist
+mkdir -p "$USER_SERVICE_DIR"
+
+# Create the symlink (ln -sf = force symlink, overwrites if exists)
+ln -sf "$SERVICE_FILE_PATH" "$USER_SERVICE_DIR/pipewire-pulse.service"
+
+# CRITICAL: Ensure the 'gamer' user (UID 1000) owns the new files/dirs
+# We chown the .config directory to be safe.
+echo "  -> Correcting ownership of user's .config directory..."
+chown -R 1000:1000 "$DEPLOYMENT_DIR/home/gamer/.config"
 
 echo -e "${GREEN}Services enabled.${NC}"
 echo "--------------------------------------------------"
