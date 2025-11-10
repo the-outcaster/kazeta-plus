@@ -96,7 +96,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.39d.KAZETA+";
+const VERSION_NUMBER: &str = "V1.39.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -791,21 +791,6 @@ async fn main() {
             thread::sleep(time::Duration::from_secs(1));
         }
     });
-    /*
-    thread::spawn(move || {
-        while cart_check_thread_running_clone.load(Ordering::Relaxed) {
-            // Check for the SD card
-            let sd_is_connected = save::is_cart_connected();
-
-            // Also check if the DVD mount path exists
-            let dvd_is_connected = std::path::Path::new("/media/sr0").exists();
-
-            // Store TRUE if EITHER ONE is connected
-            cart_connected_clone.store(sd_is_connected || dvd_is_connected, Ordering::Relaxed);
-            thread::sleep(time::Duration::from_secs(1));
-        }
-    });
-    */
 
     // Create thread-safe storage media state
     let storage_state = Arc::new(Mutex::new(StorageMediaState::new()));
@@ -900,21 +885,6 @@ async fn main() {
                     thread::sleep(time::Duration::from_secs(1));
                 }
             });
-            /*
-            thread::spawn(move || {
-                while cart_check_thread_running_clone.load(Ordering::Relaxed) {
-                    // Check for the SD card
-                    let sd_is_connected = save::is_cart_connected();
-
-                    // Also check if the DVD mount path exists
-                    let dvd_is_connected = std::path::Path::new("/media/sr0").exists();
-
-                    // Store TRUE if EITHER ONE is connected
-                    cart_connected_clone.store(sd_is_connected || dvd_is_connected, Ordering::Relaxed);
-                    thread::sleep(time::Duration::from_secs(1));
-                }
-            });
-            */
         } else if !should_thread_run && thread_is_running {
             // Left main menu, stop cart check thread
             cart_check_thread_running.store(false, Ordering::Relaxed);
