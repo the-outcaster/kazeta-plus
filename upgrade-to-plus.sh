@@ -131,9 +131,13 @@ for pkg in "${PACKAGES_TO_INSTALL[@]}"; do
     echo "  -> Ensuring $pkg is installed..."
     pacman -S --noconfirm --needed "$pkg"
 done
+
+# we need to bypass overwriting /etc/lsb-release when installing Steam, since pacman will try to do so when Kazeta/Kazeta+ already has this file
+echo -e "${GREEN}Installing Steam..."
+pacman -S --noconfirm --needed --assume-installed lsb-release steam
+
 echo -e "${GREEN}System packages are up to date.${NC}"
 echo "--------------------------------------------------"
-
 
 ### ===================================================================
 ###           BUILD AND INSTALL GC ADAPTER OVERCLOCK MODULE (DKMS)
@@ -253,11 +257,16 @@ echo -e "${YELLOW}Step 7: Enabling new system services...${NC}"
 echo "  -> Reloading systemd daemon..."
 systemctl daemon-reload
 
-SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service" "sshd.service" "pipewire-pulse.service")
+SERVICES_TO_ENABLE=("keyd.service" "kazeta-profile-loader.service" "NetworkManager.service" "iwd.service" "bluetooth.service" "sshd.service")
 for service in "${SERVICES_TO_ENABLE[@]}"; do
     echo "  -> Enabling and starting $service..."
     systemctl enable --now "$service"
 done
+
+# this might be needed in the event the user doesn't have sound, but it works temporarily when they reset the Settings in the BIOS
+echo -e "${GREEN}Enabling pipewire-pulse.service for user..."
+systemctl --user enable pipewire-pulse.service
+
 echo -e "${GREEN}Services enabled.${NC}"
 echo "--------------------------------------------------"
 
