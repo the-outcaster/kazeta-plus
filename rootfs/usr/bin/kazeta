@@ -134,6 +134,8 @@ if [[ ! -d "${upper}" ]]; then
 	mkdir -p "${upper}"
 fi
 
+# old runtime block
+<<COMMENT
 runtime_name="$(get_attribute 'Runtime' ${cart_info})"
 if [ -n "$runtime_name" ]; then
 	runtime="${cart_path}/${runtime_name}"
@@ -149,6 +151,76 @@ if [ -n "$runtime_name" ]; then
 else
 	runtime="/usr/share/kazeta/runtimes/none.kzr"
 fi
+COMMENT
+
+# --- Helper function to find a runtime in a given directory ---
+# Usage: runtime_path=$(find_runtime "name_to_find" "/path/to/search")
+function find_runtime {
+    local rt_name="$1"
+    local base_dir="$2"
+    local found_path=""
+
+    # Path 1: Exact match (e.g., Runtime=windows-1.1.kzr)
+    if [ -f "${base_dir}/${rt_name}" ]; then
+        found_path="${base_dir}/${rt_name}"
+    # Path 2: Match with .kzr (e.g., Runtime=windows-1.1)
+    elif [ -f "${base_dir}/${rt_name}.kzr" ]; then
+        found_path="${base_dir}/${rt_name}.kzr"
+    # Path 3: Glob match (e.g., Runtime=windows-1.1 finds windows-1.1-v2.kzr)
+    else
+        # Use ls to find the first match and redirect stderr to /dev/null
+        local glob_match=$(ls -1 "${base_dir}/${rt_name}-"*.kzr 2>/dev/null | head -1)
+        if [ -f "$glob_match" ]; then
+            found_path="$glob_match"
+        fi
+    fi
+
+    echo "$found_path" # Return the found path (or empty string if not found)
+}
+
+# --- Define runtime paths ---
+SYSTEM_RUNTIME_DIR="/usr/share/kazeta/runtimes"
+DVD_RUNTIME_DIR="${cart_path}" # This path is already defined earlier in the script
+DEFAULT_RUNTIME="${SYSTEM_RUNTIME_DIR}/none.kzr"
+
+runtime_name="$(get_attribute 'Runtime' ${cart_info})"
+runtime="" # Initialize as empty
+
+if [ -n "$runtime_name" ]; then
+    echo "DEBUG: Runtime requested: '$runtime_name'"
+
+    # --- 1. Check Internal Drive (Priority 1) ---
+    echo "DEBUG: Checking for runtime on internal drive..."
+    runtime=$(find_runtime "$runtime_name" "$SYSTEM_RUNTIME_DIR")
+
+    # --- 2. Check DVD (Fallback) ---
+    if [ -z "$runtime" ]; then # -z checks if the string is empty (not found)
+        echo "DEBUG: Runtime not found internally. Checking DVD drive ($DVD_RUNTIME_DIR)..."
+        runtime=$(find_runtime "$runtime_name" "$DVD_RUNTIME_DIR")
+
+        if [ -n "$runtime" ]; then
+             echo "DEBUG: Found runtime on DVD. Load times may be slow."
+        fi
+    fi
+
+    # --- 3. Set Default (if still not found) ---
+    if [ -z "$runtime" ]; then
+        echo "WARNING: Runtime '$runtime_name' not found in $SYSTEM_RUNTIME_DIR or $DVD_RUNTIME_DIR. Defaulting to 'none'."
+        runtime="$DEFAULT_RUNTIME"
+    fi
+else
+    # No runtime specified, use 'none'
+    echo "DEBUG: No runtime specified. Defaulting to 'none'."
+    runtime="$DEFAULT_RUNTIME"
+fi
+
+# Final check in case 'none.kzr' is missing
+if [ ! -f "$runtime" ]; then
+    echo "CRITICAL: Runtime file '$runtime' not found! The system may fail to mount."
+    # We still pass the path to kazeta-mount, which will then fail.
+fi
+
+echo "DEBUG: Using runtime: $runtime"
 
 # old mounting filesystem block
 <<COMMENT
