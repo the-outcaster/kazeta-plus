@@ -1,6 +1,7 @@
 # Kazeta+
 The "overly complex" fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that adds several features:
 - multi-cart support
+- optical disc drive support (CDs, DVDs, etc)
 - multi-resolution support
 - multi-audio sink support, with adjustable volume controls
 - OTA update support
@@ -13,6 +14,7 @@ The "overly complex" fork of the original [Kazeta](https://github.com/kazetaos/k
 - native GameCube controller adapter support, overclocked to 1,000 Hz
 - fixes for missing fonts in certain applications (and may even fix apps that only had a black screen)
 - D-pad reversal fix for native Linux games
+- updated runtimes for Linux and Windows, plus emulator runtimes for other systems
 
 ![Kazeta+ About page](https://i.imgur.com/kQiAVvc.png)
 
