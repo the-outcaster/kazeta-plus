@@ -13,6 +13,7 @@ pub const EXTRAS_MENU_OPTIONS: &[&str] = &[
     "CONNECT TO WI-FI",
     "PAIR BLUETOOTH CONTROLLER",
     "GET NEW THEMES",
+    "CD PLAYER",
     "CHECK FOR UPDATES",
 ];
 
@@ -45,7 +46,8 @@ pub fn update(
             0 => *current_screen = Screen::Wifi,
             1 => *current_screen = Screen::Bluetooth,
             2 => *current_screen = Screen::ThemeDownloader,
-            3 => *current_screen = Screen::UpdateChecker,
+            3 => *current_screen = Screen::CdPlayer,
+            4 => *current_screen = Screen::UpdateChecker,
             _ => {}
         }
     }

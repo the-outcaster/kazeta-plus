@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 pub mod about;
 pub mod bluetooth;
+pub mod cd_player;
 pub mod data;
 pub mod dialog;
 pub mod extras_menu;

@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use rodio::{buffer::SamplesBuffer, Sink};
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use chrono::Local;
 use crate::{save, Child, Arc, Mutex, thread, BufReader};
 use crate::audio::play_new_bgm;
 use crate::types::Screen;
-use macroquad::audio::Sound;
+//use macroquad::audio::Sound;
 
 // wrap text in certain menus so it doesn't clip outside the screen
 pub fn wrap_text(text: &str, font: Font, font_size: u16, max_width: f32) -> Vec<String> {
@@ -94,8 +95,10 @@ pub fn copy_session_logs_to_sd() -> Result<String, String> {
 
 // FOR ACTUAL HARDWARE USE
 pub fn trigger_session_restart(
-    current_bgm: &mut Option<Sound>,
-    music_cache: &HashMap<String, Sound>,
+    //current_bgm: &mut Option<Sound>,
+    //music_cache: &HashMap<String, Sound>,
+    current_bgm: &mut Option<Sink>,
+    music_cache: &HashMap<String, SamplesBuffer>,
 ) -> (Screen, Option<f64>) {
     // Stop the BGM
     play_new_bgm("OFF", 0.0, music_cache, current_bgm);
@@ -116,8 +119,10 @@ pub fn trigger_session_restart(
 pub fn trigger_game_launch(
     _cart_info: &save::CartInfo,
     kzi_path: &Path,
-    current_bgm: &mut Option<Sound>,
-    music_cache: &HashMap<String, Sound>,
+    //current_bgm: &mut Option<Sound>,
+    //music_cache: &HashMap<String, Sound>,
+    current_bgm: &mut Option<Sink>,
+    music_cache: &HashMap<String, SamplesBuffer>,
 ) -> (Screen, Option<f64>) {
     // Write the specific launch command for the selected game
     if let Err(e) = save::write_launch_command(kzi_path) {

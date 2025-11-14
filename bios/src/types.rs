@@ -76,6 +76,7 @@ pub enum Screen {
     UpdateChecker,
     Debug,
     GameSelection,
+    CdPlayer,
     About,
 }
 
@@ -98,7 +99,6 @@ pub enum GccMessage {
 // ===================================
 
 pub struct AppState {
-    // ... your other state fields like input_state, screen_state, etc.
     pub gcc_adapter_poll_rate: Option<u32>, // Store rate in Hz
 }
 

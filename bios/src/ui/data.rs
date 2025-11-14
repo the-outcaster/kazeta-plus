@@ -1,6 +1,7 @@
 use std::panic;
 use futures;
 use crate::{*, ui::dialog::*, memory::*}; // Use wildcards for convenience or specify each type
+use crate::audio::SoundEffects;
 //use macroquad::prelude::*;
 
 // This function will handle all input and state changes for the data screen

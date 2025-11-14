@@ -1,8 +1,9 @@
 use macroquad::prelude::*;
+use rodio::{buffer::SamplesBuffer, Sink};
 use std::collections::HashMap;
 use std::process::Command;
 use std::thread;
-use macroquad::audio::{Sound, set_sound_volume};
+//use macroquad::audio::{Sound, set_sound_volume};
 
 // Import things from our new modules
 use crate::audio::{SoundEffects, play_new_bgm};
@@ -285,9 +286,11 @@ pub fn update(
     brightness: &mut f32,
     system_volume: &mut f32,
     available_sinks: &Vec<AudioSink>,
-    current_bgm: &mut Option<Sound>,
+    //current_bgm: &mut Option<Sound>,
+    current_bgm: &mut Option<Sink>,
     bgm_choices: &Vec<String>,
-    music_cache: &HashMap<String, Sound>,
+    //music_cache: &HashMap<String, Sound>,
+    music_cache: &HashMap<String, SamplesBuffer>,
     sfx_pack_to_reload: &mut Option<String>,
     logo_choices: &Vec<String>,
     background_choices: &Vec<String>,
@@ -523,8 +526,13 @@ pub fn update(
                     }
 
                     // Change the volume of the currently playing sound
+                    /*
                     if let Some(sound) = &current_bgm {
                         set_sound_volume(sound, config.bgm_volume);
+                    }
+                    */
+                    if let Some(sink) = current_bgm {
+                        sink.set_volume(config.bgm_volume);
                     }
 
                     config.save();

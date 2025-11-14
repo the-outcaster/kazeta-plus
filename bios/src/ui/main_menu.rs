@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use rodio::{buffer::SamplesBuffer, Sink};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -45,8 +46,10 @@ pub fn update(
     log_messages: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     storage_state: &Arc<Mutex<StorageMediaState>>,
     fade_start_time: &mut Option<f64>,
-    current_bgm: &mut Option<macroquad::audio::Sound>,
-    music_cache: &HashMap<String, macroquad::audio::Sound>,
+    //current_bgm: &mut Option<macroquad::audio::Sound>,
+    //music_cache: &HashMap<String, macroquad::audio::Sound>,
+    current_bgm: &mut Option<Sink>,
+    music_cache: &HashMap<String, SamplesBuffer>,
     game_icon_queue: &mut Vec<(String, PathBuf)>,
     available_games: &mut Vec<(save::CartInfo, PathBuf)>,
     game_selection: &mut usize,

@@ -34,7 +34,8 @@ pub struct Theme {
 // LOAD CUSTOM THEMES
 pub async fn load_all_themes() -> HashMap<String, Theme> {
     let mut themes = HashMap::new();
-    let default_sfx = SoundEffects::load("Default").await;
+    //let default_sfx = SoundEffects::load("Default").await;
+    let default_sfx = SoundEffects::load("Default");
 
     // create a virtual default theme so we don't crash at startup
     let virtual_default_theme = Theme {
@@ -74,8 +75,8 @@ pub async fn load_all_themes() -> HashMap<String, Theme> {
                     if let Ok(content) = load_string(&toml_path.to_string_lossy()).await {
                         if let Ok(config) = toml::from_str::<ThemeConfigFile>(&content) {
                             let sounds = match &config.sfx_pack {
-                                // .await is needed here too
-                                Some(pack_name) => SoundEffects::load(pack_name).await,
+                                //Some(pack_name) => SoundEffects::load(pack_name).await,
+                                Some(pack_name) => SoundEffects::load(pack_name),
                                 None => default_sfx.clone(),
                             };
 

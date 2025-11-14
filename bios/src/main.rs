@@ -1,16 +1,21 @@
 use macroquad::prelude::*;
-use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
+//use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
 use std::collections::{HashMap, HashSet};
 use gilrs::Gilrs;
+use rodio::{
+    buffer::SamplesBuffer,
+    Decoder, Sink,
+};
 use std::sync::atomic::{Ordering, AtomicBool};
 use std::fs;
 use std::process;
 use std::process::Child;
 
 // extra stuff I'm using
+use std::fs::File;
 use std::path::PathBuf; // for loading assets
 use std::io::BufReader; // logger
 use std::env; // backtracing
@@ -20,6 +25,7 @@ use regex::Regex; // fetching audio sinks
 
 // Import our new modules
 mod audio;
+mod cd_player_backend;
 mod config;
 mod gcc_adapter;
 mod input;
@@ -31,7 +37,9 @@ mod types;
 mod ui;
 mod utils;
 
-use crate::audio::{SoundEffects, play_new_bgm};
+//use crate::audio::{SoundEffects, play_new_bgm};
+use crate::audio::{AUDIO, load_sound_from_bytes, SoundEffects, play_new_bgm};
+use crate::cd_player_backend::CdPlayerBackend;
 use crate::config::{Config, get_user_data_dir};
 use crate::dialog::Dialog;
 use crate::gcc_adapter::start_gcc_adapter_polling;
@@ -56,9 +64,10 @@ pub use types::*;
 - gamepad tester
 - add system debugger in the event the game crashed
 - add option to safely unmount cart in main menu
+- download ALL runtimes (Linux, Windows, emulators, etc.) to /usr/share/kazeta/runtimes/ when the user upgrades
+- support for local multiplayer (i.e. add support for controllers 2-4)
 
 Hard
-- DVD functionality?
 - MP4 support for background videos?
 
 Maybe
@@ -96,7 +105,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.4.KAZETA+";
+const VERSION_NUMBER: &str = "V1.41d.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -223,7 +232,9 @@ macro_rules! load_audio_category {
                     Ok(bytes) => {
                         println!("[DEBUG] Read {} bytes from {}", bytes.len(), file_name);
                         // Now, load the sound from the bytes
-                        match load_sound_from_bytes(&bytes).await {
+                        //match load_sound_from_bytes(&bytes).await {
+                        /*
+                        match load_sound_from_bytes(&bytes) {
                             Ok(asset) => {
                                 println!("[OK] Loaded {}: {}", $type_name.to_lowercase(), file_name);
                                 $cache.insert(file_name.to_string(), asset);
@@ -232,6 +243,12 @@ macro_rules! load_audio_category {
                             }
                             Err(e) => eprintln!("[ERROR] Failed to decode audio {}: {:?} (File: {})", file_name, e, path.display()),
                         }
+                        */
+                        let asset = load_sound_from_bytes(&bytes); // Use the new function name
+                        println!("[OK] Loaded {}: {}", $type_name.to_lowercase(), file_name);
+                        $cache.insert(file_name.to_string(), asset);
+                        *$assets_loaded += 1;
+                        animate_step!($display_progress, $assets_loaded, $total_assets, $animation_speed, &status, $draw_fn);
                     }
                     Err(e) => eprintln!("[ERROR] Failed to read audio file {}: {:?} (File: {})", file_name, e, path.display()),
                 }
@@ -340,7 +357,8 @@ async fn load_all_assets(
 ) -> (
     HashMap<String, Texture2D>, // background cache
     HashMap<String, Texture2D>, // logo cache
-    HashMap<String, Sound>, // music cache
+    //HashMap<String, Sound>, // music cache
+    HashMap<String, SamplesBuffer>,
     HashMap<String, Font>, // font cache
     SoundEffects, // sfx
 ) {
@@ -461,7 +479,8 @@ async fn load_all_assets(
 
     println!("\n[INFO] All asset loading complete!");
 
-    let sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
+    //let sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
+    let sound_effects = audio::SoundEffects::load(&config.sfx_pack);
 
     (background_cache, logo_cache, music_cache, font_cache, sound_effects)
 }
@@ -499,6 +518,10 @@ async fn main() {
 
     // UPDATE CHECKER
     let mut update_checker_state = UpdateCheckerState::new();
+
+    // CD PLAYER STATE
+    let cd_player_backend = Arc::new(Mutex::new(CdPlayerBackend::new()));
+    let mut cd_player_ui_state = ui::cd_player::CdPlayerUiState::new(cd_player_backend.clone());
 
     // RESET SETTINGS CONFIRMATION
     let mut confirm_selection = 0; // 0 for YES, 1 for NO
@@ -605,7 +628,8 @@ async fn main() {
     // load custom sound pack
     if config.sfx_pack != "Default" {
         println!("[Info] Loading configured SFX pack: {}", &config.sfx_pack);
-        sound_effects = SoundEffects::load(&config.sfx_pack).await;
+        //sound_effects = SoundEffects::load(&config.sfx_pack).await;
+        sound_effects = SoundEffects::load(&config.sfx_pack);
     }
     let mut sfx_pack_to_reload: Option<String> = None;
 
@@ -652,7 +676,8 @@ async fn main() {
     .collect();
     bgm_choices.extend(track_names);
 
-    let mut current_bgm: Option<Sound> = None;
+    //let mut current_bgm: Option<Sound> = None;
+    let mut current_bgm: Option<Sink> = None;
 
     // At the end of your setup, start the BGM based on the config
     if let Some(track_name) = &config.bgm_track {
@@ -662,16 +687,20 @@ async fn main() {
     // SPLASH SCREEN
     if config.show_splash_screen {
         // Mute the main BGM if it's already playing
-        if let Some(sound) = &current_bgm {
-            set_sound_volume(sound, 0.0);
+        if let Some(sink) = &current_bgm {
+            sink.set_volume(0.0); // Use the rodio Sink method
         }
 
         // --- Load only what the splash screen needs ---
         let splash_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
-        let splash_sfx = load_sound_from_bytes(include_bytes!("../splash.wav")).await.unwrap();
+
+        let sink = Sink::connect_new(&AUDIO.stream.mixer());
+        let splash_sfx = File::open("../splash.wav").unwrap();
+        let source = Decoder::new(BufReader::new(splash_sfx)).unwrap();
 
         // Play the splash sound
-        play_sound(&splash_sfx, PlaySoundParams { looped: false, volume: 0.2 });
+        //play_sound(&splash_sfx, PlaySoundParams { looped: false, volume: 0.2 });
+        sink.append(source);
 
         // --- Animation Durations ---
         const FADE_DURATION: f64 = 1.0;
@@ -739,8 +768,13 @@ async fn main() {
         }
 
         // Restore BGM volume after splash screen
+        /*
         if let Some(sound) = &current_bgm {
             set_sound_volume(sound, config.bgm_volume);
+        }
+        */
+        if let Some(sink) = &current_bgm {
+            sink.set_volume(config.bgm_volume);
         }
     }
 
@@ -1430,12 +1464,33 @@ async fn main() {
                     scale_factor,
                 );
             }
+            Screen::CdPlayer => {
+                ui::cd_player::update(
+                    &mut cd_player_ui_state,
+                    &input_state,
+                    &mut current_screen,
+                    &sound_effects,
+                    &config,
+                    &mut current_bgm,
+                );
+
+                ui::cd_player::draw(
+                    &mut cd_player_ui_state,
+                    &animation_state,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    scale_factor,
+                );
+            }
         }
 
         // This block checks if the settings screen requested an SFX reload
         if let Some(pack_name) = sfx_pack_to_reload.take() {
             println!("[Info] Reloading SFX pack: {}", pack_name);
-            sound_effects = SoundEffects::load(&pack_name).await;
+            //sound_effects = SoundEffects::load(&pack_name).await;
+            sound_effects = SoundEffects::load(&pack_name);
             // Play a sound from the new pack to confirm it changed
             sound_effects.play_cursor_move(&config);
         }
