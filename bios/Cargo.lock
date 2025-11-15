@@ -1300,6 +1300,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tar",
+ "tempfile",
  "tokio",
  "toml",
  "walkdir",

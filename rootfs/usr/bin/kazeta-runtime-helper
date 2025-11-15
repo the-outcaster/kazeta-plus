@@ -1,0 +1,67 @@
+#!/bin/bash
+# This script safely installs or deletes runtimes in the target directory.
+
+set -euo pipefail
+
+TARGET_DIR="/usr/share/kazeta/runtimes"
+ACTION=$1
+SOURCE_FILE=""
+TARGET_NAME=""
+
+# --- Sanitize Filename ---
+# Takes a filename and strips all path components (../, /)
+#
+# $1 = file name (e.g., "psx.kzr" or "../../etc/shadow")
+# Returns: Sanitized name (e.g., "psx.kzr" or "shadow")
+sanitize_name() {
+    # Use 'basename' to strip any and all directory paths
+    echo "$(basename "$1")"
+}
+
+# --- Main Actions ---
+case "$ACTION" in
+    "install")
+        SOURCE_FILE=$2
+        TARGET_NAME=$(sanitize_name "$3")
+
+        if [ -z "$TARGET_NAME" ]; then
+            echo "Error: Target name cannot be empty." >&2
+            exit 1
+        fi
+
+        echo "Installing '$SOURCE_FILE' to '$TARGET_DIR/$TARGET_NAME'..."
+        # Ensure the directory exists
+        mkdir -p "$TARGET_DIR"
+        # Move the source file from temp location to the target
+        mv -f "$SOURCE_FILE" "$TARGET_DIR/$TARGET_NAME"
+        echo "Install complete."
+        ;;
+
+    "delete")
+        TARGET_NAME=$(sanitize_name "$2")
+
+        if [ -z "$TARGET_NAME" ]; then
+            echo "Error: Target name cannot be empty." >&2
+            exit 1
+        fi
+
+        TARGET_PATH="$TARGET_DIR/$TARGET_NAME"
+
+        if [ ! -e "$TARGET_PATH" ]; then
+            echo "Warning: File not found, nothing to delete: '$TARGET_PATH'"
+            exit 0 # Not an error, it's already gone.
+        fi
+
+        echo "Deleting '$TARGET_PATH'..."
+        rm -rf "$TARGET_PATH"
+        echo "Delete complete."
+        ;;
+
+    *)
+        echo "Error: Unknown action '$ACTION'." >&2
+        echo "Usage: $0 [install /path/to/source /target/name.kzr] | [delete target/name.kzr]" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

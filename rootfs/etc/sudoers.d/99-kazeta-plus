@@ -7,6 +7,9 @@
 # Wi-Fi
 %wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-wifi-setup
 
+# Runtime Downloader Helper
+%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-runtime-helper
+
 # Bluetooth
 %wheel ALL=(ALL) NOPASSWD: /usr/bin/bluetoothctl
 

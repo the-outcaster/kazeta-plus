@@ -24,6 +24,7 @@ home = "0.5" # reliably find user's home directory
 reqwest = { version = "0.12.24", features = ["blocking", "json"] } # handle HTTP requests
 zip = "6.0.0" # handle zip extraction
 bluer = { version = "0.17.4", features = ["bluetoothd"] } # bluetooth
+tempfile = "3.23.0" # for downloading runtime files
 
 # CD-ROM support
 cd-da-reader = "0.1.0"

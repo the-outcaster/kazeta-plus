@@ -3,11 +3,13 @@ use serde::Deserialize;
 use std::{
     fs, thread,
     collections::{HashMap, HashSet},
-    sync::mpsc::{channel, Receiver, Sender},
-    time::{Duration, Instant},
     io::{self, Read, Write},
     path::PathBuf,
+    process::Command,
+    sync::mpsc::{channel, Receiver, Sender},
+    time::{Duration, Instant},
 };
+use tempfile::{Builder, NamedTempFile};
 
 use crate::{
     audio::SoundEffects,
@@ -703,10 +705,9 @@ fn download_and_install_runtime(runtime: RemoteRuntime, tx: Sender<DownloaderMes
     thread::spawn(move || {
         let result = (|| -> Result<String, String> {
             let runtimes_dir = get_runtime_dir();
-            fs::create_dir_all(&runtimes_dir)
-            .map_err(|e| format!("Failed to create runtime dir: {}", e))?;
 
-            // Use a client that can handle streaming
+            // --- Download Phase (Same for Dev and Prod) ---
+            // This part streams the download into memory without writing to disk yet.
             let client = reqwest::blocking::Client::new();
             let mut response = client.get(&runtime.download_url)
             .send()
@@ -715,68 +716,117 @@ fn download_and_install_runtime(runtime: RemoteRuntime, tx: Sender<DownloaderMes
             if !response.status().is_success() {
                 return Err(format!("Download failed: Server returned {}", response.status()));
             }
-
-            // Get total size for progress bar, if available
-            let total_size = response.content_length(); // This is Option<u64>
-
+            let total_size = response.content_length();
             let mut received_bytes: u64 = 0;
             let mut response_bytes = Vec::new(); // Store the downloaded data here
-            let mut buffer = [0; 8192]; // 8KB read buffer
-
-            // Throttling for UI updates. Sending a message for every 8KB chunk
-            // would flood the UI thread.
+            let mut buffer = [0; 8192];
             let mut last_update = Instant::now();
-            let update_interval = Duration::from_millis(50); // ~20 updates per second
+            let update_interval = Duration::from_millis(50);
 
             loop {
-                // Read a chunk from the download stream
                 let bytes_read = response.read(&mut buffer)
                 .map_err(|e| format!("Failed to read download stream: {}", e))?;
+                if bytes_read == 0 { break; }
 
-                if bytes_read == 0 {
-                    break; // Download complete
-                }
-
-                // Save the chunk to our main byte vector
                 response_bytes.write_all(&buffer[..bytes_read])
                 .map_err(|e| format!("Failed to write to in-memory buffer: {}", e))?;
-
                 received_bytes += bytes_read as u64;
 
-                // Send progress update (if throttled time has passed)
                 if last_update.elapsed() >= update_interval {
                     let progress = total_size.map(|total| received_bytes as f32 / total as f32);
                     let received_mb = received_bytes as f32 / 1024.0 / 1024.0;
-
-                    // Send the progress update. If this fails, the UI closed, so we abort.
                     if tx.send(DownloaderMessage::DownloadProgress { progress, received_mb }).is_err() {
                         return Err("Download cancelled: UI closed".to_string());
                     }
                     last_update = Instant::now();
                 }
             }
-
-            // Send one final, 100% update to make sure it looks complete
             let received_mb = received_bytes as f32 / 1024.0 / 1024.0;
             tx.send(DownloaderMessage::DownloadProgress { progress: Some(1.0), received_mb }).ok();
+            // --- End Download Phase ---
 
-            // We have all the bytes. Now proceed as before.
-            if runtime.is_zip {
-                let reader = io::Cursor::new(response_bytes); // Use our Vec<u8>
-                let mut archive = zip::ZipArchive::new(reader)
-                .map_err(|e| format!("Invalid zip file: {}", e))?;
-                archive.extract(&runtimes_dir)
-                .map_err(|e| format!("Failed to extract zip: {}", e))?;
+
+            // --- Installation Phase (Split Logic) ---
+            if DEV_MODE {
+                // --- DEV MODE: Write directly to local folder ---
+                fs::create_dir_all(&runtimes_dir)
+                .map_err(|e| format!("Failed to create dev runtime dir: {}", e))?;
+
+                if runtime.is_zip {
+                    let reader = io::Cursor::new(response_bytes);
+                    let mut archive = zip::ZipArchive::new(reader)
+                    .map_err(|e| format!("Invalid zip file: {}", e))?;
+                    archive.extract(&runtimes_dir)
+                    .map_err(|e| format!("Failed to extract zip: {}", e))?;
+                } else {
+                    let target_path = runtimes_dir.join(&runtime.file_name);
+                    fs::write(target_path, response_bytes)
+                    .map_err(|e| format!("Failed to save file: {}", e))?;
+                }
             } else {
-                let target_path = runtimes_dir.join(&runtime.file_name);
-                fs::write(target_path, response_bytes) // Use our Vec<u8>
-                .map_err(|e| format!("Failed to save file: {}", e))?;
+                // --- PROD MODE: Use sudo helper script ---
+                if runtime.is_zip {
+                    // 1. Extract zip to a temporary directory
+                    let temp_dir = Builder::new()
+                    .prefix("kazeta-zip-")
+                    .tempdir()
+                    .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+                    let reader = io::Cursor::new(response_bytes);
+                    let mut archive = zip::ZipArchive::new(reader)
+                    .map_err(|e| format!("Invalid zip file: {}", e))?;
+                    archive.extract(temp_dir.path())
+                    .map_err(|e| format!("Failed to extract zip to temp: {}", e))?;
+
+                    // 2. Iterate the temp dir and "install" (move) each file
+                    for entry in fs::read_dir(temp_dir.path()).map_err(|e| format!("Failed to read temp dir: {}", e))? {
+                        let entry = entry.map_err(|e| format!("Failed to read temp entry: {}", e))?;
+                        let temp_source_path = entry.path();
+
+                        // Ensure we're only moving files
+                        if temp_source_path.is_file() {
+                            let target_file_name = entry.file_name().to_string_lossy().to_string();
+                            let status = Command::new("sudo")
+                            .arg("/usr/bin/kazeta-runtime-helper")
+                            .arg("install")
+                            .arg(&temp_source_path)  // Source: /tmp/kazeta-zip-XXXX/psx.kzr
+                            .arg(&target_file_name)  // Target: psx.kzr
+                            .status()
+                            .map_err(|e| format!("Failed to run helper: {}", e))?;
+
+                            if !status.success() {
+                                return Err(format!("Helper failed to install {}", target_file_name));
+                            }
+                        }
+                    }
+                    // Temp dir is automatically cleaned up when `temp_dir` goes out of scope
+                } else {
+                    // .kzr file: Write to a temp file, then "install" (move) it
+                    let mut temp_file = NamedTempFile::new()
+                    .map_err(|e| format!("Failed to create temp file: {}", e))?;
+                    temp_file.write_all(&response_bytes)
+                    .map_err(|e| format!("Failed to write to temp file: {}", e))?;
+
+                    let temp_path = temp_file.path().to_path_buf(); // Keep the file alive
+
+                    let status = Command::new("sudo")
+                    .arg("/usr/bin/kazeta-runtime-helper")
+                    .arg("install")
+                    .arg(&temp_path)            // Source: /tmp/tmp.XXXX
+                    .arg(&runtime.file_name)    // Target: linux-1.0.kzr
+                    .status()
+                    .map_err(|e| format!("Failed to run helper: {}", e))?;
+
+                    if !status.success() {
+                        return Err(format!("Helper failed to install {}", runtime.file_name));
+                    }
+                    // Temp file is automatically cleaned up
+                }
             }
 
             Ok(runtime.name)
         })();
 
-        // Send the final result (Ok or Err)
         tx.send(DownloaderMessage::InstallResult(result)).unwrap_or_default();
     });
 }
@@ -786,58 +836,96 @@ fn delete_runtime(runtime: RemoteRuntime, tx: Sender<DownloaderMessage>) {
         let result = (|| -> Result<String, String> {
             let runtimes_dir = get_runtime_dir();
 
-            if runtime.is_zip {
-                // It's a zip, so we delete all associated extracted files
-                let files_to_delete = get_zip_extracted_files(&runtime.file_name);
+            if DEV_MODE {
+                // --- DEV MODE: Delete directly from local folder ---
+                if runtime.is_zip {
+                    let files_to_delete = get_zip_extracted_files(&runtime.file_name);
+                    if files_to_delete.is_empty() { return Err(format!("Unknown zip: {}", runtime.name)); }
 
-                if files_to_delete.is_empty() {
-                    return Err(format!("Unknown zip file: {}", runtime.name));
+                    let mut deleted_count = 0;
+                    let mut last_error = Ok(());
+
+                    for file_name in files_to_delete {
+                        let target_path = runtimes_dir.join(file_name);
+                        if target_path.is_file() {
+                            if let Err(e) = fs::remove_file(target_path) {
+                                eprintln!("[Delete] Failed to delete file: {}", file_name);
+                                last_error = Err(format!("Failed to delete {}: {}", file_name, e));
+                            } else {
+                                deleted_count += 1;
+                            }
+                        }
+                    }
+                    if deleted_count == 0 {
+                        // If no files were deleted, it's an error.
+                        match last_error {
+                            Ok(_) => {
+                                // No errors, but no files deleted.
+                                return Err(format!("Extracted files for {} not found.", runtime.name));
+                            }
+                            Err(e) => {
+                                // An error occurred during the loop. Return that error.
+                                return Err(e);
+                            }
+                        }
+                    }
+                } else {
+                    let target_path = runtimes_dir.join(&runtime.file_name);
+                    if !target_path.is_file() { return Err(format!("File {} not found.", runtime.file_name)); }
+                    fs::remove_file(target_path).map_err(|e| format!("Failed to delete file: {}", e))?;
                 }
+            } else {
+                // --- PROD MODE: Use sudo helper script ---
+                if runtime.is_zip {
+                    let files_to_delete = get_zip_extracted_files(&runtime.file_name);
+                    if files_to_delete.is_empty() { return Err(format!("Unknown zip: {}", runtime.name)); }
 
-                let mut deleted_count = 0;
-                let mut last_error = Ok(());
+                    let mut deleted_count = 0;
+                    let mut last_error = Ok(());
 
-                for file_name in files_to_delete {
-                    let target_path = runtimes_dir.join(file_name);
-                    if target_path.is_file() {
-                        if let Err(e) = fs::remove_file(target_path) {
-                            eprintln!("[Delete] Failed to delete file: {}", file_name);
-                            last_error = Err(format!("Failed to delete {}: {}", file_name, e));
-                            // We'll continue anyway, to try and delete the others
+                    for file_name in files_to_delete {
+                        let status = Command::new("sudo")
+                        .arg("/usr/bin/kazeta-runtime-helper")
+                        .arg("delete")
+                        .arg(file_name) // The helper will sanitize this name
+                        .status()
+                        .map_err(|e| format!("Failed to run helper: {}", e))?;
+
+                        if !status.success() {
+                            last_error = Err(format!("Helper failed to delete {}", file_name));
                         } else {
                             deleted_count += 1;
                         }
                     }
-                }
-
-                if deleted_count == 0 {
-                    // If no files were deleted, it's an error.
-                    // Return the specific error if one occurred,
-                    // otherwise return a "not found" error.
-                    match last_error {
-                        Ok(_) => {
-                            // No errors, but no files deleted.
-                            return Err(format!("Extracted files for {} not found.", runtime.name));
-                        }
-                        Err(e) => {
-                            // An error occurred during the loop. Return that error.
-                            return Err(e);
+                    if deleted_count == 0 {
+                        // If no files were deleted, it's an error.
+                        match last_error {
+                            Ok(_) => {
+                                // No errors, but no files deleted.
+                                return Err(format!("Extracted files for {} not found.", runtime.name));
+                            }
+                            Err(e) => {
+                                // An error occurred during the loop. Return that error.
+                                return Err(e);
+                            }
                         }
                     }
-                }
-            } else {
-                // It's a .kzr, so we delete the *file*
-                let target_path = runtimes_dir.join(&runtime.file_name);
+                } else {
+                    let status = Command::new("sudo")
+                    .arg("/usr/bin/kazeta-runtime-helper")
+                    .arg("delete")
+                    .arg(&runtime.file_name)
+                    .status()
+                    .map_err(|e| format!("Failed to run helper: {}", e))?;
 
-                if !target_path.is_file() {
-                    return Err(format!("File {} not found.", runtime.file_name));
+                    if !status.success() {
+                        return Err(format!("Helper failed to delete {}", runtime.file_name));
+                    }
                 }
-                fs::remove_file(target_path)
-                .map_err(|e| format!("Failed to delete file: {}", e))?;
             }
 
             Ok(runtime.name)
         })();
-        tx.send(DownloaderMessage::DeleteResult(result)).unwrap();
+        tx.send(DownloaderMessage::DeleteResult(result)).unwrap_or_default();
     });
 }
