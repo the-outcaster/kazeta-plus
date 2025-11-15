@@ -125,10 +125,6 @@ impl WifiState {
                 let ssid = &selected_network.ssid;
                 let password = &self.password_buffer;
 
-                let _ = Command::new("nmcli")
-                .args(&["connection", "delete", ssid])
-                .output();
-
                 let output = Command::new("nmcli")
                 .args(&["device", "wifi", "connect", ssid, "password", password])
                 .output();

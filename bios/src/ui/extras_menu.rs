@@ -13,6 +13,7 @@ pub const EXTRAS_MENU_OPTIONS: &[&str] = &[
     "CONNECT TO WI-FI",
     "PAIR BLUETOOTH CONTROLLER",
     "GET NEW THEMES",
+    "DOWNLOAD RUNTIMES",
     "CD PLAYER",
     "CHECK FOR UPDATES",
 ];
@@ -46,8 +47,9 @@ pub fn update(
             0 => *current_screen = Screen::Wifi,
             1 => *current_screen = Screen::Bluetooth,
             2 => *current_screen = Screen::ThemeDownloader,
-            3 => *current_screen = Screen::CdPlayer,
-            4 => *current_screen = Screen::UpdateChecker,
+            3 => *current_screen = Screen::RuntimeDownloader,
+            4 => *current_screen = Screen::CdPlayer,
+            5 => *current_screen = Screen::UpdateChecker,
             _ => {}
         }
     }
@@ -81,7 +83,8 @@ pub fn draw(
 
     // Center the menu
     let start_x = screen_width() / 2.0;
-    let start_y = screen_height() * 0.35;
+    //let start_y = screen_height() * 0.35;
+    let start_y = screen_height() * 0.25;
 
     // Draw menu options
     for (i, &option) in EXTRAS_MENU_OPTIONS.iter().enumerate() {

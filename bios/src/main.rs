@@ -46,6 +46,7 @@ use crate::gcc_adapter::start_gcc_adapter_polling;
 use crate::input::InputState;
 use crate::system::*; // Wildcard to get all system functions
 use crate::ui::main_menu::MAIN_MENU_OPTIONS;
+use crate::ui::runtime_downloader::RuntimeDownloaderState;
 use crate::ui::theme_downloader::ThemeDownloaderState;
 use crate::ui::update_checker::UpdateCheckerState;
 use crate::ui::wifi::WifiState;
@@ -88,7 +89,7 @@ Maybe
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
-const DEV_MODE: bool = false;
+const DEV_MODE: bool = true;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -512,6 +513,9 @@ async fn main() {
 
     // THEME DOWNLOADER
     let mut theme_downloader_state = ThemeDownloaderState::new();
+
+    // RUNTIME DOWNLOADER
+    let mut runtime_downloader_state = RuntimeDownloaderState::new();
 
     // BLUETOOTH CONTROLLER PAIRING
     let mut bluetooth_state = ui::bluetooth::BluetoothState::new();
@@ -1446,6 +1450,24 @@ async fn main() {
 
                 // 4. After reloading, go back to the downloader screen
                 current_screen = Screen::ThemeDownloader;
+            }
+            Screen::RuntimeDownloader => {
+                ui::runtime_downloader::update(
+                    &mut runtime_downloader_state,
+                    &input_state,
+                    &mut current_screen,
+                    &sound_effects,
+                    &config,
+                );
+                ui::runtime_downloader::draw(
+                    &runtime_downloader_state,
+                    &mut animation_state,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
+                    scale_factor,
+                );
             }
             Screen::UpdateChecker => {
                 ui::update_checker::update(

@@ -73,6 +73,7 @@ pub enum Screen {
     Bluetooth,
     ThemeDownloader,
     ReloadingThemes,
+    RuntimeDownloader,
     UpdateChecker,
     Debug,
     GameSelection,

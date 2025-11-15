@@ -19,7 +19,7 @@ use crate::{
     config::Config,
     types::{AnimationState, BackgroundState, BatteryInfo, Screen},
     render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color,
-    FONT_SIZE, InputState,
+    FONT_SIZE, InputState, DEV_MODE,
 };
 
 // ===================================
@@ -66,7 +66,16 @@ impl BluetoothState {
         let (tx_msg, rx_msg) = tokio_channel(); // Use tokio's channel
         let (tx_cmd, rx_cmd) = tokio_channel(); // Use tokio's channel
 
-        manage_bluetooth_agent(tx_msg, rx_cmd);
+        if !DEV_MODE {
+            // We are in a release build, start the agent normally.
+            manage_bluetooth_agent(tx_msg, rx_cmd);
+        } else {
+            // We are in dev mode, don't start the agent.
+            // Immediately send an error to the UI.
+            println!("[DEV_MODE] Bluetooth agent is disabled.");
+            let _ = tx_msg.send(BluetoothMessage::Error("Disabled in Dev Mode".to_string()));
+            // tx_msg and rx_cmd are dropped here, which is fine.
+        }
 
         Self {
             screen_state: BluetoothScreenState::DeviceList,
