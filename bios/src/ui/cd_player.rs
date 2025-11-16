@@ -261,7 +261,7 @@ pub fn draw(
             text_with_config_color(font_cache, config, text, (screen_width() - dims.width) / 2.0, screen_height() / 2.0, font_size);
         }
         PlayerStatus::DataDisc => {
-            let text = "GAME DISC INSERTED\n(Not an Audio CD)";
+            let text = "GAME DISC INSERTED (Not an Audio CD)";
             let dims = measure_text(text, Some(current_font), font_size, 1.0);
             text_with_config_color(font_cache, config, text, (screen_width() - dims.width) / 2.0, screen_height() / 2.0, font_size);
         }
