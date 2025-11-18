@@ -263,7 +263,7 @@ pub async fn update(
                     let (grid_pos, dialog_pos) = calculate_icon_transition_positions(*selected_memory, scale_factor);
                     animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                     *dialog_state = DialogState::Closing;
-                    sound_effects.play_back(&config);
+                    //sound_effects.play_back(&config);
                 },
                 ("confirm_delete", "DELETE") => {
                     if let Ok(mut state) = storage_state.lock() {
@@ -283,7 +283,7 @@ pub async fn update(
                     let (grid_pos, dialog_pos) = calculate_icon_transition_positions(*selected_memory, scale_factor);
                     animation_state.trigger_dialog_transition(dialog_pos, grid_pos);
                     *dialog_state = DialogState::Closing;
-                    sound_effects.play_back(&config);
+                    //sound_effects.play_back(&config);
                 },
                 ("copy_storage_select", target_id) if target_id != "CANCEL" => {
                     let memory_index = get_memory_index(*selected_memory, *scroll_offset);
