@@ -300,18 +300,12 @@ impl AnimationState {
         self.shake_time = Self::SHAKE_DURATION;
     }
 
-    /*
-    pub fn trigger_transition(&mut self) {
-        self.cursor_transition_time = Self::CURSOR_TRANSITION_DURATION;
-    }
-    */
     pub fn trigger_transition(&mut self, speed_setting: &str) {
         let duration = match speed_setting {
-            "INSTANT" => 0.0,
             "FAST" => 0.07,
             "NORMAL" => 0.15,
             "SLOW" => 0.30,
-            _ => 0.15,
+            _ => 0.0, // OFF
         };
 
         self.current_transition_duration = duration;
@@ -334,17 +328,6 @@ impl AnimationState {
         }
     }
 
-    /*
-    pub fn get_cursor_scale(&self) -> f32 {
-        if self.cursor_transition_time > 0.0 {
-            let t = self.cursor_transition_time / Self::CURSOR_TRANSITION_DURATION;
-            // Start at 1.5x size and smoothly transition to 1.0x
-            1.0 + 0.5 * t
-        } else {
-            1.0
-        }
-    }
-    */
     pub fn get_cursor_scale(&self) -> f32 {
         // If duration is 0 (INSTANT) or time is 0, return 1.0 (no scale effect)
         if self.current_transition_duration <= 0.0 || self.cursor_transition_time <= 0.0 {

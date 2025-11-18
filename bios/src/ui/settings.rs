@@ -67,7 +67,7 @@ pub const CUSTOM_ASSET_SETTINGS: &[&str] = &[
     "GUI CUSTOMIZATION SETTINGS",
 ];
 
-pub const FONT_COLORS: &[&str] = &[
+pub const COLORS: &[&str] = &[
     "WHITE",
     "BLACK",
     "PINK",
@@ -89,10 +89,14 @@ pub const RESOLUTIONS: &[&str] = &[
     "3840x2160",
 ];
 
-pub const SCROLL_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-pub const COLOR_SHIFT_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-pub const CURSOR_BLINK_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-pub const TRANSITION_SPEEDS: &[&str] = &["SLOW", "NORMAL", "FAST", "INSTANT"];
+pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+
+/*
+pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+*/
 
 pub const TIMEZONES: [&str; 25] = [
     "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8", "UTC-7", "UTC-6",
@@ -696,56 +700,56 @@ pub fn update(
             2 => { // FONT COLOR
                 if input_state.left || input_state.right {
                     // Find current color's index in our list
-                    let current_index = FONT_COLORS.iter().position(|&c| c == config.font_color).unwrap_or(0);
+                    let current_index = COLORS.iter().position(|&c| c == config.font_color).unwrap_or(0);
                     let new_index = if input_state.right {
-                        (current_index + 1) % FONT_COLORS.len()
+                        (current_index + 1) % COLORS.len()
                     } else {
-                        (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
+                        (current_index + COLORS.len() - 1) % COLORS.len()
                     };
-                    config.font_color = FONT_COLORS[new_index].to_string();
+                    config.font_color = COLORS[new_index].to_string();
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             }
             3 => { // CURSOR COLOR
                 if input_state.left || input_state.right {
-                    // We can reuse the FONT_COLORS constant for this
-                    let current_index = FONT_COLORS.iter().position(|&c| c == config.cursor_color).unwrap_or(0);
+                    // We can reuse the COLORS constant for this
+                    let current_index = COLORS.iter().position(|&c| c == config.cursor_color).unwrap_or(0);
                     let new_index = if input_state.right {
-                        (current_index + 1) % FONT_COLORS.len()
+                        (current_index + 1) % COLORS.len()
                     } else {
-                        (current_index + FONT_COLORS.len() - 1) % FONT_COLORS.len()
+                        (current_index + COLORS.len() - 1) % COLORS.len()
                     };
 
-                    config.cursor_color = FONT_COLORS[new_index].to_string();
+                    config.cursor_color = COLORS[new_index].to_string();
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
             4 => { // CURSOR BLINK SPEED
                 if input_state.left || input_state.right {
-                    let current_index = CURSOR_BLINK_SPEEDS.iter().position(|&s| s == config.cursor_blink_speed).unwrap_or(0);
+                    let current_index = SPEEDS.iter().position(|&s| s == config.cursor_blink_speed).unwrap_or(0);
                     let new_index = if input_state.right {
-                        (current_index + 1) % CURSOR_BLINK_SPEEDS.len()
+                        (current_index + 1) % SPEEDS.len()
                     } else {
-                        (current_index + CURSOR_BLINK_SPEEDS.len() - 1) % CURSOR_BLINK_SPEEDS.len()
+                        (current_index + SPEEDS.len() - 1) % SPEEDS.len()
                     };
 
-                    config.cursor_blink_speed = CURSOR_BLINK_SPEEDS[new_index].to_string();
+                    config.cursor_blink_speed = SPEEDS[new_index].to_string();
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
             5 => { // TRANSITION ANIMATION
                 if input_state.left || input_state.right {
-                    let current_index = TRANSITION_SPEEDS.iter().position(|&s| s == config.cursor_transition_speed).unwrap_or(2); // Default to NORMAL (index 2)
+                    let current_index = SPEEDS.iter().position(|&s| s == config.cursor_transition_speed).unwrap_or(2); // Default to NORMAL (index 2)
                     let new_index = if input_state.right {
-                        (current_index + 1) % TRANSITION_SPEEDS.len()
+                        (current_index + 1) % SPEEDS.len()
                     } else {
-                        (current_index + TRANSITION_SPEEDS.len() - 1) % TRANSITION_SPEEDS.len()
+                        (current_index + SPEEDS.len() - 1) % SPEEDS.len()
                     };
 
-                    config.cursor_transition_speed = TRANSITION_SPEEDS[new_index].to_string();
+                    config.cursor_transition_speed = SPEEDS[new_index].to_string();
                     config.save();
                     // Trigger a transition so the user sees the effect immediately!
                     animation_state.trigger_transition(&config.cursor_transition_speed);
@@ -754,28 +758,28 @@ pub fn update(
             },
             6 => { // BACKGROUND SCROLLING
                 if input_state.left || input_state.right {
-                    let current_index = SCROLL_SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
+                    let current_index = SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
                     let new_index = if input_state.right {
-                        (current_index + 1) % SCROLL_SPEEDS.len()
+                        (current_index + 1) % SPEEDS.len()
                     } else {
-                        (current_index + SCROLL_SPEEDS.len() - 1) % SCROLL_SPEEDS.len()
+                        (current_index + SPEEDS.len() - 1) % SPEEDS.len()
                     };
 
-                    config.background_scroll_speed = SCROLL_SPEEDS[new_index].to_string();
+                    config.background_scroll_speed = SPEEDS[new_index].to_string();
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
             7 => { // COLOR GRADIENT SHIFTING
                 if input_state.left || input_state.right {
-                    let current_index = COLOR_SHIFT_SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
+                    let current_index = SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
                     let new_index = if input_state.right {
-                        (current_index + 1) % COLOR_SHIFT_SPEEDS.len()
+                        (current_index + 1) % SPEEDS.len()
                     } else {
-                        (current_index + COLOR_SHIFT_SPEEDS.len() - 1) % COLOR_SHIFT_SPEEDS.len()
+                        (current_index + SPEEDS.len() - 1) % SPEEDS.len()
                     };
 
-                    config.color_shift_speed = COLOR_SHIFT_SPEEDS[new_index].to_string();
+                    config.color_shift_speed = SPEEDS[new_index].to_string();
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
