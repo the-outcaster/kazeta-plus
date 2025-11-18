@@ -36,8 +36,6 @@ pub fn load_sound_from_bytes(bytes: &[u8]) -> SamplesBuffer {
     SamplesBuffer::new(channels, sample_rate, samples)
 }
 
-
-
 pub fn load_from_file(path: &Path) -> Result<SamplesBuffer, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -60,7 +58,6 @@ pub struct SoundEffects {
 
 impl SoundEffects {
     pub fn load(pack_name: &str) -> Self {
-        // (This logic remains unchanged, copying your original correct logic)
         let default_move = load_sound_from_bytes(include_bytes!("../move.wav"));
         let default_select = load_sound_from_bytes(include_bytes!("../select.wav"));
         let default_reject = load_sound_from_bytes(include_bytes!("../reject.wav"));

@@ -15,9 +15,8 @@ use std::process;
 use std::process::Child;
 
 // extra stuff I'm using
-use std::fs::File;
 use std::path::PathBuf; // for loading assets
-use std::io::BufReader; // logger
+use std::io::{BufReader, Cursor};
 use std::env; // backtracing
 use ::rand::Rng; // for selecting a random message on startup
 use chrono::Local; // for getting clock
@@ -65,7 +64,6 @@ pub use types::*;
 - gamepad tester
 - add system debugger in the event the game crashed
 - add option to safely unmount cart in main menu
-- download ALL runtimes (Linux, Windows, emulators, etc.) to /usr/share/kazeta/runtimes/ when the user upgrades
 - support for local multiplayer (i.e. add support for controllers 2-4)
 
 Hard
@@ -77,8 +75,8 @@ Maybe
 // ===================================
 // NOTES
 // ===================================
-- setting brightness needs the brightnessctl package -- this has been added to the manifest
-- Steam Deck volume/brightness controls requires the keyd package -- this has been added to the manifest
+- setting brightness needs the brightnessctl package
+- Steam Deck volume/brightness controls requires the keyd package
 - support for multiple audio sinks requires us to replace the wireplumber file in /var/kazeta/state/ to .AUDIO_PREFERENCE_SET, as specified in the kazeta-session script
 - multi-cart support requires us to have a LAUNCH_CMD_FILE, as specified in kazeta-session, and we also have to check if a specific .kzi file was passed as an argument in "kazeta"
 - we add a "steam-deck.yaml" device profile for InputPlumber in /usr/share/inputplumber/profiles/ and map two of the back buttons to F13 and F14 so keyd can recognize them as keyboard inputs. These then get loaded into /etc/keyd/default.conf and control the brightness level
@@ -106,7 +104,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.41.KAZETA+";
+const VERSION_NUMBER: &str = "V1.41a.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -699,8 +697,17 @@ async fn main() {
         let splash_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
 
         let sink = Sink::connect_new(&AUDIO.stream.mixer());
-        let splash_sfx = File::open("../splash.wav").unwrap();
-        let source = Decoder::new(BufReader::new(splash_sfx)).unwrap();
+
+        // 1. Embed the bytes into the binary at compile time
+        // Note: The path is relative to this .rs file
+        let splash_bytes = include_bytes!("../splash.wav");
+
+        // 2. Create a "Cursor" which allows the decoder to read the raw bytes
+        // as if they were a file stream
+        let cursor = Cursor::new(splash_bytes);
+
+        // 3. Decode the audio from memory
+        let source = Decoder::new(cursor).unwrap();
 
         // Play the splash sound
         //play_sound(&splash_sfx, PlaySoundParams { looped: false, volume: 0.2 });
