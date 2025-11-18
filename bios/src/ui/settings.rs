@@ -50,6 +50,8 @@ pub const GUI_CUSTOMIZATION_SETTINGS: &[&str] = &[
     "MAIN MENU POSITION",
     "FONT COLOR",
     "CURSOR COLOR",
+    "CURSOR BLINK SPEED",
+    "TRANSITION ANIMATION",
     "BACKGROUND SCROLLING",
     "COLOR GRADIENT SHIFTING",
     "AUDIO SETTINGS",
@@ -89,6 +91,8 @@ pub const RESOLUTIONS: &[&str] = &[
 
 pub const SCROLL_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
 pub const COLOR_SHIFT_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+pub const CURSOR_BLINK_SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+pub const TRANSITION_SPEEDS: &[&str] = &["SLOW", "NORMAL", "FAST", "INSTANT"];
 
 pub const TIMEZONES: [&str; 25] = [
     "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8", "UTC-7", "UTC-6",
@@ -237,10 +241,12 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
             1 => format!("{:?}", config.menu_position).to_uppercase(), // MENU POSITION
             2 => config.font_color.clone(), // FONT COLOR
             3 => config.cursor_color.clone(), // CURSOR COLOR
-            4 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
-            5 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
-            6 => "<-".to_string(),
-            7 => "->".to_string(),
+            4 => config.cursor_blink_speed.clone(),
+            5 => config.cursor_transition_speed.clone(),
+            6 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
+            7 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
+            8 => "<-".to_string(),
+            9 => "->".to_string(),
             _ => "".to_string(),
         },
         // CUSTOM ASSETS
@@ -295,6 +301,7 @@ pub fn update(
     logo_choices: &Vec<String>,
     background_choices: &Vec<String>,
     font_choices: &Vec<String>,
+    animation_state: &mut AnimationState,
 ) {
     // --- Determine current page info ---
     let (page_number, options): (usize, &[&str]) = match *current_screen {
@@ -634,6 +641,8 @@ pub fn update(
                             config.menu_position = defaults.menu_position;
                             config.font_color = defaults.font_color;
                             config.cursor_color = defaults.cursor_color;
+                            config.cursor_blink_speed = defaults.cursor_blink_speed;
+                            config.cursor_transition_speed = defaults.cursor_transition_speed;
                             config.background_scroll_speed = defaults.background_scroll_speed;
                             config.color_shift_speed = defaults.color_shift_speed;
 
@@ -653,6 +662,8 @@ pub fn update(
                                 if let Some(val) = &theme.config.menu_position { config.menu_position = val.parse().unwrap_or_default(); }
                                 if let Some(val) = &theme.config.font_color { config.font_color = val.clone(); }
                                 if let Some(val) = &theme.config.cursor_color { config.cursor_color = val.clone(); }
+                                if let Some(val) = &theme.config.cursor_blink_speed { config.cursor_blink_speed = val.clone(); }
+                                if let Some(val) = &theme.config.cursor_transition_speed { config.cursor_transition_speed = val.clone(); }
                                 if let Some(val) = &theme.config.background_scroll_speed { config.background_scroll_speed = val.clone(); }
                                 if let Some(val) = &theme.config.color_shift_speed { config.color_shift_speed = val.clone(); }
                             }
@@ -711,7 +722,37 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            4 => { // BACKGROUND SCROLLING
+            4 => { // CURSOR BLINK SPEED
+                if input_state.left || input_state.right {
+                    let current_index = CURSOR_BLINK_SPEEDS.iter().position(|&s| s == config.cursor_blink_speed).unwrap_or(0);
+                    let new_index = if input_state.right {
+                        (current_index + 1) % CURSOR_BLINK_SPEEDS.len()
+                    } else {
+                        (current_index + CURSOR_BLINK_SPEEDS.len() - 1) % CURSOR_BLINK_SPEEDS.len()
+                    };
+
+                    config.cursor_blink_speed = CURSOR_BLINK_SPEEDS[new_index].to_string();
+                    config.save();
+                    sound_effects.play_cursor_move(&config);
+                }
+            },
+            5 => { // TRANSITION ANIMATION
+                if input_state.left || input_state.right {
+                    let current_index = TRANSITION_SPEEDS.iter().position(|&s| s == config.cursor_transition_speed).unwrap_or(2); // Default to NORMAL (index 2)
+                    let new_index = if input_state.right {
+                        (current_index + 1) % TRANSITION_SPEEDS.len()
+                    } else {
+                        (current_index + TRANSITION_SPEEDS.len() - 1) % TRANSITION_SPEEDS.len()
+                    };
+
+                    config.cursor_transition_speed = TRANSITION_SPEEDS[new_index].to_string();
+                    config.save();
+                    // Trigger a transition so the user sees the effect immediately!
+                    animation_state.trigger_transition(&config.cursor_transition_speed);
+                    sound_effects.play_cursor_move(&config);
+                }
+            },
+            6 => { // BACKGROUND SCROLLING
                 if input_state.left || input_state.right {
                     let current_index = SCROLL_SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -725,7 +766,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            5 => { // COLOR GRADIENT SHIFTING
+            7 => { // COLOR GRADIENT SHIFTING
                 if input_state.left || input_state.right {
                     let current_index = COLOR_SHIFT_SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -739,14 +780,14 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            6 => { // GO TO AUDIO SETTINGS
+            8 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;
                     sound_effects.play_select(&config);
                 }
             },
-            7 => { // GO TO CUSTOM ASSETS
+            9 => { // GO TO CUSTOM ASSETS
                 if input_state.select {
                     *current_screen = Screen::AssetSettings;
                     *settings_menu_selection = 0;

@@ -96,25 +96,25 @@ pub async fn update(
                     }
                     if input_state.right && *selected_memory < GRID_WIDTH * GRID_HEIGHT - 1 {
                         *selected_memory += 1;
-                        animation_state.trigger_transition();
+                        animation_state.trigger_transition(&config.cursor_transition_speed);
                         sound_effects.play_cursor_move(&config);
                     }
                     if input_state.left && *selected_memory >= 1 {
                         *selected_memory -= 1;
-                        animation_state.trigger_transition();
+                        animation_state.trigger_transition(&config.cursor_transition_speed);
                         sound_effects.play_cursor_move(&config);
                     }
                     if input_state.down {
                         if *selected_memory < GRID_WIDTH * GRID_HEIGHT - GRID_WIDTH {
                             *selected_memory += GRID_WIDTH;
-                            animation_state.trigger_transition();
+                            animation_state.trigger_transition(&config.cursor_transition_speed);
                             sound_effects.play_cursor_move(&config);
                         } else {
                             // Check if there are any saves in the next row
                             let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, *scroll_offset);
                             if next_row_start < memories.len() {
                                 *scroll_offset += 1;
-                                animation_state.trigger_transition();
+                                animation_state.trigger_transition(&config.cursor_transition_speed);
                                 sound_effects.play_cursor_move(&config);
                             }
                         }
@@ -122,21 +122,21 @@ pub async fn update(
                     if input_state.up {
                         if *selected_memory >= GRID_WIDTH {
                             *selected_memory -= GRID_WIDTH;
-                            animation_state.trigger_transition();
+                            animation_state.trigger_transition(&config.cursor_transition_speed);
                             sound_effects.play_cursor_move(&config);
                         } else if *scroll_offset > 0 {
                             *scroll_offset -= 1;
-                            animation_state.trigger_transition();
+                            animation_state.trigger_transition(&config.cursor_transition_speed);
                             sound_effects.play_cursor_move(&config);
                         } else {
                             // Allow moving to storage navigation from leftmost or rightmost column
                             if *selected_memory % GRID_WIDTH == 0 {
                                 input_state.ui_focus = UIFocus::StorageLeft;
-                                animation_state.trigger_transition();
+                                animation_state.trigger_transition(&config.cursor_transition_speed);
                                 sound_effects.play_cursor_move(&config);
                             } else if *selected_memory % GRID_WIDTH == GRID_WIDTH - 1 {
                                 input_state.ui_focus = UIFocus::StorageRight;
-                                animation_state.trigger_transition();
+                                animation_state.trigger_transition(&config.cursor_transition_speed);
                                 sound_effects.play_cursor_move(&config);
                             }
                         }
@@ -145,13 +145,13 @@ pub async fn update(
                 UIFocus::StorageLeft => {
                     if input_state.right {
                         input_state.ui_focus = UIFocus::StorageRight;
-                        animation_state.trigger_transition();
+                        animation_state.trigger_transition(&config.cursor_transition_speed);
                         sound_effects.play_cursor_move(&config);
                     }
                     if input_state.down {
                         input_state.ui_focus = UIFocus::Grid;
                         *selected_memory = 0; // Move to leftmost grid position
-                        animation_state.trigger_transition();
+                        animation_state.trigger_transition(&config.cursor_transition_speed);
                         sound_effects.play_cursor_move(&config);
                     }
                     if input_state.select {
@@ -171,13 +171,13 @@ pub async fn update(
                 UIFocus::StorageRight => {
                     if input_state.left {
                         input_state.ui_focus = UIFocus::StorageLeft;
-                        animation_state.trigger_transition();
+                        animation_state.trigger_transition(&config.cursor_transition_speed);
                         sound_effects.play_cursor_move(&config);
                     }
                     if input_state.down {
                         input_state.ui_focus = UIFocus::Grid;
                         *selected_memory = GRID_WIDTH - 1; // Move to rightmost grid position
-                        animation_state.trigger_transition();
+                        animation_state.trigger_transition(&config.cursor_transition_speed);
                         sound_effects.play_cursor_move(&config);
                     }
                     if input_state.select {
@@ -204,13 +204,13 @@ pub async fn update(
                 let mut selection: i32 = dialog.selection as i32 + dialog.options.len() as i32;
                 if input_state.up {
                     selection -= 1;
-                    animation_state.trigger_transition();
+                    animation_state.trigger_transition(&config.cursor_transition_speed);
                     sound_effects.play_cursor_move(&config);
                 }
 
                 if input_state.down {
                     selection += 1;
-                    animation_state.trigger_transition();
+                    animation_state.trigger_transition(&config.cursor_transition_speed);
                     sound_effects.play_cursor_move(&config);
                 }
 

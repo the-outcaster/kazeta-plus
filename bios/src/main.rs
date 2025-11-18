@@ -87,7 +87,7 @@ Maybe
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
-const DEV_MODE: bool = false;
+const DEV_MODE: bool = true;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -104,7 +104,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.41a.KAZETA+";
+const VERSION_NUMBER: &str = "V1.42d.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
@@ -911,7 +911,7 @@ async fn main() {
 
         // Update animations
         animation_state.update_shake(get_frame_time());
-        animation_state.update_cursor_animation(get_frame_time());
+        animation_state.update_cursor_animation(get_frame_time(), &config.cursor_blink_speed);
         animation_state.update_dialog_transition(get_frame_time());
 
         // Manage cart check thread based on current screen
@@ -1070,7 +1070,7 @@ async fn main() {
                     &mut sound_effects, &mut confirm_selection,
                     &mut brightness, &mut system_volume, &available_sinks, &mut current_bgm,
                     &bgm_choices, &music_cache, &mut sfx_pack_to_reload, &logo_choices,
-                    &background_choices, &font_choices,
+                    &background_choices, &font_choices, &mut animation_state,
                 );
 
                 // --- Draw the UI ---

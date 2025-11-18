@@ -156,6 +156,7 @@ pub struct AnimationState {
     pub shake_target: ShakeTarget, // Which element is currently shaking
     pub cursor_animation_time: f32, // Time counter for cursor animations
     pub cursor_transition_time: f32, // Time counter for cursor transition animation
+    pub current_transition_duration: f32,
     pub dialog_transition_time: f32, // Time counter for dialog transition animation
     pub dialog_transition_progress: f32, // Progress of dialog transition (0.0 to 1.0)
     pub dialog_transition_start_pos: Vec2, // Starting position for icon transition
@@ -214,8 +215,7 @@ impl MenuPosition {
 impl AnimationState {
     const SHAKE_DURATION: f32 = 0.2;    // Duration of shake animation in seconds
     const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
-    const CURSOR_ANIMATION_SPEED: f32 = 10.0; // Speed of cursor color animation
-    const CURSOR_TRANSITION_DURATION: f32 = 0.15; // Duration of cursor transition animation
+    //const CURSOR_TRANSITION_DURATION: f32 = 0.15; // Duration of cursor transition animation
     const DIALOG_TRANSITION_DURATION: f32 = 0.4; // Duration of dialog transition animation
 
     pub fn new() -> Self {
@@ -224,6 +224,7 @@ impl AnimationState {
             shake_target: ShakeTarget::None,
             cursor_animation_time: 0.0,
             cursor_transition_time: 0.0,
+            current_transition_duration: 0.15,
             dialog_transition_time: 0.0,
             dialog_transition_progress: 0.0,
             dialog_transition_start_pos: Vec2::ZERO,
@@ -249,10 +250,26 @@ impl AnimationState {
         }
     }
 
-    pub fn update_cursor_animation(&mut self, delta_time: f32) {
-        // Update cursor animation
-        self.cursor_animation_time = (self.cursor_animation_time + delta_time * Self::CURSOR_ANIMATION_SPEED) % (2.0 * std::f32::consts::PI);
-        // Update cursor transition
+    pub fn update_cursor_animation(&mut self, delta_time: f32, speed_setting: &str) {
+
+        // Determine numeric speed based on string setting
+        let speed = match speed_setting {
+            "FAST" => 15.0,
+            "NORMAL" => 10.0,
+            "SLOW" => 5.0,
+            _ => 0.0, // "OFF"
+        };
+
+        if speed > 0.0 {
+            // Standard animation
+            self.cursor_animation_time = (self.cursor_animation_time + delta_time * speed) % (2.0 * std::f32::consts::PI);
+        } else {
+            // If OFF, lock time to PI/2.
+            // sin(PI/2) = 1.0, ensuring the cursor stays fully lit/solid instead of freezing at a random dimness.
+            self.cursor_animation_time = std::f32::consts::PI / 2.0;
+        }
+
+        // Update cursor transition (unchanged)
         if self.cursor_transition_time > 0.0 {
             self.cursor_transition_time = (self.cursor_transition_time - delta_time).max(0.0);
         }
@@ -283,8 +300,22 @@ impl AnimationState {
         self.shake_time = Self::SHAKE_DURATION;
     }
 
+    /*
     pub fn trigger_transition(&mut self) {
         self.cursor_transition_time = Self::CURSOR_TRANSITION_DURATION;
+    }
+    */
+    pub fn trigger_transition(&mut self, speed_setting: &str) {
+        let duration = match speed_setting {
+            "INSTANT" => 0.0,
+            "FAST" => 0.07,
+            "NORMAL" => 0.15,
+            "SLOW" => 0.30,
+            _ => 0.15,
+        };
+
+        self.current_transition_duration = duration;
+        self.cursor_transition_time = duration;
     }
 
     pub fn get_cursor_color(&self, config: &Config) -> Color { // Add config parameter
@@ -303,6 +334,7 @@ impl AnimationState {
         }
     }
 
+    /*
     pub fn get_cursor_scale(&self) -> f32 {
         if self.cursor_transition_time > 0.0 {
             let t = self.cursor_transition_time / Self::CURSOR_TRANSITION_DURATION;
@@ -311,6 +343,17 @@ impl AnimationState {
         } else {
             1.0
         }
+    }
+    */
+    pub fn get_cursor_scale(&self) -> f32 {
+        // If duration is 0 (INSTANT) or time is 0, return 1.0 (no scale effect)
+        if self.current_transition_duration <= 0.0 || self.cursor_transition_time <= 0.0 {
+            return 1.0;
+        }
+
+        let t = self.cursor_transition_time / self.current_transition_duration;
+        // Start at 1.5x size and smoothly transition to 1.0x
+        1.0 + 0.5 * t
     }
 
     pub fn update_dialog_transition(&mut self, delta_time: f32) {

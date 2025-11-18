@@ -29,12 +29,12 @@ pub fn update(
 ) {
     if input_state.up {
         *extras_menu_selection = if *extras_menu_selection == 0 { EXTRAS_MENU_OPTIONS.len() - 1 } else { *extras_menu_selection - 1 };
-        animation_state.trigger_transition();
+        animation_state.trigger_transition(&config.cursor_transition_speed);
         sound_effects.play_cursor_move(config);
     }
     if input_state.down {
         *extras_menu_selection = (*extras_menu_selection + 1) % EXTRAS_MENU_OPTIONS.len();
-        animation_state.trigger_transition();
+        animation_state.trigger_transition(&config.cursor_transition_speed);
         sound_effects.play_cursor_move(config);
     }
     if input_state.back {

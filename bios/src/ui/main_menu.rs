@@ -69,12 +69,12 @@ pub fn update(
         } else {
             *main_menu_selection = (*main_menu_selection - 1) % MAIN_MENU_OPTIONS.len();
         }
-        animation_state.trigger_transition();
+        animation_state.trigger_transition(&config.cursor_transition_speed);
         sound_effects.play_cursor_move(&config);
     }
     if input_state.down {
         *main_menu_selection = (*main_menu_selection + 1) % MAIN_MENU_OPTIONS.len();
-        animation_state.trigger_transition();
+        animation_state.trigger_transition(&config.cursor_transition_speed);
         sound_effects.play_cursor_move(&config);
     }
     if input_state.select {
