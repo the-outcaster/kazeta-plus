@@ -215,7 +215,6 @@ impl MenuPosition {
 impl AnimationState {
     const SHAKE_DURATION: f32 = 0.2;    // Duration of shake animation in seconds
     const SHAKE_INTENSITY: f32 = 3.0;   // How far the arrow shakes
-    //const CURSOR_TRANSITION_DURATION: f32 = 0.15; // Duration of cursor transition animation
     const DIALOG_TRANSITION_DURATION: f32 = 0.4; // Duration of dialog transition animation
 
     pub fn new() -> Self {

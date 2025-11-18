@@ -368,9 +368,39 @@ pub fn draw(
     animation_state: &AnimationState,
     playtime_cache: &mut PlaytimeCache,
     size_cache: &mut SizeCache,
-    scale_factor: f32,
+    _scale_factor: f32, // we're now ignoring this
     dialog_state: &DialogState,
 ) {
+    // Calculate Safe Scale Factor & Centering Offsets
+    // We assume the UI was designed for 640x360
+    const BASE_W: f32 = 640.0;
+    const BASE_H: f32 = 360.0;
+
+    let scale_w = screen_width() / BASE_W;
+    let scale_h = screen_height() / BASE_H;
+
+    // Take the smaller of the two scales to ensure it fits on both axes
+    let scale_factor = scale_w.min(scale_h);
+
+    // Calculate offsets to center the UI
+    let ui_w = BASE_W * scale_factor;
+    let ui_h = BASE_H * scale_factor;
+    let offset_x = (screen_width() - ui_w) / 2.0;
+    let offset_y = (screen_height() - ui_h) / 2.0;
+
+    // If we have extra vertical space (like in 4:3), use it to spread the UI.
+    // We use 1/3 of the extra space for the top gap, and 1/3 for the bottom gap.
+    let extra_h = (screen_height() - ui_h).max(0.0);
+    let spread = extra_h / 3.0;
+
+    // We moved Header UP by 1*spread, and Footer DOWN by 1*spread.
+    // So we have 2*spread of extra vertical space to fill with the grid.
+    let row_spread = if GRID_HEIGHT > 1 {
+        (spread * 2.0) / (GRID_HEIGHT as f32 - 1.0)
+    } else {
+        0.0
+    };
+
     if *dialog_state == DialogState::Opening || *dialog_state == DialogState::Closing || *dialog_state == DialogState::None {
 
         // During opening, only render the main view and the transitioning icon
@@ -418,10 +448,9 @@ pub fn draw(
             let offset = (scaled_size - base_size) / 2.0;
 
             draw_rectangle_lines(
-                //pixel_pos(xp)-3.0-SELECTED_OFFSET - offset,
-                //pixel_pos(yp)-3.0-SELECTED_OFFSET+GRID_OFFSET - offset,
-                pixel_pos(xp, scale_factor) - (3.0 * scale_factor) - selected_offset - offset,
-                pixel_pos(yp, scale_factor) - (3.0 * scale_factor) - selected_offset + grid_offset - offset,
+                // Add offset_x to X and offset_y to Y
+                offset_x + pixel_pos(xp, scale_factor) - (3.0 * scale_factor) - selected_offset - offset,
+                offset_y + pixel_pos(yp, scale_factor) - (3.0 * scale_factor) - selected_offset + grid_offset - offset - spread + (yp * row_spread),
                 scaled_size,
                 scaled_size,
                 cursor_thickness,
@@ -432,8 +461,10 @@ pub fn draw(
         for x in 0..GRID_WIDTH {
             for y in 0..GRID_HEIGHT {
                 let memory_index = get_memory_index(x + GRID_WIDTH * y, scroll_offset);
-                let pos_x = pixel_pos(x as f32, scale_factor);
-                let pos_y = pixel_pos(y as f32, scale_factor) + grid_offset;
+
+                // Add offsets to grid positions
+                let pos_x = offset_x + pixel_pos(x as f32, scale_factor);
+                let pos_y = offset_y + pixel_pos(y as f32, scale_factor) + grid_offset - spread + (y as f32 * row_spread);
 
                 if xp as usize == x && yp as usize == y {
                     if let UIFocus::Grid = input_state.ui_focus {
@@ -480,10 +511,13 @@ pub fn draw(
             }
         }
 
-        // --- Storage media info area (NOW FULLY SCALED) ---
+        // --- Storage media info area ---
         let storage_info_w = 512.0 * scale_factor;
-        let storage_info_x = tile_size * 2.0;
-        let storage_info_y = 16.0 * scale_factor;
+
+        // Add offset_x and offset_y to UI elements below
+        let storage_info_x = offset_x + tile_size * 2.0;
+        let storage_info_y = (offset_y + 16.0 * scale_factor) - spread;
+
         let storage_info_h = 36.0 * scale_factor;
         let nav_arrow_size = 10.0 * scale_factor;
         let nav_arrow_outline = 1.0 * scale_factor;
@@ -508,7 +542,7 @@ pub fn draw(
                 text_with_config_color(font_cache, config, &free_space_text, storage_info_x + (2.0 * scale_factor), storage_info_y + (33.0 * scale_factor), font_size);
 
                 // Draw left arrow background
-                let left_box_x = padding;  // Align with leftmost grid column
+                let left_box_x = offset_x + padding;
                 let left_box_y = storage_info_y + storage_info_h / 2.0 - tile_size / 2.0;
                 let left_shake = animation_state.calculate_shake_offset(ShakeTarget::LeftArrow);
 
@@ -554,7 +588,7 @@ pub fn draw(
                 draw_triangle_lines(left_points[0], left_points[1], left_points[2], nav_arrow_outline, BLACK);
 
                 // Draw right arrow background
-                let right_box_x = padding + (GRID_WIDTH as f32 - 1.0) * (tile_size + padding);  // Align with rightmost grid column
+                let right_box_x = offset_x + padding + (GRID_WIDTH as f32 - 1.0) * (tile_size + padding);
                 let right_box_y = storage_info_y + storage_info_h / 2.0 - tile_size / 2.0;
                 let right_shake = animation_state.calculate_shake_offset(ShakeTarget::RightArrow);
 
@@ -600,9 +634,15 @@ pub fn draw(
             }
         }
 
-        // --- Draw highlight box for save info (NOW FULLY SCALED) ---
-        draw_rectangle(16.0 * scale_factor, 309.0 * scale_factor, screen_width() - (32.0 * scale_factor), 40.0 * scale_factor, UI_BG_COLOR);
-        draw_rectangle_lines(12.0 * scale_factor, 305.0 * scale_factor, screen_width() - (24.0 * scale_factor), 48.0 * scale_factor, box_line_thickness, UI_BG_COLOR_DARK);
+        // --- Draw highlight box for save info ---
+        // Add offsets to the save info box
+        let save_info_x = offset_x + 16.0 * scale_factor;
+        let save_info_y = (offset_y + 309.0 * scale_factor) + spread;
+
+        let save_box_w = 640.0 * scale_factor - (32.0 * scale_factor); // Scale relative to 640 base
+
+        draw_rectangle(save_info_x, save_info_y, save_box_w, 40.0 * scale_factor, UI_BG_COLOR);
+        draw_rectangle_lines(save_info_x - (4.0*scale_factor), save_info_y - (4.0*scale_factor), save_box_w + (8.0 * scale_factor), 48.0 * scale_factor, box_line_thickness, UI_BG_COLOR_DARK);
 
         let memory_index = get_memory_index(selected_memory, scroll_offset);
         if input_state.ui_focus == UIFocus::Grid {
@@ -612,12 +652,12 @@ pub fn draw(
                 let size = get_game_size(selected_mem, size_cache);
                 let stats_text = format!("{:.1} MB | {:.1} H", size, playtime);
 
-                // Draw save info text (NOW in the correct, scaled box)
-                text_with_config_color(font_cache, config, &desc, 19.0 * scale_factor, 327.0 * scale_factor, font_size);
-                text_with_config_color(font_cache, config, &stats_text, 19.0 * scale_factor, 345.0 * scale_factor, font_size);
+                // Use save_info_x/y for text positioning
+                text_with_config_color(font_cache, config, &desc, save_info_x + (3.0 * scale_factor), save_info_y + (18.0 * scale_factor), font_size);
+                text_with_config_color(font_cache, config, &stats_text, save_info_x + (3.0 * scale_factor), save_info_y + (36.0 * scale_factor), font_size);
             }
         }
-        // --- Draw scroll indicators (NOW FULLY SCALED) ---
+        // --- Draw scroll indicators ---
         let indicator_size = 8.0 * scale_factor;
         let distance_top = -13.0 * scale_factor;
         let distance_bottom = 4.0 * scale_factor;
@@ -625,8 +665,10 @@ pub fn draw(
 
         if scroll_offset > 0 {
             // Up arrow
+            // Center X relative to the screen, Y relative to grid (offset included)
             let center_x = screen_width() / 2.0;
-            let top_y = grid_offset - distance_top;
+            let top_y = (offset_y + grid_offset - spread) - distance_top;
+
             let points = [
                 Vec2::new(center_x, top_y - indicator_size),
                 Vec2::new(center_x - indicator_size, top_y),
@@ -639,9 +681,10 @@ pub fn draw(
         let next_row_start = get_memory_index(GRID_WIDTH * GRID_HEIGHT, scroll_offset);
         if next_row_start < memories.len() {
             // Down arrow
-            let grid_bottom = grid_offset + GRID_HEIGHT as f32 * (tile_size + padding);
+            let grid_bottom = (offset_y + grid_offset - spread) + GRID_HEIGHT as f32 * (tile_size + padding + row_spread);
             let center_x = screen_width() / 2.0;
             let bottom_y = grid_bottom + distance_bottom;
+
             let points = [
                 Vec2::new(center_x, bottom_y + indicator_size),
                 Vec2::new(center_x - indicator_size, bottom_y),

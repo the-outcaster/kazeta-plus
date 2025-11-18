@@ -83,8 +83,7 @@ pub fn draw(
 
     // Center the menu
     let start_x = screen_width() / 2.0;
-    //let start_y = screen_height() * 0.35;
-    let start_y = screen_height() * 0.25;
+    let start_y = screen_height() * 0.3;
 
     // Draw menu options
     for (i, &option) in EXTRAS_MENU_OPTIONS.iter().enumerate() {

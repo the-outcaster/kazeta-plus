@@ -22,11 +22,12 @@ use crate::{
 const FONT_SIZE: u16 = 12;
 const MENU_PADDING: f32 = 6.0;
 const SETTINGS_START_Y: f32 = 80.0;
-const SETTINGS_OPTION_HEIGHT: f32 = 25.0;
+const SETTINGS_OPTION_HEIGHT: f32 = 23.0;
 
 pub const GENERAL_SETTINGS: &[&str] = &[
     "RESET SETTINGS",
     "RESOLUTION",
+    "ASPECT RATIO",
     "SHOW SPLASH SCREEN",
     "TIME ZONE",
     "BRIGHTNESS",
@@ -81,22 +82,26 @@ pub const COLORS: &[&str] = &[
 
 pub const RESOLUTIONS: &[&str] = &[
     "640x360",
+    "640x480",   // [!] 4:3 (Classic VGA)
+    "800x600",   // [!] 4:3
+    "1024x768",  // [!] 4:3
     "1280x720",
-    "1280x800", // Steam Deck
+    "1280x800",  // Steam Deck (16:10)
+    "1280x960",  // [!] 4:3 (2x integer scale of 480p)
+    "1440x1080", // [!] 4:3 (Perfect height match for 1080p screens)
     "1920x1080",
     "1920x1200", // DeckHD
     "2560x1440",
     "3840x2160",
 ];
 
-pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
+pub const ASPECT_RATIOS: &[&str] = &[
+    "4:3",
+    "16:9",
+    "16:10",
+];
 
-/*
 pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
-*/
 
 pub const TIMEZONES: [&str; 25] = [
     "UTC-12", "UTC-11", "UTC-10", "UTC-9", "UTC-8", "UTC-7", "UTC-6",
@@ -104,6 +109,16 @@ pub const TIMEZONES: [&str; 25] = [
     "UTC+2", "UTC+3", "UTC+4", "UTC+5", "UTC+6", "UTC+7", "UTC+8",
     "UTC+9", "UTC+10", "UTC+11", "UTC+12",
 ];
+
+// Helper to check if a resolution string belongs to an aspect ratio
+fn matches_aspect_ratio(res: &str, ratio: &str) -> bool {
+    match ratio {
+        "4:3" => matches!(res, "640x480" | "800x600" | "1024x768" | "1280x960" | "1440x1080"),
+        "16:9" => matches!(res, "640x360" | "1280x720" | "1920x1080" | "2560x1440" | "3840x2160"),
+        "16:10" => matches!(res, "1280x800" | "1920x1200"),
+        _ => true, // Unknown ratio, allow all
+    }
+}
 
 // SETTINGS
 pub fn render_settings_page(
@@ -220,13 +235,14 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
         1 => match index {
             0 => "CONFIRM".to_string(), // RESET SETTINGS
             1 => config.resolution.clone(), // RESOLUTION
-            2 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
-            3 => config.timezone.clone().to_uppercase(), // TIME ZONE
-            4 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
-            5 => if config.wifi { "ON" } else { "OFF" }.to_string(), // WI-FI
-            6 => if config.bluetooth { "ON" } else { "OFF" }.to_string(), // BLUETOOTH
-            7 => if config.autoboot { "ON" } else { "OFF" }.to_string(), // AUTOBOOT
-            8 => "->".to_string(),
+            2 => config.aspect_ratio.clone(), // ASPECT RATIO
+            3 => if config.show_splash_screen { "ON" } else { "OFF" }.to_string(), // SPLASH SCREEN TOGGLE
+            4 => config.timezone.clone().to_uppercase(), // TIME ZONE
+            5 => format!("{:.0}%", brightness * 100.0), // BRIGHTNESS
+            6 => if config.wifi { "ON" } else { "OFF" }.to_string(), // WI-FI
+            7 => if config.bluetooth { "ON" } else { "OFF" }.to_string(), // BLUETOOTH
+            8 => if config.autoboot { "ON" } else { "OFF" }.to_string(), // AUTOBOOT
+            9 => "->".to_string(),
             _ => "".to_string(),
         },
         // AUDIO SETTINGS
@@ -364,27 +380,63 @@ pub fn update(
             },
             1 => { // RESOLUTION
                 if input_state.left || input_state.right {
-                    let current_index = RESOLUTIONS.iter().position(|&r| r == config.resolution).unwrap_or(0);
+                    // 1. Filter the resolutions list based on the CURRENT aspect ratio
+                    let filtered_resolutions: Vec<&str> = RESOLUTIONS
+                    .iter()
+                    .filter(|&&r| matches_aspect_ratio(r, &config.aspect_ratio))
+                    .cloned()
+                    .collect();
+
+                    if filtered_resolutions.is_empty() { return; } // Safety check
+
+                    // 2. Find current index in the FILTERED list
+                    let current_index = filtered_resolutions.iter().position(|&r| r == config.resolution).unwrap_or(0);
+
+                    // 3. Calculate new index
                     let new_index = if input_state.right {
-                        (current_index + 1) % RESOLUTIONS.len()
+                        (current_index + 1) % filtered_resolutions.len()
                     } else {
-                        (current_index + RESOLUTIONS.len() - 1) % RESOLUTIONS.len()
+                        (current_index + filtered_resolutions.len() - 1) % filtered_resolutions.len()
                     };
 
-                    config.resolution = RESOLUTIONS[new_index].to_string();
+                    // 4. Apply
+                    config.resolution = filtered_resolutions[new_index].to_string();
                     config.save();
-                    apply_resolution(&config.resolution); // Apply the change immediately
+                    apply_resolution(&config.resolution);
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            2 => { // SPLASH SCREEN
+            2 => { // ASPECT RATIO
+                if input_state.left || input_state.right {
+                    let current_index = ASPECT_RATIOS.iter().position(|&r| r == config.aspect_ratio).unwrap_or(1); // Default 16:9
+                    let new_index = if input_state.right {
+                        (current_index + 1) % ASPECT_RATIOS.len()
+                    } else {
+                        (current_index + ASPECT_RATIOS.len() - 1) % ASPECT_RATIOS.len()
+                    };
+
+                    config.aspect_ratio = ASPECT_RATIOS[new_index].to_string();
+
+                    // [!] AUTO-SWITCH RESOLUTION
+                    // When ratio changes, switch to the "Best" (first) resolution for that ratio
+                    // to prevent invalid states (like 4:3 ratio but 1920x1080 resolution).
+                    if let Some(new_res) = RESOLUTIONS.iter().find(|&&r| matches_aspect_ratio(r, &config.aspect_ratio)) {
+                        config.resolution = new_res.to_string();
+                        apply_resolution(&config.resolution);
+                    }
+
+                    config.save();
+                    sound_effects.play_cursor_move(&config);
+                }
+            },
+            3 => { // SPLASH SCREEN
                 if input_state.left || input_state.right {
                     config.show_splash_screen = !config.show_splash_screen;
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            3 => { // TIME ZONE
+            4 => { // TIME ZONE
                 let mut change_occurred = false;
 
                 // Find the current index of the timezone in our array
@@ -408,7 +460,7 @@ pub fn update(
                     config.save();
                 }
             },
-            4 => { // BRIGHTNESS
+            5 => { // BRIGHTNESS
                 if input_state.left {
                     set_brightness(*brightness - 0.1); // Decrease by 10%
                     *brightness = get_current_brightness().unwrap_or(*brightness); // Refresh the value
@@ -420,7 +472,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            5 => { // WI-FI
+            6 => { // WI-FI
                 if input_state.left || input_state.right {
                     // Toggle the state optimistically and save immediately.
                     config.wifi = !config.wifi;
@@ -459,7 +511,7 @@ pub fn update(
                     }
                 }
             },
-            6 => { // BLUETOOTH
+            7 => { // BLUETOOTH
                 if input_state.left || input_state.right {
                     config.bluetooth = !config.bluetooth;
                     config.save();
@@ -496,14 +548,14 @@ pub fn update(
                     }
                 }
             },
-            7 => { // AUTOBOOT
+            8 => { // AUTOBOOT
                 if input_state.left || input_state.right {
                     config.autoboot = !config.autoboot;
                     config.save();
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            8 => { // GO TO AUDIO SETTINGS
+            9 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;

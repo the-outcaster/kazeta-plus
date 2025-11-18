@@ -531,13 +531,13 @@ pub fn render_dialog(
     if copy_running {
         draw_rectangle_lines(
             (font_size * 3) as f32, screen_height() / 2.0,
-                             screen_width() - (font_size * 6) as f32, 1.2 * font_size as f32,
-                             4.0 * scale_factor, WHITE
+            screen_width() - (font_size * 6) as f32, 1.2 * font_size as f32,
+            4.0 * scale_factor, WHITE
         );
         draw_rectangle(
             (font_size*3) as f32 + 0.2*font_size as f32, screen_height()/2.0 + 0.2*font_size as f32,
-                       (screen_width() - (font_size*6) as f32 - 0.4*font_size as f32) * (copy_progress as f32 / 100.0),
-                       0.8 * font_size as f32, WHITE
+            (screen_width() - (font_size*6) as f32 - 0.4*font_size as f32) * (copy_progress as f32 / 100.0),
+            0.8 * font_size as f32, WHITE
         );
     } else if animation_state.dialog_transition_progress >= 1.0 {
         if let Some(desc) = dialog.desc.clone() {
@@ -561,23 +561,24 @@ pub fn render_dialog(
             }
         }
 
-        // Selection rectangle - NOW SCALED
+        // Selection rectangle
         let selection_y = (font_size * 9 + font_size * 2 * (dialog.selection as u16)) as f32;
         let selected_option = &dialog.options[dialog.selection];
         let selection_shake = if selected_option.disabled { animation_state.calculate_shake_offset(ShakeTarget::Dialog) * scale_factor } else { 0.0 };
 
         let cursor_color = animation_state.get_cursor_color(config);
         let cursor_scale = animation_state.get_cursor_scale();
-        let base_width = longest_width + (padding * 2.0); // Use scaled padding
-        let base_height = (1.2 * font_size as f32) + (padding * 2.0); // Use scaled padding
+        let box_padding = padding * 0.5;
+        let base_width = longest_width + (box_padding * 2.0);
+        let base_height = (1.0 * font_size as f32) + (box_padding * 2.0);
         let scaled_width = base_width * cursor_scale;
         let scaled_height = base_height * cursor_scale;
         let offset_x = (scaled_width - base_width) / 2.0;
         let offset_y = (scaled_height - base_height) / 2.0;
 
         draw_rectangle_lines(
-            options_start_x - padding + selection_shake - offset_x,
-            selection_y - padding - offset_y,
+            options_start_x - box_padding + selection_shake - offset_x,
+            selection_y - box_padding - offset_y,
             scaled_width, scaled_height, 4.0 * scale_factor, cursor_color
         );
     }

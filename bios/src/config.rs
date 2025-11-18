@@ -18,6 +18,7 @@ fn get_config_path() -> Result<PathBuf, Box<dyn Error>> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
+    pub aspect_ratio: String,
     pub resolution: String,
     pub show_splash_screen: bool,
     pub timezone: String,
@@ -45,6 +46,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            aspect_ratio: "16:9".to_string(),
             resolution: "640x360".to_string(),
             show_splash_screen: true,
             timezone: "UTC".to_string(),

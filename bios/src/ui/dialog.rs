@@ -42,15 +42,15 @@ pub fn create_copy_storage_dialog(storage_state: &Arc<Mutex<StorageMediaState>>)
             }
             options.push(DialogOption {
                 text: format!("{} ({} MB Free)", drive.id.clone(), drive.free),
-                         value: drive.id.clone(),
-                         disabled: false,
+                value: drive.id.clone(),
+                disabled: false,
             });
         }
     }
     options.push(DialogOption {
         text: "CANCEL".to_string(),
-                 value: "CANCEL".to_string(),
-                 disabled: false,
+        value: "CANCEL".to_string(),
+        disabled: false,
     });
 
     Dialog {
