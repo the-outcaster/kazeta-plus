@@ -110,8 +110,8 @@ impl WifiState {
                             if !ssid.is_empty() {
                                 aps.push(AccessPoint {
                                     ssid: ssid.to_string(),
-                                         signal_level: signal,
-                                         security: security.to_string(),
+                                    signal_level: signal,
+                                    security: security.to_string(),
                                 });
                             }
                         }
@@ -217,7 +217,6 @@ pub fn update(
 
     match &mut wifi_state.screen_state {
         WifiScreenState::PasswordInput => {
-            // ... (Keyboard logic remains exactly the same) ...
             let (row, col) = &mut wifi_state.osk_coords;
             let current_layout = if wifi_state.osk_shift_active { OSK_LAYOUT_UPPER } else { OSK_LAYOUT_LOWER };
             let num_rows = current_layout.len() + 1;

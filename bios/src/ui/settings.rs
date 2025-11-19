@@ -17,10 +17,10 @@ use crate::{
     text_with_config_color, DEV_MODE, theme, text_with_color,
 };
 
-const FONT_SIZE: u16 = 12;
+const FONT_SIZE: u16 = 10;
 const MENU_PADDING: f32 = 6.0;
 const SETTINGS_START_Y: f32 = 80.0;
-const SETTINGS_OPTION_HEIGHT: f32 = 23.0;
+const SETTINGS_OPTION_HEIGHT: f32 = 20.0;
 
 pub const GENERAL_SETTINGS: &[&str] = &[
     "RESET SETTINGS",
