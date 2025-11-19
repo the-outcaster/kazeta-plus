@@ -202,6 +202,7 @@ if [ ! -f "$UDEV_RULES_SRC" ]; then
     echo -e "${YELLOW}  -> WARNING: 51-gcadapter.rules not found in kit. This is non-critical.${NC}"
 fi
 
+# Enforce strict permissions for sudoers to ensure passwordless rules work
 echo "  -> Correcting ownership and permissions for sudoers.d..."
 SUDOERS_D_DIR="$DEPLOYMENT_DIR/etc/sudoers.d"
 if [ -d "$SUDOERS_D_DIR" ]; then
@@ -210,6 +211,7 @@ if [ -d "$SUDOERS_D_DIR" ]; then
     find "$SUDOERS_D_DIR" -type f -exec chmod 440 {} \;
 fi
 
+# Ensure udev rules are root owned
 echo "  -> Correcting ownership and permissions for udev rules..."
 UDEV_RULES_DEST_DIR="$DEPLOYMENT_DIR/etc/udev/rules.d"
 if [ -d "$UDEV_RULES_DEST_DIR" ]; then
@@ -218,6 +220,7 @@ if [ -d "$UDEV_RULES_DEST_DIR" ]; then
     find "$UDEV_RULES_DEST_DIR" -type f -exec chmod 644 {} \; # Udev rules need read permission for all
 fi
 
+# Function to copy binary, set executable, AND set ROOT ownership (Critical)
 backup_and_copy() {
     local source_file=$1
     local dest_file=$2
@@ -225,7 +228,10 @@ backup_and_copy() {
     echo "  -> Processing executable: $filename"
     if [ -f "$dest_file" ]; then mv "$dest_file" "$dest_file.bak"; fi
     cp "$source_file" "$dest_file"
-    chmod +x "$dest_file"
+
+    # Ensure binaries in /usr/bin are root:root
+    chown root:root "$dest_file"
+    chmod 755 "$dest_file"
 }
 
 DEST_BIN_DIR="$DEPLOYMENT_DIR/usr/bin"

@@ -105,8 +105,7 @@ pub fn draw(
             let offset_x = (scaled_width - base_width) / 2.0;
             let offset_y = (scaled_height - base_height) / 2.0;
             let rect_x = x_pos - menu_padding;
-            let slot_center_y = y_pos + (menu_option_height / 2.0);
-            let rect_y = slot_center_y - (base_height / 2.0);
+            let rect_y = y_pos - text_dims.height - menu_padding;
 
             draw_rectangle_lines(
                 rect_x - offset_x,

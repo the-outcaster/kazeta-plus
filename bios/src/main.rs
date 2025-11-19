@@ -86,7 +86,7 @@ Maybe
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
-const DEV_MODE: bool = true;
+const DEV_MODE: bool = false;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;

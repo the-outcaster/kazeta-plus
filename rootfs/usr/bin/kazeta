@@ -7,23 +7,23 @@ set -x
 
 # Check for the --bios flag
 if [ "$1" == "--bios" ]; then
-    # If the flag is present, launch the BIOS immediately and exit,
-    # ignoring any inserted SD cards.
-    gamescope --filter pixel -- kazeta-bios
-    exit 0
+	# If the flag is present, launch the BIOS immediately and exit,
+	# ignoring any inserted SD cards.
+	gamescope --filter pixel -- kazeta-bios
+	exit 0
 fi
 
 # check for autoboot disabled
 BIOS_CONFIG_FILE="$HOME/.local/share/kazeta-plus/config.toml"
 
 if [ -f "$BIOS_CONFIG_FILE" ]; then
-    # Check if autoboot is set to false.
-    # We use a regex to ignore whitespace around the = sign.
-    if grep -q "^\s*autoboot\s*=\s*false\s*$" "$BIOS_CONFIG_FILE"; then
-        echo "DEBUG: Autoboot disabled in $BIOS_CONFIG_FILE. Booting to BIOS."
-        gamescope --filter pixel -- kazeta-bios
-        exit 0
-    fi
+	# Check if autoboot is set to false.
+	# We use a regex to ignore whitespace around the = sign.
+	if grep -q "^\s*autoboot\s*=\s*false\s*$" "$BIOS_CONFIG_FILE"; then
+		echo "DEBUG: Autoboot disabled in $BIOS_CONFIG_FILE. Booting to BIOS."
+		gamescope --filter pixel -- kazeta-bios
+		exit 0
+	fi
 fi
 
 BASE_DIR="$HOME/.local/share/kazeta"
@@ -58,52 +58,52 @@ function start_playtime_capture {
 <<COMMENT
 # Check if a specific .kzi file was passed as an argument
 if [ -n "$1" ] && [ -f "$1" ]; then
-    cart_info="$1"
+	cart_info="$1"
 else
-    # If not, wait up to 2 seconds for any cart (original behavior)
-    for i in $(seq 1 20); do
-        cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
-        if [[ -f "${cart_info}" ]]; then
-            break
-        else
-            sleep 0.1
-        fi
-    done
+	# If not, wait up to 2 seconds for any cart (original behavior)
+	for i in $(seq 1 20); do
+		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
+		if [[ -f "${cart_info}" ]]; then
+			break
+		else
+			sleep 0.1
+		fi
+	done
 fi
 COMMENT
 
 # Check if a specific .kzi file was passed as an argument
 # this new method checks to see if there are any .kzi files that have the default game boot option
 if [ -n "$1" ] && [ -f "$1" ]; then
-    cart_info="$1"
+	cart_info="$1"
 else
-    # If not, wait up to 2 seconds for any cart
-    for i in $(seq 1 20); do
-        # First, try to find a "default" cart.
-        # We use -exec grep -l ... {} + which is efficient.
-        # It finds all *.kzi, greps them, and lists files that match.
-        # We pipe to head -1 to just get the first match (in case multiple are set).
-        # We also add 2>/dev/null to hide "Permission denied" errors.
-        cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" -exec grep -l "^SetAsDefaultGame=true$" {} + 2>/dev/null | head -1)
+	# If not, wait up to 2 seconds for any cart
+	for i in $(seq 1 20); do
+		# First, try to find a "default" cart.
+		# We use -exec grep -l ... {} + which is efficient.
+		# It finds all *.kzi, greps them, and lists files that match.
+		# We pipe to head -1 to just get the first match (in case multiple are set).
+		# We also add 2>/dev/null to hide "Permission denied" errors.
+		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" -exec grep -l "^SetAsDefaultGame=true$" {} + 2>/dev/null | head -1)
 
-        if [ -f "$cart_info" ]; then
-            # Found a default cart. Break the loop.
-            echo "DEBUG: Found default cart: $cart_info"
-            break
-        fi
+		if [ -f "$cart_info" ]; then
+			# Found a default cart. Break the loop.
+			echo "DEBUG: Found default cart: $cart_info"
+			break
+		fi
 
-        # If no default cart was found, try to find *any* cart (original behavior)
-        cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" 2>/dev/null | head -1)
+		# If no default cart was found, try to find *any* cart (original behavior)
+		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" 2>/dev/null | head -1)
 
-        if [ -f "$cart_info" ]; then
-            # Found *a* cart (just not a default). Break the loop.
-            echo "DEBUG: Found first available cart: $cart_info"
-            break
-        else
-            # No .kzi files found at all. Sleep and try again.
-            sleep 0.1
-        fi
-    done
+		if [ -f "$cart_info" ]; then
+			# Found *a* cart (just not a default). Break the loop.
+			echo "DEBUG: Found first available cart: $cart_info"
+			break
+		else
+			# No .kzi files found at all. Sleep and try again.
+			sleep 0.1
+		fi
+	done
 fi
 
 if [[ ! -f "${cart_info}" ]]; then
@@ -156,26 +156,26 @@ COMMENT
 # --- Helper function to find a runtime in a given directory ---
 # Usage: runtime_path=$(find_runtime "name_to_find" "/path/to/search")
 function find_runtime {
-    local rt_name="$1"
-    local base_dir="$2"
-    local found_path=""
+	local rt_name="$1"
+	local base_dir="$2"
+	local found_path=""
 
-    # Path 1: Exact match (e.g., Runtime=windows-1.1.kzr)
-    if [ -f "${base_dir}/${rt_name}" ]; then
-        found_path="${base_dir}/${rt_name}"
-    # Path 2: Match with .kzr (e.g., Runtime=windows-1.1)
-    elif [ -f "${base_dir}/${rt_name}.kzr" ]; then
-        found_path="${base_dir}/${rt_name}.kzr"
-    # Path 3: Glob match (e.g., Runtime=windows-1.1 finds windows-1.1-v2.kzr)
-    else
-        # Use ls to find the first match and redirect stderr to /dev/null
-        local glob_match=$(ls -1 "${base_dir}/${rt_name}-"*.kzr 2>/dev/null | head -1)
-        if [ -f "$glob_match" ]; then
-            found_path="$glob_match"
-        fi
-    fi
+	# Path 1: Exact match (e.g., Runtime=windows-1.1.kzr)
+	if [ -f "${base_dir}/${rt_name}" ]; then
+		found_path="${base_dir}/${rt_name}"
+	# Path 2: Match with .kzr (e.g., Runtime=windows-1.1)
+	elif [ -f "${base_dir}/${rt_name}.kzr" ]; then
+		found_path="${base_dir}/${rt_name}.kzr"
+	# Path 3: Glob match (e.g., Runtime=windows-1.1 finds windows-1.1-v2.kzr)
+	else
+		# Use ls to find the first match and redirect stderr to /dev/null
+		local glob_match=$(ls -1 "${base_dir}/${rt_name}-"*.kzr 2>/dev/null | head -1)
+		if [ -f "$glob_match" ]; then
+			found_path="$glob_match"
+		fi
+	fi
 
-    echo "$found_path" # Return the found path (or empty string if not found)
+	echo "$found_path" # Return the found path (or empty string if not found)
 }
 
 # --- Define runtime paths ---
@@ -187,37 +187,37 @@ runtime_name="$(get_attribute 'Runtime' ${cart_info})"
 runtime="" # Initialize as empty
 
 if [ -n "$runtime_name" ]; then
-    echo "DEBUG: Runtime requested: '$runtime_name'"
+	echo "DEBUG: Runtime requested: '$runtime_name'"
 
-    # --- 1. Check Internal Drive (Priority 1) ---
-    echo "DEBUG: Checking for runtime on internal drive..."
-    runtime=$(find_runtime "$runtime_name" "$SYSTEM_RUNTIME_DIR")
+	# --- 1. Check Internal Drive (Priority 1) ---
+	echo "DEBUG: Checking for runtime on internal drive..."
+	runtime=$(find_runtime "$runtime_name" "$SYSTEM_RUNTIME_DIR")
 
-    # --- 2. Check DVD (Fallback) ---
-    if [ -z "$runtime" ]; then # -z checks if the string is empty (not found)
-        echo "DEBUG: Runtime not found internally. Checking DVD drive ($DVD_RUNTIME_DIR)..."
-        runtime=$(find_runtime "$runtime_name" "$DVD_RUNTIME_DIR")
+	# --- 2. Check DVD (Fallback) ---
+	if [ -z "$runtime" ]; then # -z checks if the string is empty (not found)
+		echo "DEBUG: Runtime not found internally. Checking DVD drive ($DVD_RUNTIME_DIR)..."
+		runtime=$(find_runtime "$runtime_name" "$DVD_RUNTIME_DIR")
 
-        if [ -n "$runtime" ]; then
-             echo "DEBUG: Found runtime on DVD. Load times may be slow."
-        fi
-    fi
+		if [ -n "$runtime" ]; then
+			echo "DEBUG: Found runtime on DVD. Load times may be slow."
+		fi
+	fi
 
-    # --- 3. Set Default (if still not found) ---
-    if [ -z "$runtime" ]; then
-        echo "WARNING: Runtime '$runtime_name' not found in $SYSTEM_RUNTIME_DIR or $DVD_RUNTIME_DIR. Defaulting to 'none'."
-        runtime="$DEFAULT_RUNTIME"
-    fi
+	# --- 3. Set Default (if still not found) ---
+	if [ -z "$runtime" ]; then
+		echo "WARNING: Runtime '$runtime_name' not found in $SYSTEM_RUNTIME_DIR or $DVD_RUNTIME_DIR. Defaulting to 'none'."
+		runtime="$DEFAULT_RUNTIME"
+	fi
 else
-    # No runtime specified, use 'none'
-    echo "DEBUG: No runtime specified. Defaulting to 'none'."
-    runtime="$DEFAULT_RUNTIME"
+	# No runtime specified, use 'none'
+	echo "DEBUG: No runtime specified. Defaulting to 'none'."
+	runtime="$DEFAULT_RUNTIME"
 fi
 
 # Final check in case 'none.kzr' is missing
 if [ ! -f "$runtime" ]; then
-    echo "CRITICAL: Runtime file '$runtime' not found! The system may fail to mount."
-    # We still pass the path to kazeta-mount, which will then fail.
+	echo "CRITICAL: Runtime file '$runtime' not found! The system may fail to mount."
+	# We still pass the path to kazeta-mount, which will then fail.
 fi
 
 echo "DEBUG: Using runtime: $runtime"
@@ -251,7 +251,20 @@ post_exec_cmd=$(get_attribute 'PostExec' ${cart_info})
 
 # Now build the trap. ${post_exec_cmd} will be safely empty
 # or it will be "some_command;"
+<<COMMENT
 trap "\
+	popd; \
+	echo 'DEBUG: Running PostExec cleanup...'; \
+	${post_exec_cmd} \
+	sudo kazeta-mount --unmount "${target}" "${runtimedir}"; \
+	sudo rm -rf "${work}"; \
+	sudo rm -rf "${upper}/.kazeta/share"; \
+	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
+" EXIT
+COMMENT
+
+trap "\
+	if [ -n \"\$PLAYTIME_PID\" ]; then kill \"\$PLAYTIME_PID\" 2>/dev/null; fi; \
 	popd; \
 	echo 'DEBUG: Running PostExec cleanup...'; \
 	${post_exec_cmd} \
@@ -272,9 +285,9 @@ pushd "${HOME}"
 # --- Run PreExec command ---
 cart_preexec="$(get_attribute 'PreExec' ${cart_info})"
 if [ -n "$cart_preexec" ]; then
-    echo "DEBUG: Running PreExec command: $cart_preexec"
-    eval "$cart_preexec"
-    echo "DEBUG: PreExec complete."
+	echo "DEBUG: Running PreExec command: $cart_preexec"
+	eval "$cart_preexec"
+	echo "DEBUG: PreExec complete."
 fi
 # --- End PreExec ---
 
@@ -292,9 +305,69 @@ rm -f .kazeta/var/playtime_end
 mkdir -p .kazeta/var
 date --iso-8601=seconds > .kazeta/var/playtime_start
 start_playtime_capture &
-gamescope ${cart_gsopts} -- ./.kazeta/share/run /tmp/kazeta-cart-exec | grep -v "pressure-vessel-wrap" > "${HOME}/.kazeta/var/run.log" 2>&1
+PLAYTIME_PID=$! # save PID of background job
 
-# a bunch of crap, might be useful later though
-#gamescope ${cart_gsopts} -- ./.kazeta/share/run /tmp/kazeta-cart-exec | grep -v "pressure-vessel-wrap" > "${HOME}/.kazeta/var/run.log" 2>&1
-#gamescope ${cart_gsopts} -- ./.kazeta/share/run /tmp/kazeta-cart-exec 2>&1 | grep -v "pressure-vessel-wrap" > "${HOME}/.kazeta/var/run.log"
-#gamescope ${cart_gsopts} -- ./.kazeta/share/run "${cart_exec}" 2>&1 | grep -v "pressure-vessel-wrap" > "${HOME}/.kazeta/var/run.log"
+# --- EXECUTION & ERROR HANDLING ---
+
+# 1. Start Timer
+START_TIME=$(date +%s)
+
+# 2. Run Gamescope
+# We capture the output to the log file inside the mount
+gamescope ${cart_gsopts} -- ./.kazeta/share/run /tmp/kazeta-cart-exec | grep -v "pressure-vessel-wrap" > "${HOME}/.kazeta/var/run.log" 2>&1
+EXIT_CODE=$?
+
+set +x # disable debug tracing
+
+# 3. Stop Timer
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+# 4. Define Threshold (Seconds)
+# If the game runs for less than this, we consider it a "Failure to Launch"
+CRASH_THRESHOLD=10
+
+# Check: Did it fail? AND Did it fail quickly?
+if [ $EXIT_CODE -ne 0 ] && [ $DURATION -lt $CRASH_THRESHOLD ]; then
+	# ===============================
+	#      ERROR SCREEN LOGIC
+	# ===============================
+
+	# Stop background jobs using the captured PID
+	if [ -n "$PLAYTIME_PID" ]; then
+		kill "$PLAYTIME_PID" 2>/dev/null
+	fi
+
+	PHYSICAL_LOG_PATH="/var/kazeta/saves/default/${cart_id}/.kazeta/var/run.log"
+
+	echo "" >> /var/kazeta/session.log
+	echo "========== [KAZETA+] GAME LAUNCH FAILURE ==========" >> /var/kazeta/session.log
+	echo "Timestamp: $(date)" >> /var/kazeta/session.log
+	echo "Cart ID: ${cart_id}" >> /var/kazeta/session.log
+	echo "Duration: ${DURATION} seconds (Threshold: ${CRASH_THRESHOLD}s)" >> /var/kazeta/session.log
+	echo "Exit Code: ${EXIT_CODE}" >> /var/kazeta/session.log
+	echo "Log Path: ${PHYSICAL_LOG_PATH}" >> /var/kazeta/session.log
+	echo "Last 20 lines of game execution log:" >> /var/kazeta/session.log
+
+	# Check if game log exists AND has content
+	if [ -f "${PHYSICAL_LOG_PATH}" ]; then
+		if [ -s "${PHYSICAL_LOG_PATH}" ]; then
+			# File exists and is NOT empty
+			tail -n 20 "${PHYSICAL_LOG_PATH}" >> /var/kazeta/session.log
+		else
+			# File exists but IS empty (0 bytes)
+			echo "---------------------------------------------------" >> /var/kazeta/session.log
+			echo "[!] run.log is empty." >> /var/kazeta/session.log
+			echo "The application exited immediately without producing output." >> /var/kazeta/session.log
+		fi
+	else
+		echo "No run.log found at ${PHYSICAL_LOG_PATH}" >> /var/kazeta/session.log
+	fi
+	echo "===================================================" >> /var/kazeta/session.log
+
+	# Call the helper script as root
+	sudo /usr/bin/kazeta-show-error
+fi
+
+# If the game ran successfully (or ran longer than 10s), we just fall through
+# to the 'trap' which handles unmounting and cleanup automatically.

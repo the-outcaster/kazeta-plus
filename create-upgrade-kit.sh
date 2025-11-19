@@ -83,7 +83,7 @@ cp "$SOURCE_DIR/rootfs/etc/udev/rules.d/51-gcadapter.rules" "$KIT_FULL_PATH/root
 cp "$SOURCE_DIR/rootfs/etc/udev/rules.d/99-optical-automount.rules" "$KIT_FULL_PATH/rootfs/etc/udev/rules.d/"
 
 echo "Copying shell scripts..."
-scripts_to_copy=( "ethernet-connect" "kazeta" "kazeta-copy-logs" "kazeta-mount" "kazeta-runtime-helper" "kazeta-session" "kazeta-wifi-setup" )
+scripts_to_copy=( "ethernet-connect" "kazeta" "kazeta-copy-logs" "kazeta-mount" "kazeta-runtime-helper" "kazeta-session" "kazeta-wifi-setup" "kazeta-show-error" )
 for script in "${scripts_to_copy[@]}"; do
     cp "$SOURCE_DIR/rootfs/usr/bin/$script" "$KIT_FULL_PATH/rootfs/usr/bin/"
 done
