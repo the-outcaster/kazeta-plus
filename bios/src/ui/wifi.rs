@@ -1,13 +1,15 @@
 use macroquad::prelude::*;
-use std::collections::HashMap;
-use std::process::Command;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
-
+use std::{
+    collections::HashMap,
+    process::Command,
+    sync::mpsc::{channel, Receiver, Sender},
+    thread,
+};
 use crate::{
-    get_current_font, text_with_config_color, BatteryInfo, DEV_MODE,
+    text_with_config_color, get_current_font, DEV_MODE,
     audio::SoundEffects,
     config::Config, FONT_SIZE, Screen, BackgroundState, render_background, measure_text, InputState,
+    ui::text_with_color,
 };
 
 // Define the keyboard layout
@@ -27,11 +29,12 @@ const OSK_LAYOUT_UPPER: &[&str] = &[
 
 const OSK_SPECIAL_KEYS: &[&str] = &["SHOW", "SHIFT", "SPACE", "BACKSPACE", "ENTER"];
 
-// A local, simple struct to hold Wi-Fi info. No dependency needed.
+// [!] MODIFIED: Added 'security' field
 #[derive(Debug, Clone)]
 pub struct AccessPoint {
     pub ssid: String,
     pub signal_level: u8,
+    pub security: String,
 }
 
 #[derive(PartialEq)]
@@ -54,7 +57,6 @@ pub struct WifiState {
     pub networks: Result<Vec<AccessPoint>, String>,
     pub selected_index: usize,
     pub password_buffer: String,
-    //pub connection_status: Option<String>,
     pub osk_coords: (usize, usize),
     pub osk_shift_active: bool,
     pub show_password: bool,
@@ -79,16 +81,15 @@ impl WifiState {
             rx,
             _tx: tx,
         }
-        //state.scan_networks();
-        //Ok(state)
     }
 
     /// Scans for networks using the `nmcli` command-line tool.
     pub fn scan_networks(&mut self) {
         self.screen_state = WifiScreenState::Scanning;
 
+        // [!] MODIFIED: Added SECURITY to the fields list
         let output = Command::new("nmcli")
-        .args(&["--terse", "--fields", "SSID,SIGNAL", "device", "wifi", "list"])
+        .args(&["--terse", "--fields", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"])
         .output();
 
         match output {
@@ -96,11 +97,22 @@ impl WifiState {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let mut aps: Vec<AccessPoint> = Vec::new();
                 for line in stdout.lines() {
+                    // [!] MODIFIED: Parse 3 parts instead of 2
                     let parts: Vec<&str> = line.split(':').collect();
-                    if let (Some(ssid), Some(signal_str)) = (parts.get(0), parts.get(1)) {
+                    // Note: Split might produce more than 3 parts if SSID contains colon,
+                    // but --terse usually handles escaping. For simple safety:
+                    if parts.len() >= 3 {
+                        let ssid = parts[0];
+                        let signal_str = parts[1];
+                        let security = parts[2]; // "WPA2", "WPA1 WPA2", or "" (empty means Open)
+
                         if let Ok(signal) = signal_str.parse::<u8>() {
                             if !ssid.is_empty() {
-                                aps.push(AccessPoint { ssid: (*ssid).to_string(), signal_level: signal });
+                                aps.push(AccessPoint {
+                                    ssid: ssid.to_string(),
+                                         signal_level: signal,
+                                         security: security.to_string(),
+                                });
                             }
                         }
                     }
@@ -125,15 +137,34 @@ impl WifiState {
                 let ssid = &selected_network.ssid;
                 let password = &self.password_buffer;
 
-                let output = Command::new("nmcli")
-                .args(&["device", "wifi", "connect", ssid, "password", password])
+                // [!] RESTORED: Delete any existing profile for this SSID first.
+                // This prevents the "key-mgmt property is missing" error by ensuring
+                // we create a fresh profile with the correct security settings.
+                let _ = Command::new("nmcli")
+                .args(&["connection", "delete", ssid])
                 .output();
+
+                // [!] MODIFIED: Logic to handle Open vs Secured networks
+                let mut cmd = Command::new("nmcli");
+                cmd.arg("device").arg("wifi").arg("connect").arg(ssid);
+
+                // Only add password argument if the buffer isn't empty
+                // OR check selected_network.security.
+                // But trusting the buffer is safer if the scan was weird.
+                if !password.is_empty() {
+                    cmd.arg("password").arg(password);
+                }
+
+                // [!] ADDED: Explicitly ensure the new profile is saved and set to auto-connect
+                // (Though nmcli defaults to this, being explicit helps with persistence)
+                // Note: We can't pass these to 'device wifi connect' easily in one line
+                // without complex syntax, but the default behavior is persistent.
+
+                let output = cmd.output();
 
                 match output {
                     Ok(output) => {
                         if output.status.success() {
-                            // --- SIMPLIFIED LOGIC ---
-                            // Just transition to the connected screen.
                             self.screen_state = WifiScreenState::Connected;
                         } else {
                             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -156,21 +187,17 @@ pub fn update(
     sound_effects: &SoundEffects,
     config: &Config,
 ) {
-    // Check for messages from the background thread first
     if let Ok(msg) = wifi_state.rx.try_recv() {
         match msg {
             WifiMessage::PreparationComplete(Ok(_)) => {
-                // Setup was successful, now we can scan for networks.
                 wifi_state.scan_networks();
             }
             WifiMessage::PreparationComplete(Err(e)) => {
-                // If setup fails, show an error.
                 wifi_state.screen_state = WifiScreenState::Error(e);
             }
         }
     }
     if input_state.back {
-        // If we are showing the password, the first back press should hide it
         if wifi_state.screen_state == WifiScreenState::PasswordInput && wifi_state.show_password {
             wifi_state.show_password = false;
             sound_effects.play_back(config);
@@ -190,6 +217,7 @@ pub fn update(
 
     match &mut wifi_state.screen_state {
         WifiScreenState::PasswordInput => {
+            // ... (Keyboard logic remains exactly the same) ...
             let (row, col) = &mut wifi_state.osk_coords;
             let current_layout = if wifi_state.osk_shift_active { OSK_LAYOUT_UPPER } else { OSK_LAYOUT_LOWER };
             let num_rows = current_layout.len() + 1;
@@ -227,13 +255,26 @@ pub fn update(
                 if networks.is_empty() { return; }
                 if input_state.down && wifi_state.selected_index < networks.len() - 1 { wifi_state.selected_index += 1; sound_effects.play_cursor_move(&config); }
                 if input_state.up && wifi_state.selected_index > 0 { wifi_state.selected_index -= 1; sound_effects.play_cursor_move(&config); }
+
                 if input_state.select {
                     sound_effects.play_select(config);
-                    wifi_state.password_buffer.clear();
-                    wifi_state.osk_coords = (0, 0);
-                    wifi_state.osk_shift_active = false;
-                    wifi_state.show_password = false;
-                    wifi_state.screen_state = WifiScreenState::PasswordInput;
+
+                    // [!] MODIFIED: Check security before going to password screen
+                    let selected_ap = &networks[wifi_state.selected_index];
+
+                    // If security string is empty, it's an Open network
+                    if selected_ap.security.is_empty() {
+                        // Skip password input, connect immediately
+                        wifi_state.password_buffer.clear(); // Ensure empty
+                        wifi_state.attempt_connection();
+                    } else {
+                        // It's secured, go to input
+                        wifi_state.password_buffer.clear();
+                        wifi_state.osk_coords = (0, 0);
+                        wifi_state.osk_shift_active = false;
+                        wifi_state.show_password = false;
+                        wifi_state.screen_state = WifiScreenState::PasswordInput;
+                    }
                 }
             }
         }
@@ -250,13 +291,10 @@ pub fn update(
 pub fn draw(
     wifi_state: &WifiState,
     animation_state: &mut crate::AnimationState,
-    _logo_cache: &HashMap<String, Texture2D>,
     background_cache: &HashMap<String, Texture2D>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
-    _battery_info: &Option<BatteryInfo>,
-    _current_time_str: &str,
     scale_factor: f32,
 ) {
     render_background(&background_cache, &config, background_state);
@@ -292,18 +330,42 @@ pub fn draw(
                     let input_box_y = container_y + 60.0 * scale_factor + 10.0;
                     let input_box_height = line_height * 0.8;
                     let input_text_font_size = (font_size as f32 * 0.9) as u16;
+
                     draw_rectangle(text_x, input_box_y, container_w - 80.0 * scale_factor, input_box_height, BLACK);
                     let text_y_inside_box = input_box_y + (input_box_height / 2.0) + (input_text_font_size as f32 / 2.5);
                     draw_text_ex(&password_display, text_x + 10.0 * scale_factor, text_y_inside_box, TextParams { font: Some(font), font_size: input_text_font_size, color: WHITE, ..Default::default() });
 
-                    let osk_font_size = (font_size as f32) as u16;
+                    // --- [!] FIX 1: DYNAMIC SCALING FOR 4:3 ASPECT RATIOS ---
+                    // Calculate ideal sizing
+                    let base_osk_size = (font_size as f32) as u16;
+                    let base_spacing = base_osk_size as f32 * 1.5;
+
+                    // Calculate available width for the keyboard
+                    let available_width = container_w - 80.0 * scale_factor; // padding
+                    let max_chars_in_row = OSK_LAYOUT_LOWER[0].len() as f32;
+
+                    // Determine if we need to shrink
+                    let needed_width = max_chars_in_row * base_spacing;
+
+                    let (osk_font_size, key_spacing) = if needed_width > available_width {
+                        // It's too wide (likely 4:3 ratio), shrink it to fit
+                        let new_spacing = available_width / max_chars_in_row;
+                        let new_size = (new_spacing / 1.5) as u16;
+                        (new_size, new_spacing)
+                    } else {
+                        // It fits fine
+                        (base_osk_size, base_spacing)
+                    };
+                    // -------------------------------------------------------
+
                     let osk_start_y = input_box_y + input_box_height + line_height * 1.2;
-                    let key_spacing = osk_font_size as f32 * 1.5;
+
                     let cursor_color = animation_state.get_cursor_color(config);
                     let cursor_scale = animation_state.get_cursor_scale();
                     let line_thickness = 4.0 * cursor_scale;
                     let current_layout = if wifi_state.osk_shift_active { OSK_LAYOUT_UPPER } else { OSK_LAYOUT_LOWER };
 
+                    // --- Character Grid Loop ---
                     for (r, row_str) in current_layout.iter().enumerate() {
                         for (c, key) in row_str.chars().enumerate() {
                             let key_str = key.to_string();
@@ -312,46 +374,79 @@ pub fn draw(
                             let text_draw_x = cell_x + (key_spacing - text_dims.width) / 2.0;
                             let key_y = osk_start_y + (r as f32 * key_spacing);
 
-                            if (r, c) == wifi_state.osk_coords {
+                            let is_selected = (r, c) == wifi_state.osk_coords;
+
+                            // [!] FIX 2: Apply Cursor Styles to Characters
+                            if is_selected && config.cursor_style == "BOX" {
                                 let box_h = osk_font_size as f32 + 10.0;
                                 let box_y = key_y - osk_font_size as f32 - 5.0;
                                 draw_rectangle_lines(text_draw_x - 5.0, box_y, text_dims.width + 10.0, box_h, line_thickness, cursor_color);
                             }
-                            text_with_config_color(font_cache, config, &key_str, text_draw_x, key_y, osk_font_size);
+
+                            if is_selected && config.cursor_style == "TEXT" {
+                                text_with_color(font_cache, config, &key_str, text_draw_x, key_y, osk_font_size, cursor_color);
+                            } else {
+                                text_with_config_color(font_cache, config, &key_str, text_draw_x, key_y, osk_font_size);
+                            }
                         }
                     }
 
-                    // add some extra space below the letters with the + 20.0
+                    // --- Special Keys Row ---
                     let special_row_y = osk_start_y + (current_layout.len() as f32 * key_spacing) + 20.0;
                     let key_gap = 40.0 * scale_factor;
-
                     let mut total_row_width = 0.0;
                     for key_str in OSK_SPECIAL_KEYS.iter() {
                         total_row_width += measure_text(key_str, Some(font), osk_font_size, 1.0).width;
                     }
                     total_row_width += ((OSK_SPECIAL_KEYS.len() - 1) as f32) * key_gap;
-                    let mut current_key_x = container_x + (container_w - total_row_width) / 2.0;
+
+                    // Check if special row fits, scale gap if needed
+                    let actual_key_gap = if total_row_width > available_width {
+                        let text_width_sum: f32 = OSK_SPECIAL_KEYS.iter().map(|k| measure_text(k, Some(font), osk_font_size, 1.0).width).sum();
+                        (available_width - text_width_sum) / (OSK_SPECIAL_KEYS.len() as f32 - 1.0)
+                    } else {
+                        key_gap
+                    };
+
+                    // Re-calculate total with new gap to center it
+                    let mut recalc_width = 0.0;
+                    for key_str in OSK_SPECIAL_KEYS.iter() {
+                        recalc_width += measure_text(key_str, Some(font), osk_font_size, 1.0).width;
+                    }
+                    recalc_width += ((OSK_SPECIAL_KEYS.len() - 1) as f32) * actual_key_gap;
+
+                    let mut current_key_x = container_x + (container_w - recalc_width) / 2.0;
 
                     for (c, key_str) in OSK_SPECIAL_KEYS.iter().enumerate() {
                         let text_dims = measure_text(key_str, Some(font), osk_font_size, 1.0);
                         let is_selected = (current_layout.len(), c) == wifi_state.osk_coords;
                         let is_active = (*key_str == "SHIFT" && wifi_state.osk_shift_active) || (*key_str == "SHOW" && wifi_state.show_password);
+
                         let mut box_color = if is_active { Color::new(0.3, 0.7, 1.0, 1.0) } else { WHITE };
 
+                        // [!] FIX 3: Apply Cursor Styles to Special Keys
                         if is_selected {
                             box_color = cursor_color;
-                            // --- FIX: Use the same Y-axis centering logic as the character keys ---
-                            let box_h = osk_font_size as f32 + 10.0;
-                            let box_y = special_row_y - osk_font_size as f32 - 5.0;
-                            draw_rectangle_lines(current_key_x - 5.0, box_y, text_dims.width + 10.0, box_h, line_thickness, box_color);
+                            // Only draw the selection box if we are in BOX mode
+                            if config.cursor_style == "BOX" {
+                                let box_h = osk_font_size as f32 + 10.0;
+                                let box_y = special_row_y - osk_font_size as f32 - 5.0;
+                                draw_rectangle_lines(current_key_x - 5.0, box_y, text_dims.width + 10.0, box_h, line_thickness, box_color);
+                            }
                         } else if is_active {
+                            // Always draw box for active toggle states (SHIFT/SHOW) so user knows they are ON
                             let box_h = osk_font_size as f32 + 10.0;
                             let box_y = special_row_y - osk_font_size as f32 - 5.0;
                             draw_rectangle_lines(current_key_x - 5.0, box_y, text_dims.width + 10.0, box_h, 2.0, box_color);
                         }
 
-                        text_with_config_color(font_cache, config, key_str, current_key_x, special_row_y, osk_font_size);
-                        current_key_x += text_dims.width + key_gap;
+                        if is_selected && config.cursor_style == "TEXT" {
+                            text_with_color(font_cache, config, key_str, current_key_x, special_row_y, osk_font_size, cursor_color);
+                        } else {
+                            text_with_config_color(font_cache, config, key_str, current_key_x, special_row_y, osk_font_size);
+                        }
+
+                        current_key_x += text_dims.width + actual_key_gap;
                     }
                 }
             }
@@ -365,14 +460,27 @@ pub fn draw(
                     } else {
                         for (i, ap) in networks.iter().take(10).enumerate() {
                             let y_pos = container_y + 80.0 * scale_factor + (i as f32 * line_height * 1.5);
+
+                            // [!] MODIFIED: Box vs Text Cursor Logic (optional, keeping Box for consistency with your previous styles)
                             if i == wifi_state.selected_index {
+                                // Use a subtle background highlight for selection
                                 draw_rectangle(container_x, y_pos - font_size as f32 - 5.0, container_w, line_height, Color::new(1.0, 1.0, 1.0, 0.2));
                             }
+
                             text_with_config_color(font_cache, config, &ap.ssid, text_x, y_pos, font_size);
+
                             let signal_text = format!("{}%", ap.signal_level);
                             let signal_dims = measure_text(&signal_text, Some(font), font_size, 1.0);
                             let signal_x = container_x + container_w - signal_dims.width - (40.0 * scale_factor);
                             text_with_config_color(font_cache, config, &signal_text, signal_x, y_pos, font_size);
+
+                            // [!] MODIFIED: Draw Lock Icon if Secured
+                            if !ap.security.is_empty() {
+                                let lock_text = "🔒"; // Or use a texture if you have one
+                                let lock_dims = measure_text(lock_text, Some(font), font_size, 1.0);
+                                let lock_x = signal_x - lock_dims.width - (20.0 * scale_factor);
+                                text_with_config_color(font_cache, config, lock_text, lock_x, y_pos, font_size);
+                            }
                         }
                     }
                 }
@@ -388,9 +496,28 @@ pub fn draw(
         }
         WifiScreenState::Error(msg) => {
             text_with_config_color(font_cache, config, "Connection Failed", text_x, container_y + 80.0 * scale_factor, font_size);
-            text_with_config_color(font_cache, config, msg, text_x, container_y + 80.0 * scale_factor + line_height, font_size);
+
+            // Simple wrapping: split into chunks or just display multiple lines if it contains newlines
+            // For the "key-mgmt" error which is one long line, we can split it for display.
+            let max_width = container_w - 80.0 * scale_factor; // Approximate available width
+
+            // A quick hack to split long error messages for display
+            let chars_per_line = (max_width / (font_size as f32 * 0.6)) as usize; // Approximate char width
+
+            let mut y_offset = container_y + 80.0 * scale_factor + line_height;
+
+            // Split the message into chunks that fit
+            let mut start = 0;
+            let len = msg.len();
+            while start < len {
+                let end = usize::min(start + chars_per_line, len);
+                let slice = &msg[start..end];
+                text_with_config_color(font_cache, config, slice, text_x, y_offset, font_size);
+                y_offset += line_height;
+                start = end;
+            }
         }
-        _ => { // Simplified logic for Scanning and Connecting
+        _ => {
             let text = match &wifi_state.screen_state {
                 WifiScreenState::Scanning => "Scanning...",
                 WifiScreenState::Connecting => "Connecting...",
@@ -400,7 +527,6 @@ pub fn draw(
             text_with_config_color(font_cache, config, text, screen_width() / 2.0 - text_dims.width / 2.0, screen_height() / 2.0, font_size);
         }
     }
-    //render_ui_overlay(&logo_cache, &font_cache, &config, &battery_info, &current_time_str, scale_factor);
 }
 
 // --- Background Thread Functions ---

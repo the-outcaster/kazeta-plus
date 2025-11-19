@@ -1375,6 +1375,7 @@ async fn main() {
                 );
 
                 // Tell the about module to draw itself
+                /*
                 ui::wifi::draw(
                     &wifi_state,
                     &mut animation_state,
@@ -1385,6 +1386,16 @@ async fn main() {
                     &mut background_state,
                     &battery_info,
                     &current_time_str,
+                    scale_factor,
+                );
+                */
+                ui::wifi::draw(
+                    &wifi_state,
+                    &mut animation_state,
+                    &background_cache,
+                    &font_cache,
+                    &config,
+                    &mut background_state,
                     scale_factor,
                 );
             }
