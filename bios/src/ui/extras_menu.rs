@@ -5,6 +5,7 @@ use crate::{
     audio::SoundEffects,
     config::Config,
     types::{AnimationState, BackgroundState, BatteryInfo, Screen},
+    ui::text_with_color,
     render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color,
     FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, InputState,
 };
@@ -91,8 +92,10 @@ pub fn draw(
         let text_dims = measure_text(option, Some(current_font), font_size, 1.0);
         let x_pos = start_x - (text_dims.width / 2.0);
 
+        let is_selected = i == selected_option;
+
         // Draw selected option highlight
-        if i == selected_option {
+        if is_selected && config.cursor_style == "BOX" {
             let cursor_color = animation_state.get_cursor_color(config);
             let cursor_scale = animation_state.get_cursor_scale();
             let base_width = text_dims.width + (menu_padding * 2.0);
@@ -115,9 +118,18 @@ pub fn draw(
             );
         }
 
+        if is_selected && config.cursor_style == "TEXT" {
+            let highlight_color = animation_state.get_cursor_color(config);
+            text_with_color(font_cache, config, option, x_pos, y_pos, font_size, highlight_color);
+        } else {
+            text_with_config_color(font_cache, config, option, x_pos, y_pos, font_size);
+        }
+
+        /*
         // Draw text
         let slot_center_y = y_pos + (menu_option_height / 2.0);
         let y_pos_text = slot_center_y + (text_dims.offset_y / 2.0);
         text_with_config_color(font_cache, config, option, x_pos, y_pos_text, font_size);
+        */
     }
 }

@@ -18,6 +18,7 @@ use crate::{
     audio::SoundEffects,
     config::Config,
     types::{AnimationState, BackgroundState, BatteryInfo, Screen},
+    ui::text_with_color,
     render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color,
     FONT_SIZE, InputState, DEV_MODE,
 };
@@ -244,11 +245,30 @@ pub fn draw(
                     let dims = measure_text(&device.name, Some(font), font_size, 1.0);
                     let x_pos = center_x - dims.width / 2.0;
 
-                    if i == state.selected_index {
+                    let is_selected = i == state.selected_index;
+
+                    // 1. Draw Cursor Box (Only if BOX style)
+                    if is_selected && config.cursor_style == "BOX" {
                         let cursor_color = animation_state.get_cursor_color(config);
-                        draw_rectangle_lines(x_pos - 20.0, y_pos - font_size as f32 * 1.3, dims.width + 40.0, line_height, 8.0, cursor_color);
+                        draw_rectangle_lines(
+                            x_pos - 20.0,
+                            y_pos - font_size as f32 * 1.3,
+                            dims.width + 40.0,
+                            line_height,
+                            8.0,
+                            cursor_color
+                        );
                     }
-                    text_with_config_color(font_cache, config, &device.name, x_pos, y_pos, font_size);
+
+                    // 2. Draw Text
+                    if is_selected && config.cursor_style == "TEXT" {
+                        // [!] TEXT Highlight Style
+                        let highlight_color = animation_state.get_cursor_color(config);
+                        text_with_color(font_cache, config, &device.name, x_pos, y_pos, font_size, highlight_color);
+                    } else {
+                        // Standard Text
+                        text_with_config_color(font_cache, config, &device.name, x_pos, y_pos, font_size);
+                    }
                 }
             }
         }

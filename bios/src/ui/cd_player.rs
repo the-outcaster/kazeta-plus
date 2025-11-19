@@ -6,14 +6,13 @@ use std::{
     time::Duration,
     thread,
 };
-// use std::time::Duration; // FIXED: Removed unused import
 use crate::{
     audio::SoundEffects,
+    cd_player_backend::{CdPlayerBackend, PlayerStatus},
     config::Config,
     types::{AnimationState, BackgroundState, Screen},
+    ui::text_with_color,
     render_background, get_current_font, measure_text, text_with_config_color, InputState,
-    //cd_player_backend::{CdPlayerBackend, PlayerStatus, update_playback_state}, // Import helper
-    cd_player_backend::{CdPlayerBackend, PlayerStatus},
 };
 
 const TRACK_FONT_SIZE: u16 = 16;
@@ -225,7 +224,6 @@ pub fn draw(
 ) {
     let backend = ui_state.backend.lock().unwrap();
 
-    // [!] Note: I'm using your original constants, but renamed for clarity
     let font_size = (TRACK_FONT_SIZE as f32 * scale_factor) as u16;
     let menu_padding = TRACK_PADDING * scale_factor;
     let menu_option_height = (TRACK_OPTION_HEIGHT * 0.8) * scale_factor; // Tighter track list
@@ -297,8 +295,10 @@ pub fn draw(
                             y = list_start_y + (col_index as f32 * menu_option_height);
                         }
 
-                        if i == ui_state.selected_track {
-                            // Draw cursor
+                        let is_selected = i == ui_state.selected_track;
+
+                        // --- 1. Draw Cursor Box (Only if BOX style) ---
+                        if is_selected && config.cursor_style == "BOX" {
                             let cursor_color = animation_state.get_cursor_color(config);
                             draw_rectangle_lines(
                                 x - menu_padding,
@@ -310,7 +310,15 @@ pub fn draw(
                             );
                         }
 
-                        text_with_config_color(font_cache, config, &text, x, y, font_size);
+                        // --- 2. Draw Text ---
+                        if is_selected && config.cursor_style == "TEXT" {
+                            // [!] TEXT Highlight Style
+                            let highlight_color = animation_state.get_cursor_color(config);
+                            text_with_color(font_cache, config, &text, x, y, font_size, highlight_color);
+                        } else {
+                            // Standard Text
+                            text_with_config_color(font_cache, config, &text, x, y, font_size);
+                        }
                     }
                 }
             }

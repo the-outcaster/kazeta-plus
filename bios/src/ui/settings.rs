@@ -3,11 +3,9 @@ use rodio::{buffer::SamplesBuffer, Sink};
 use std::collections::HashMap;
 use std::process::Command;
 use std::thread;
-//use macroquad::audio::{Sound, set_sound_volume};
 
 // Import things from our new modules
 use crate::audio::{SoundEffects, play_new_bgm};
-//use crate::config::{Config, save_config};
 use crate::config::Config;
 use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
 use crate::utils::{apply_resolution, trim_extension};
@@ -16,7 +14,7 @@ use crate::utils::{apply_resolution, trim_extension};
 use crate::{
     AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen,
     render_background, render_ui_overlay, get_current_font, measure_text,
-    text_with_config_color, DEV_MODE, theme
+    text_with_config_color, DEV_MODE, theme, text_with_color,
 };
 
 const FONT_SIZE: u16 = 12;
@@ -51,6 +49,7 @@ pub const GUI_CUSTOMIZATION_SETTINGS: &[&str] = &[
     "MAIN MENU POSITION",
     "FONT COLOR",
     "CURSOR COLOR",
+    "CURSOR STYLE",
     "CURSOR BLINK SPEED",
     "TRANSITION ANIMATION",
     "BACKGROUND SCROLLING",
@@ -81,6 +80,7 @@ pub const COLORS: &[&str] = &[
 ];
 
 pub const RESOLUTIONS: &[&str] = &[
+    "320x240",
     "640x360",
     "640x480",   // [!] 4:3 (Classic VGA)
     "800x600",   // [!] 4:3
@@ -101,6 +101,8 @@ pub const ASPECT_RATIOS: &[&str] = &[
     "16:10",
 ];
 
+pub const CURSOR_STYLES: &[&str] = &["BOX", "TEXT"];
+
 pub const SPEEDS: &[&str] = &["OFF", "SLOW", "NORMAL", "FAST"];
 
 pub const TIMEZONES: [&str; 25] = [
@@ -113,7 +115,7 @@ pub const TIMEZONES: [&str; 25] = [
 // Helper to check if a resolution string belongs to an aspect ratio
 fn matches_aspect_ratio(res: &str, ratio: &str) -> bool {
     match ratio {
-        "4:3" => matches!(res, "640x480" | "800x600" | "1024x768" | "1280x960" | "1440x1080"),
+        "4:3" => matches!(res, "320x240" | "640x480" | "800x600" | "1024x768" | "1280x960" | "1440x1080"),
         "16:9" => matches!(res, "640x360" | "1280x720" | "1920x1080" | "2560x1440" | "3840x2160"),
         "16:10" => matches!(res, "1280x800" | "1920x1200"),
         _ => true, // Unknown ratio, allow all
@@ -163,10 +165,13 @@ pub fn render_settings_page(
         let y_pos_base = settings_start_y + (i as f32 * settings_option_height);
 
         let value_text = get_settings_value(page_number, i, config, system_volume, brightness);
-
-        // --- UPDATED: Consistent and Dynamic Layout Calculations ---
         let value_dims = measure_text(&value_text.to_uppercase(), Some(current_font), font_size, 1.0);
+        let value_x = screen_width() - value_dims.width - right_margin;
+        let text_y = y_pos_base + (settings_option_height / 2.0) + (value_dims.offset_y * 0.5);
 
+        let is_selected = i == selection;
+
+        /*
         // --- Draw the highlight rectangle if this item is selected ---
         if i == selection {
             let cursor_color = animation_state.get_cursor_color(config);
@@ -195,6 +200,38 @@ pub fn render_settings_page(
 
         text_with_config_color(font_cache, config, label_text, left_margin, text_y, font_size);
         text_with_config_color(font_cache, config, &value_text, value_x, text_y, font_size);
+        */
+
+        // 1. Handle Box Drawing (Only if selected AND style is BOX)
+        if is_selected && config.cursor_style == "BOX" {
+            let cursor_color = animation_state.get_cursor_color(config);
+            let cursor_scale = animation_state.get_cursor_scale();
+
+            let base_width = value_dims.width + (menu_padding * 2.0);
+            let base_height = value_dims.height + (menu_padding * 2.0);
+            let scaled_width = base_width * cursor_scale;
+            let scaled_height = base_height * cursor_scale;
+            let offset_x = (scaled_width - base_width) / 2.0;
+            let offset_y = (scaled_height - base_height) / 2.0;
+
+            let rect_x = value_x - menu_padding;
+            let rect_y = y_pos_base + (settings_option_height / 2.0) - (base_height / 2.0);
+
+            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
+        }
+
+        // 2. Draw Label (Standard)
+        text_with_config_color(font_cache, config, label_text, left_margin, text_y, font_size);
+
+        // 3. Draw Value (Conditional Color)
+        if is_selected && config.cursor_style == "TEXT" {
+            // If selected and style is TEXT, use the animated cursor color
+            let highlight_color = animation_state.get_cursor_color(config);
+            text_with_color(font_cache, config, &value_text, value_x, text_y, font_size, highlight_color);
+        } else {
+            // Otherwise use standard config color
+            text_with_config_color(font_cache, config, &value_text, value_x, text_y, font_size);
+        }
     }
 
     // let the user know what page they're on
@@ -261,12 +298,13 @@ pub fn get_settings_value(page: usize, index: usize, config: &Config, system_vol
             1 => format!("{:?}", config.menu_position).to_uppercase(), // MENU POSITION
             2 => config.font_color.clone(), // FONT COLOR
             3 => config.cursor_color.clone(), // CURSOR COLOR
-            4 => config.cursor_blink_speed.clone(),
-            5 => config.cursor_transition_speed.clone(),
-            6 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
-            7 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
-            8 => "<-".to_string(),
-            9 => "->".to_string(),
+            4 => config.cursor_style.clone(), // CURSOR STYLE
+            5 => config.cursor_blink_speed.clone(), // CURSOR BLINK SPEED
+            6 => config.cursor_transition_speed.clone(), // CURSOR TRANSITION SPEED
+            7 => config.background_scroll_speed.clone(), // BACKGROUND SCROLL SPEED
+            8 => config.color_shift_speed.clone(), // COLOR SHIFTING GRADIENT SPEED
+            9 => "<-".to_string(),
+            10 => "->".to_string(),
             _ => "".to_string(),
         },
         // CUSTOM ASSETS
@@ -589,11 +627,6 @@ pub fn update(
                     }
 
                     // Change the volume of the currently playing sound
-                    /*
-                    if let Some(sound) = &current_bgm {
-                        set_sound_volume(sound, config.bgm_volume);
-                    }
-                    */
                     if let Some(sink) = current_bgm {
                         sink.set_volume(config.bgm_volume);
                     }
@@ -697,6 +730,7 @@ pub fn update(
                             config.menu_position = defaults.menu_position;
                             config.font_color = defaults.font_color;
                             config.cursor_color = defaults.cursor_color;
+                            config.cursor_style = defaults.cursor_style;
                             config.cursor_blink_speed = defaults.cursor_blink_speed;
                             config.cursor_transition_speed = defaults.cursor_transition_speed;
                             config.background_scroll_speed = defaults.background_scroll_speed;
@@ -718,6 +752,7 @@ pub fn update(
                                 if let Some(val) = &theme.config.menu_position { config.menu_position = val.parse().unwrap_or_default(); }
                                 if let Some(val) = &theme.config.font_color { config.font_color = val.clone(); }
                                 if let Some(val) = &theme.config.cursor_color { config.cursor_color = val.clone(); }
+                                if let Some(val) = &theme.config.cursor_style { config.cursor_style = val.clone(); }
                                 if let Some(val) = &theme.config.cursor_blink_speed { config.cursor_blink_speed = val.clone(); }
                                 if let Some(val) = &theme.config.cursor_transition_speed { config.cursor_transition_speed = val.clone(); }
                                 if let Some(val) = &theme.config.background_scroll_speed { config.background_scroll_speed = val.clone(); }
@@ -778,7 +813,20 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            4 => { // CURSOR BLINK SPEED
+            4 => { // CURSOR STYLE
+                if input_state.left || input_state.right {
+                    let current_index = CURSOR_STYLES.iter().position(|&s| s == config.cursor_style).unwrap_or(0);
+                    let new_index = if input_state.right {
+                        (current_index + 1) % CURSOR_STYLES.len()
+                    } else {
+                        (current_index + CURSOR_STYLES.len() - 1) % CURSOR_STYLES.len()
+                    };
+                    config.cursor_style = CURSOR_STYLES[new_index].to_string();
+                    config.save();
+                    sound_effects.play_cursor_move(&config);
+                }
+            },
+            5 => { // CURSOR BLINK SPEED
                 if input_state.left || input_state.right {
                     let current_index = SPEEDS.iter().position(|&s| s == config.cursor_blink_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -792,7 +840,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            5 => { // TRANSITION ANIMATION
+            6 => { // TRANSITION ANIMATION
                 if input_state.left || input_state.right {
                     let current_index = SPEEDS.iter().position(|&s| s == config.cursor_transition_speed).unwrap_or(2); // Default to NORMAL (index 2)
                     let new_index = if input_state.right {
@@ -808,7 +856,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            6 => { // BACKGROUND SCROLLING
+            7 => { // BACKGROUND SCROLLING
                 if input_state.left || input_state.right {
                     let current_index = SPEEDS.iter().position(|&s| s == config.background_scroll_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -822,7 +870,7 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            7 => { // COLOR GRADIENT SHIFTING
+            8 => { // COLOR GRADIENT SHIFTING
                 if input_state.left || input_state.right {
                     let current_index = SPEEDS.iter().position(|&s| s == config.color_shift_speed).unwrap_or(0);
                     let new_index = if input_state.right {
@@ -836,14 +884,14 @@ pub fn update(
                     sound_effects.play_cursor_move(&config);
                 }
             },
-            8 => { // GO TO AUDIO SETTINGS
+            9 => { // GO TO AUDIO SETTINGS
                 if input_state.select {
                     *current_screen = Screen::AudioSettings;
                     *settings_menu_selection = 0;
                     sound_effects.play_select(&config);
                 }
             },
-            9 => { // GO TO CUSTOM ASSETS
+            10 => { // GO TO CUSTOM ASSETS
                 if input_state.select {
                     *current_screen = Screen::AssetSettings;
                     *settings_menu_selection = 0;

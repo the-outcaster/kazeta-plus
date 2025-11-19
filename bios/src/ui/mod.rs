@@ -296,7 +296,7 @@ pub fn render_game_selection_menu(
         // Draw the icon
         draw_texture_ex(icon, pos_x, pos_y, WHITE, DrawTextureParams {
             dest_size: Some(vec2(scaled_tile_size, scaled_tile_size)),
-                        ..Default::default()
+            ..Default::default()
         });
 
         // Draw selection highlight
@@ -311,11 +311,11 @@ pub fn render_game_selection_menu(
 
             draw_rectangle_lines(
                 pos_x - (3.0 * scale_factor) - offset,
-                                 pos_y - (3.0 * scale_factor) - offset,
-                                 scaled_size,
-                                 scaled_size,
-                                 6.0 * scale_factor, // Line thickness
-                                 cursor_color
+                pos_y - (3.0 * scale_factor) - offset,
+                scaled_size,
+                scaled_size,
+                6.0 * scale_factor, // Line thickness
+                cursor_color
             );
         }
     }
@@ -369,7 +369,7 @@ pub fn render_debug_screen(
     }
 
     // --- Draw the instruction or flash message ---
-    let instruction_text = flash_message.unwrap_or("PRESS A TO SAVE LOG (OR B TO EXIT)");
+    let instruction_text = flash_message.unwrap_or("PRESS [SOUTH] TO SAVE LOG (OR [EAST] TO EXIT)");
     let instruction_font_size = (14.0 * scale_factor) as u16;
     let instruction_text_width = measure_text(instruction_text, None, instruction_font_size, 1.0).width;
     let instruction_x = (screen_width() - instruction_text_width) / 2.0; // Center it
@@ -489,7 +489,7 @@ pub fn render_dialog(
     size_cache: &mut SizeCache,
     scale_factor: f32,
 ) {
-    // --- Scaled variables are defined once at the top ---
+    // --- Scaled variables ---
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
     let tile_size = TILE_SIZE * scale_factor;
     let padding = PADDING * scale_factor;
@@ -503,7 +503,7 @@ pub fn render_dialog(
         }
     };
 
-    // Dialog background - NOW SCALED
+    // Dialog background
     if animation_state.dialog_transition_progress >= 1.0 {
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), UI_BG_COLOR_DIALOG);
     }
@@ -520,14 +520,13 @@ pub fn render_dialog(
             let playtime = get_game_playtime(mem, playtime_cache);
             let size = get_game_size(mem, size_cache);
 
-            // Text calls - NOW SCALED
             text_with_config_color(font_cache, config, &desc, tile_size * 2.0, tile_size - (1.0 * scale_factor), font_size);
             let stats_text = format!("{:.1} MB | {:.1} H", size, playtime);
             text_with_config_color(font_cache, config, &stats_text, tile_size * 2.0, tile_size * 1.5 + (1.0 * scale_factor), font_size);
         }
     };
 
-    // Copy progress bar - NOW SCALED
+    // Copy progress bar
     if copy_running {
         draw_rectangle_lines(
             (font_size * 3) as f32, screen_height() / 2.0,
@@ -546,41 +545,61 @@ pub fn render_dialog(
             text_with_config_color(font_cache, config, &desc, x_pos, (font_size * 7) as f32, font_size);
         }
 
-        // Centering and drawing dialog options - NOW SCALED
+        // Centering and drawing dialog options
         let longest_width = measure_text( &dialog.options.iter() .find(|opt| opt.text.len() == dialog.options.iter().map(|opt| opt.text.len()).max().unwrap_or(0)) .map(|opt| opt.text.to_uppercase()).unwrap_or_default(), Some(current_font), font_size, 1.0).width;
         let options_start_x = (screen_width() - longest_width) / 2.0;
 
-        for (i, option) in dialog.options.iter().enumerate() {
-            let y_pos = (font_size * 10 + font_size * 2 * (i as u16)) as f32;
-            let shake_offset = if option.disabled { animation_state.calculate_shake_offset(ShakeTarget::Dialog) * scale_factor } else { 0.0 };
-            let x_pos = options_start_x + shake_offset;
-            if option.disabled {
-                text_disabled(font_cache, config, &option.text, x_pos, y_pos, font_size);
-            } else {
-                text_with_config_color(font_cache, config, &option.text, x_pos, y_pos, font_size);
-            }
-        }
-
-        // Selection rectangle
         let selection_y = (font_size * 9 + font_size * 2 * (dialog.selection as u16)) as f32;
         let selected_option = &dialog.options[dialog.selection];
         let selection_shake = if selected_option.disabled { animation_state.calculate_shake_offset(ShakeTarget::Dialog) * scale_factor } else { 0.0 };
 
         let cursor_color = animation_state.get_cursor_color(config);
-        let cursor_scale = animation_state.get_cursor_scale();
-        let box_padding = padding * 0.5;
-        let base_width = longest_width + (box_padding * 2.0);
-        let base_height = (1.0 * font_size as f32) + (box_padding * 2.0);
-        let scaled_width = base_width * cursor_scale;
-        let scaled_height = base_height * cursor_scale;
-        let offset_x = (scaled_width - base_width) / 2.0;
-        let offset_y = (scaled_height - base_height) / 2.0;
 
-        draw_rectangle_lines(
-            options_start_x - box_padding + selection_shake - offset_x,
-            selection_y - box_padding - offset_y,
-            scaled_width, scaled_height, 4.0 * scale_factor, cursor_color
-        );
+        // --- Draw Selection Box (If style is BOX) ---
+        if config.cursor_style == "BOX" {
+            let cursor_scale = animation_state.get_cursor_scale();
+            let box_padding = padding * 0.5;
+            let base_width = longest_width + (box_padding * 2.0);
+            let base_height = (1.0 * font_size as f32) + (box_padding * 2.0);
+            let scaled_width = base_width * cursor_scale;
+            let scaled_height = base_height * cursor_scale;
+            let offset_x = (scaled_width - base_width) / 2.0;
+            let offset_y = (scaled_height - base_height) / 2.0;
+
+            draw_rectangle_lines(
+                options_start_x - box_padding + selection_shake - offset_x,
+                selection_y - box_padding - offset_y,
+                scaled_width, scaled_height, 4.0 * scale_factor, cursor_color
+            );
+        }
+
+        // --- Draw Text Options ---
+        for (i, option) in dialog.options.iter().enumerate() {
+            let y_pos = (font_size * 10 + font_size * 2 * (i as u16)) as f32;
+            let shake_offset = if option.disabled { animation_state.calculate_shake_offset(ShakeTarget::Dialog) * scale_factor } else { 0.0 };
+            let x_pos = options_start_x + shake_offset;
+            let is_selected = i == dialog.selection;
+
+            // [!] UPDATED LOGIC
+            if is_selected && config.cursor_style == "TEXT" {
+                let mut highlight_color = cursor_color; // Use the animated color we calculated above
+
+                if option.disabled {
+                    // Dim the cursor color to show it's disabled but selected
+                    highlight_color.r *= 0.5;
+                    highlight_color.g *= 0.5;
+                    highlight_color.b *= 0.5;
+                    highlight_color.a = 1.0;
+                }
+
+                text_with_color(font_cache, config, &option.text, x_pos, y_pos, font_size, highlight_color);
+
+            } else if option.disabled {
+                text_disabled(font_cache, config, &option.text, x_pos, y_pos, font_size);
+            } else {
+                text_with_config_color(font_cache, config, &option.text, x_pos, y_pos, font_size);
+            }
+        }
     }
 }
 
@@ -606,7 +625,7 @@ pub fn calculate_icon_transition_positions(selected_memory: usize, scale_factor:
 
     let grid_pos = Vec2::new(
         pixel_pos(xp, scale_factor),
-                             pixel_pos(yp, scale_factor) + grid_offset
+        pixel_pos(yp, scale_factor) + grid_offset
     );
     let dialog_pos = Vec2::new(padding, padding);
     (grid_pos, dialog_pos)
@@ -625,6 +644,29 @@ pub fn get_current_font<'a>(
     font_cache
     .get(&config.font_selection)
     .unwrap_or_else(|| &font_cache["Default"])
+}
+
+// Draws text with a specific color passed in (ignoring config.font_color)
+// Useful for the "TEXT" cursor style.
+pub fn text_with_color(font_cache: &HashMap<String, Font>, config: &Config, text: &str, x: f32, y: f32, font_size: u16, color: Color) {
+    let font = get_current_font(font_cache, config);
+    let shadow_offset = 1.0 * (font_size as f32 / FONT_SIZE as f32);
+
+    // Shadow
+    draw_text_ex(text, x + shadow_offset, y + shadow_offset, TextParams {
+        font: Some(font),
+        font_size,
+        color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.9 },
+        ..Default::default()
+    });
+
+    // Main Text with specific color
+    draw_text_ex(text, x, y, TextParams {
+        font: Some(font),
+        font_size,
+        color,
+        ..Default::default()
+    });
 }
 
 // A new function specifically for drawing text that respects the config color

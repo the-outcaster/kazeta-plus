@@ -10,6 +10,7 @@ use crate::audio::SoundEffects;
 use crate::config::Config;
 use crate::{save, StorageMediaState};
 use crate::types::{AnimationState, BackgroundState, BatteryInfo, MenuPosition};
+use crate::ui::text_with_color;
 
 // Items that are still in `main.rs` (the crate root)
 use crate::{
@@ -287,8 +288,15 @@ pub fn draw(
             x_pos += animation_state.calculate_shake_offset(ShakeTarget::CopyLogOption);
         }
 
+        let is_selected = i == selected_option;
+        let is_disabled = match option {
+            "PLAY" => !play_option_enabled,
+            "COPY SESSION LOGS" => !copy_logs_option_enabled,
+            _ => false,
+        };
+
         // --- Draw selected option highlight ---
-        if i == selected_option {
+        if is_selected && config.cursor_style == "BOX" {
             let cursor_color = animation_state.get_cursor_color(config);
             let cursor_scale = animation_state.get_cursor_scale();
             let base_width = text_dims.width + (menu_padding * 2.0);
@@ -311,16 +319,41 @@ pub fn draw(
             );
         }
 
+        if is_selected && config.cursor_style == "TEXT" {
+            let mut highlight_color = animation_state.get_cursor_color(config);
+
+            if is_disabled {
+                // If the item is disabled, dim the cursor color by 50%.
+                // It will look "Red-ish" (showing selection) but Dark (showing disabled).
+                highlight_color.r *= 0.5;
+                highlight_color.g *= 0.5;
+                highlight_color.b *= 0.5;
+                // Ensure alpha is solid so it doesn't look like a ghost
+                highlight_color.a = 1.0;
+            }
+
+            text_with_color(font_cache, config, option, x_pos, y_pos, font_size, highlight_color);
+
+        } else if is_disabled {
+            // Not selected, just disabled -> Gray
+            text_disabled(font_cache, config, option, x_pos, y_pos, font_size);
+        } else {
+            // Normal -> Config Color (White/etc)
+            text_with_config_color(font_cache, config, option, x_pos, y_pos, font_size);
+        }
+
+        /*
         // --- Draw text ---
         let slot_center_y = y_pos + (menu_option_height / 2.0);
         let y_pos_text = slot_center_y + (text_dims.offset_y / 2.0);
 
         let is_cart_option = i == 1 || i == 2;
         if is_cart_option && !play_option_enabled {
-            text_disabled(font_cache, config, option, x_pos, y_pos_text, font_size);
+            text_disabled(font_cache, config, option, x_pos, y_pos, font_size);
         } else {
-            text_with_config_color(font_cache, config, option, x_pos, y_pos_text, font_size);
+            text_with_config_color(font_cache, config, option, x_pos, y_pos, font_size);
         };
+        */
     }
 
     // --- Draw the Flash Message if it exists ---

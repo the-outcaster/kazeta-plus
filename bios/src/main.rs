@@ -1,5 +1,4 @@
 use macroquad::prelude::*;
-//use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, PlaySoundParams, Sound};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time;
