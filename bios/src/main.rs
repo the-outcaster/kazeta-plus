@@ -61,7 +61,6 @@ pub use types::*;
 // TO-DO LIST
 // ===================================
 - gamepad tester
-- add system debugger in the event the game crashed
 - add option to safely unmount cart in main menu
 - support for local multiplayer (i.e. add support for controllers 2-4)
 
@@ -103,7 +102,7 @@ const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.42d.KAZETA+";
+const VERSION_NUMBER: &str = "V1.42.KAZETA+";
 
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;

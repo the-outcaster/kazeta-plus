@@ -14,14 +14,9 @@ exec < /dev/tty1 > /dev/tty1 2>&1
 
 export TERM=linux
 
-# Use Raw ANSI Escape Codes to disable blanking
-# \033[9;0]  = Set blank timeout to 0 (disable)
-# \033[13]   = Unblank the screen immediately
-# \033[14;0] = Set VESA powerdown to 0 (disable)
-echo -e "\033[9;0]\033[14;0]\033[13]"
-
-# Backup with setterm (forcing the device)
-setterm --term linux -blank 0 -powersave off -powerdown 0 > /dev/tty1
+# Force disable blanking using raw escape codes and setterm
+echo -ne "\033[9;0]\033[14;0]"
+setterm -blank 0 -powersave off -powerdown 0 > /dev/tty1
 
 # 4. UI Logic
 RED='\033[0;31m'
@@ -52,3 +47,16 @@ echo "----------------------------------------------------"
 echo ""
 echo "Press the Power button to shut down."
 echo ""
+
+# Keep-Alive Loop
+# We sit here forever until the power is cut.
+# We wake up every 5 seconds to 'poke' the screen so it doesn't sleep.
+while true; do
+    sleep 5
+
+    # Send "Unblank" escape code
+    echo -ne "\033[13]"
+
+    # Send a "ghost write" (Space then Backspace) to register terminal activity
+    echo -ne " \b"
+done
