@@ -85,7 +85,12 @@ Maybe
 // ===================================
 
 const DEBUG_GAME_LAUNCH: bool = false;
-const DEV_MODE: bool = false;
+
+#[cfg(feature = "dev")]
+pub const DEV_MODE: bool = true; // run with "cargo run --release --features dev"
+
+#[cfg(not(feature = "dev"))]
+pub const DEV_MODE: bool = false;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -494,6 +499,10 @@ async fn load_all_assets(
 #[macroquad::main(window_conf)]
 async fn main() {
     env::set_var("RUST_BACKTRACE", "full"); // allow backtracing for debugging panics
+
+    if DEV_MODE {
+        println!("DEV MODE enabled");
+    }
 
     let mut dialogs: Vec<Dialog> = Vec::new();
     let mut dialog_state = DialogState::None;

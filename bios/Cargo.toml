@@ -30,5 +30,10 @@ tempfile = "3.23.0" # for downloading runtime files
 cd-da-reader = "0.1.0"
 rodio = "0.21.1"
 
+# add dev mode flag
+[features]
+default = []
+dev = []
+
 # deprecated dependencies
 #macroquad = { version = "0.4.14", features = ["audio"] }
