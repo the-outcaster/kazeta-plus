@@ -47,8 +47,6 @@ pub fn update(
     log_messages: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     storage_state: &Arc<Mutex<StorageMediaState>>,
     fade_start_time: &mut Option<f64>,
-    //current_bgm: &mut Option<macroquad::audio::Sound>,
-    //music_cache: &HashMap<String, macroquad::audio::Sound>,
     current_bgm: &mut Option<Sink>,
     music_cache: &HashMap<String, SamplesBuffer>,
     game_icon_queue: &mut Vec<(String, PathBuf)>,
@@ -251,19 +249,38 @@ pub fn draw(
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
     let menu_padding = MENU_PADDING * scale_factor;
     let menu_option_height = MENU_OPTION_HEIGHT * scale_factor;
-    let margin_x = 30.0 * scale_factor; // A standard margin for corners
-    let margin_y = (font_size as f32) / 2.0; // A standard margin for corners
+    let margin_x = 30.0 * scale_factor;
+    let margin_y = 45.0 * scale_factor;
 
     let current_font = get_current_font(font_cache, config);
 
     // --- Determine menu position based on config ---
     let (start_x, start_y, is_centered) = match config.menu_position {
-        MenuPosition::TopLeft => (margin_x, margin_y, false),
-        MenuPosition::TopRight => (screen_width() - margin_x, margin_y, false),
-        MenuPosition::BottomLeft => (margin_x, screen_height() - (MAIN_MENU_OPTIONS.len() as f32 * menu_option_height) - margin_y, false),
-        MenuPosition::BottomRight => (screen_width() - margin_x, screen_height() - (MAIN_MENU_OPTIONS.len() as f32 * menu_option_height) - margin_y,
-        false),
-        MenuPosition::Center => (screen_width() / 2.0, screen_height() * 0.3, true),
+        MenuPosition::Center => (
+            screen_width() / 2.0,
+            (screen_height() * 0.3).max(margin_y),
+            true
+        ),
+        MenuPosition::TopLeft => (
+            margin_x,
+            margin_y,
+            false
+        ),
+        MenuPosition::TopRight => (
+            screen_width() - margin_x,
+            margin_y,
+            false
+        ),
+        MenuPosition::BottomLeft => (
+            margin_x,
+            screen_height() - (menu_options.len() as f32 * menu_option_height),
+            false
+        ),
+        MenuPosition::BottomRight => (
+            screen_width() - margin_x,
+            screen_height() - (menu_options.len() as f32 * menu_option_height),
+            false
+        ),
     };
 
     // Draw menu options
@@ -340,19 +357,6 @@ pub fn draw(
             // Normal -> Config Color (White/etc)
             text_with_config_color(font_cache, config, option, x_pos, y_pos, font_size);
         }
-
-        /*
-        // --- Draw text ---
-        let slot_center_y = y_pos + (menu_option_height / 2.0);
-        let y_pos_text = slot_center_y + (text_dims.offset_y / 2.0);
-
-        let is_cart_option = i == 1 || i == 2;
-        if is_cart_option && !play_option_enabled {
-            text_disabled(font_cache, config, option, x_pos, y_pos, font_size);
-        } else {
-            text_with_config_color(font_cache, config, option, x_pos, y_pos, font_size);
-        };
-        */
     }
 
     // --- Draw the Flash Message if it exists ---

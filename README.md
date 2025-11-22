@@ -2,7 +2,7 @@
 The "overly complex" fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project.
 
 Features:
-- multi-cart support
+- [multi-cart support](https://github.com/the-outcaster/kazeta-plus/wiki/Multi%E2%80%90Cart-Logic)
 - [optical disc drive support](https://github.com/the-outcaster/kazeta-plus/wiki/Creating-Optical-Disc-Media) (CDs, DVDs, etc)
   - music CD player support
 - multi-resolution and aspect ratio support, including 4:3
