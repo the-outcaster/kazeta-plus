@@ -112,6 +112,18 @@ echo "--------------------------------------------------"
 ### ===================================================================
 
 echo -e "${YELLOW}Step 3: Installing/updating system packages and build tools...${NC}"
+
+# Clean up stale pacman locks
+PACMAN_LOCK="/var/lib/pacman/db.lck"
+if [ -f "$PACMAN_LOCK" ]; then
+    echo -e "${YELLOW}  -> Detected stale pacman lock file. Cleaning up...${NC}"
+    # Attempt to kill any hung pacman processes first
+    killall -9 pacman 2>/dev/null || true
+    # Remove the lock file
+    rm -f "$PACMAN_LOCK"
+    echo -e "${GREEN}  -> Lock file removed.${NC}"
+fi
+
 pacman -Syy
 
 PACKAGES_TO_INSTALL=(
