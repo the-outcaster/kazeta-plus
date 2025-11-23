@@ -30,6 +30,10 @@ tempfile = "3.23.0" # for downloading runtime files
 cd-da-reader = "0.1.0"
 rodio = "0.21.1"
 
+# video support
+ffmpeg-next = "8.0.0"
+image = "0.25.9"
+
 # add dev mode flag
 [features]
 default = []

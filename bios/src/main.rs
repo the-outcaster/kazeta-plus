@@ -1,25 +1,44 @@
-use macroquad::prelude::*;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time;
-use std::collections::{HashMap, HashSet};
+use chrono::Local; // for getting clock
+use crate::{
+    audio::{AUDIO, load_sound_from_bytes, SoundEffects, play_new_bgm},
+    cd_player_backend::CdPlayerBackend,
+    config::{Config, get_user_data_dir},
+    dialog::Dialog,
+    gcc_adapter::start_gcc_adapter_polling,
+    input::InputState,
+    save::StorageMediaState,
+    settings::GENERAL_SETTINGS,
+    settings::render_settings_page,
+    system::*, // Wildcard to get all system functions
+    ui::*,
+    ui::main_menu::MAIN_MENU_OPTIONS,
+    ui::runtime_downloader::RuntimeDownloaderState,
+    ui::theme_downloader::ThemeDownloaderState,
+    ui::update_checker::UpdateCheckerState,
+    ui::wifi::WifiState,
+    utils::*, // Wildcard to get all utility functions
+};
 use gilrs::Gilrs;
+use macroquad::prelude::*;
+use ::rand::Rng; // for selecting a random message on startup
+use regex::Regex; // fetching audio sinks
 use rodio::{
     buffer::SamplesBuffer,
     Decoder, Sink,
 };
-use std::sync::atomic::{Ordering, AtomicBool};
-use std::fs;
-use std::process;
-use std::process::Child;
+use std::{
+    thread, time, fs, process, env,
+    collections::{HashMap, HashSet},
+    io::{BufReader, Cursor, Write},
+    path::PathBuf,
+    process::Child,
+    sync::{Arc, Mutex},
+    sync::atomic::{Ordering, AtomicBool},
+};
+use tempfile::NamedTempFile;
+use video::VideoPlayer;
 
-// extra stuff I'm using
-use std::path::PathBuf; // for loading assets
-use std::io::{BufReader, Cursor};
-use std::env; // backtracing
-use ::rand::Rng; // for selecting a random message on startup
-use chrono::Local; // for getting clock
-use regex::Regex; // fetching audio sinks
+pub use types::*;
 
 // Import our new modules
 mod audio;
@@ -34,27 +53,7 @@ mod theme;
 mod types;
 mod ui;
 mod utils;
-
-//use crate::audio::{SoundEffects, play_new_bgm};
-use crate::audio::{AUDIO, load_sound_from_bytes, SoundEffects, play_new_bgm};
-use crate::cd_player_backend::CdPlayerBackend;
-use crate::config::{Config, get_user_data_dir};
-use crate::dialog::Dialog;
-use crate::gcc_adapter::start_gcc_adapter_polling;
-use crate::input::InputState;
-use crate::system::*; // Wildcard to get all system functions
-use crate::ui::main_menu::MAIN_MENU_OPTIONS;
-use crate::ui::runtime_downloader::RuntimeDownloaderState;
-use crate::ui::theme_downloader::ThemeDownloaderState;
-use crate::ui::update_checker::UpdateCheckerState;
-use crate::ui::wifi::WifiState;
-use crate::ui::*;
-use crate::utils::*; // Wildcard to get all utility functions
-use crate::save::StorageMediaState;
-use crate::settings::GENERAL_SETTINGS;
-use crate::settings::render_settings_page;
-
-pub use types::*;
+mod video;
 
 /*
 // ===================================
@@ -700,6 +699,8 @@ async fn main() {
         play_new_bgm(track_name, config.bgm_volume, &music_cache, &mut current_bgm);
     }
 
+    // old splash screen logic
+    /*
     // SPLASH SCREEN
     if config.show_splash_screen {
         // Mute the main BGM if it's already playing
@@ -792,21 +793,120 @@ async fn main() {
             next_frame().await;
         }
 
-        // Restore BGM volume after splash screen
-        /*
-        if let Some(sound) = &current_bgm {
-            set_sound_volume(sound, config.bgm_volume);
-        }
-        */
         if let Some(sink) = &current_bgm {
             sink.set_volume(config.bgm_volume);
         }
     }
+    */
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().unwrap();
     let mut input_state = InputState::new();
     let mut animation_state = AnimationState::new();
+
+    // SPLASH SCREEN
+    if config.show_splash_screen {
+        // Mute BGM
+        if let Some(sink) = &current_bgm {
+            sink.set_volume(0.0);
+        }
+
+        let sink = Sink::connect_new(&AUDIO.stream.mixer());
+
+        // 1. Setup Audio (Keep this exactly as you have it!)
+        let splash_bytes = include_bytes!("../splash.wav");
+        let cursor = Cursor::new(splash_bytes);
+        let source = Decoder::new(cursor).unwrap();
+        sink.append(source);
+
+        // 2. Setup Video
+        // Embed the MP4
+        let video_bytes = include_bytes!("../splash.mp4");
+
+        // Write to temp file so FFmpeg can read it
+        let mut temp_video = NamedTempFile::new().unwrap();
+        temp_video.write_all(video_bytes).unwrap();
+        let temp_path = temp_video.path().to_path_buf();
+
+        // Initialize Player
+        // Note: We use a Result here in case FFmpeg fails (missing libs, etc)
+        let mut video_player = VideoPlayer::new(&temp_path).ok();
+
+        // Fallback logo if video fails
+        let fallback_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
+
+        let state_start_time = get_time();
+        // Use video duration, or fallback to 3.0 seconds
+        let duration = video_player.as_ref().map(|vp| vp.duration_secs).unwrap_or(3.0);
+
+        loop {
+            // --- Input Skipping ---
+            input_state.reset();
+            input_state.update_keyboard();
+            input_state.update_controller(&mut gilrs);
+
+            if input_state.back {
+                break;
+            }
+
+            let elapsed = get_time() - state_start_time;
+
+            if elapsed > duration {
+                break;
+            }
+
+            clear_background(BLACK);
+
+            if let Some(player) = &mut video_player {
+                // --- VIDEO MODE ---
+                player.update(elapsed);
+
+                // Draw Fullscreen
+                draw_texture_ex(
+                    &player.texture,
+                    0.0,
+                    0.0,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(vec2(screen_width(), screen_height())),
+                        ..Default::default()
+                    },
+                );
+            } else {
+                // --- FALLBACK IMAGE MODE (Your old code) ---
+                // Calculate fading based on 'elapsed' and 'duration'
+                let alpha = if elapsed < 0.5 {
+                    elapsed / 0.5
+                } else if elapsed > duration - 0.5 {
+                    (duration - elapsed) / 0.5
+                } else { 1.0 } as f32;
+
+                let aspect_ratio = fallback_logo.height() / fallback_logo.width();
+                let scaled_width = 200.0 * (screen_height() / BASE_SCREEN_HEIGHT);
+                let scaled_height = scaled_width * aspect_ratio;
+
+                draw_texture_ex(
+                    &fallback_logo,
+                    (screen_width() - scaled_width) / 2.0,
+                    (screen_height() - scaled_height) / 2.0,
+                    Color::new(1.0, 1.0, 1.0, alpha),
+                    DrawTextureParams {
+                        dest_size: Some(vec2(scaled_width, scaled_height)),
+                    ..Default::default()
+                    }
+                );
+            }
+            next_frame().await;
+        }
+
+        // Cleanup
+        // Temp file is deleted automatically when `temp_video` goes out of scope
+
+        // Restore BGM
+        if let Some(sink) = &current_bgm {
+            sink.set_volume(config.bgm_volume);
+        }
+    }
 
     // Screen state
     let mut current_screen = Screen::MainMenu;
