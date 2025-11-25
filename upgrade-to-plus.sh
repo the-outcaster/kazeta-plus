@@ -133,6 +133,7 @@ PACKAGES_TO_INSTALL=(
     "noto-fonts" "ttf-dejavu" "ttf-liberation" "noto-fonts-emoji"
     "pipewire-alsa" "alsa-utils"
     "mangohud" "lib32-mangohud" "gamemode" "lib32-gamemode" "openssh" "nano"
+    "clang"
 )
 
 # Install required packages (including build dependencies)

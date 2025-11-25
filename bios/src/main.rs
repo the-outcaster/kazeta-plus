@@ -83,13 +83,17 @@ Maybe
 // CONSTANTS
 // ===================================
 
-const DEBUG_GAME_LAUNCH: bool = false;
-
 #[cfg(feature = "dev")]
 pub const DEV_MODE: bool = true; // run with "cargo run --release --features dev"
 
 #[cfg(not(feature = "dev"))]
 pub const DEV_MODE: bool = false;
+
+#[cfg(feature = "debug_game")]
+pub const DEBUG_GAME_LAUNCH: bool = true; // run with "cargo run --release --features debug_game"
+
+#[cfg(not(feature = "debug_game"))]
+pub const DEBUG_GAME_LAUNCH: bool = false;
 
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
@@ -135,6 +139,8 @@ const KAZETA_LOADING_MESSAGES: &[&str] = &[
     "MOUNTING GAME DATA...",
     "REMEMBER TO SAVE YOUR PROGRESS.",
 ];
+
+const KZP_ICON_BYTES: &[u8] = include_bytes!("../kzp.png");
 
 /*
 const MONIKA_LOADING_MESSAGES: &[&str] = &[
@@ -389,10 +395,13 @@ async fn load_all_assets(
 
         // Inset the red fill rectangle to create a border effect
         let inset = 1.0 * scale_factor; // The thickness of the border
+
+        let safe_progress = progress.min(1.0); // clamp progress to 1.0 to prevent overflow
+
         draw_rectangle(
             bar_x + inset,
             bar_y + inset,
-            (bar_width - inset * 2.0) * progress, // The fill width, adjusted for the border
+            (bar_width - inset * 2.0) * safe_progress, // The fill width, adjusted for the border
             bar_height - inset * 2.0, // The fill height, adjusted for the border
             RED
         );
@@ -501,6 +510,10 @@ async fn main() {
 
     if DEV_MODE {
         println!("DEV MODE enabled");
+    }
+
+    if DEBUG_GAME_LAUNCH {
+        println!("DEBUG_GAME_LAUNCH enabled");
     }
 
     let mut dialogs: Vec<Dialog> = Vec::new();
@@ -845,7 +858,7 @@ async fn main() {
             input_state.update_keyboard();
             input_state.update_controller(&mut gilrs);
 
-            if input_state.back {
+            if input_state.back || input_state.select {
                 break;
             }
 
@@ -906,6 +919,9 @@ async fn main() {
         if let Some(sink) = &current_bgm {
             sink.set_volume(config.bgm_volume);
         }
+
+        // Clear input buffer so we don't click a menu item instantly
+        next_frame().await;
     }
 
     // Screen state
@@ -1225,8 +1241,20 @@ async fn main() {
                 // --- Load Icons from Queue ---
                 if !game_icon_queue.is_empty() {
                     let (game_id, icon_path) = game_icon_queue.remove(0);
-                    if let Ok(texture) = load_texture(&icon_path.to_string_lossy()).await {
+
+                    // Check for our Magic String
+                    if icon_path.to_string_lossy() == "::KZP_PLACEHOLDER::" {
+                        // LOAD FROM BAKED BYTES
+                        // We use from_file_with_format which reads raw bytes.
+                        // None = auto-detect format (png/jpg)
+                        let texture = Texture2D::from_file_with_format(KZP_ICON_BYTES, None);
                         game_icon_cache.insert(game_id, texture);
+                    } else {
+                        // LOAD FROM DISK (Standard behavior)
+                        // load_texture IS async and returns a Result, so we keep the check here
+                        if let Ok(texture) = load_texture(&icon_path.to_string_lossy()).await {
+                            game_icon_cache.insert(game_id, texture);
+                        }
                     }
                 }
                 let grid_width = 5; // The number of icons per row
@@ -1284,18 +1312,6 @@ async fn main() {
                             match save::launch_game(&cart_info, &kzi_path) {
                                 Ok(mut child) => {
                                     log_messages.lock().unwrap().push("\n--- LAUNCHING GAME ---".to_string());
-                                    start_log_reader(&mut child, log_messages.clone());
-                                    game_process = Some(child);
-                                }
-                                Err(e) => {
-                                    log_messages.lock().unwrap().push(format!("\n--- LAUNCH FAILED ---\nError: {}", e));
-                                }
-                            }
-                            // uncomment the line below when you are ready to debug
-                            //current_screen = Screen::Debug;
-
-                            match save::launch_game(cart_info, kzi_path) {
-                                Ok(mut child) => {
                                     start_log_reader(&mut child, log_messages.clone());
                                     game_process = Some(child);
                                 }

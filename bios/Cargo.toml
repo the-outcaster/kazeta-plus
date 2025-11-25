@@ -34,10 +34,10 @@ rodio = "0.21.1"
 ffmpeg-next = "8.0.0"
 image = "0.25.9"
 
-# add dev mode flag
 [features]
 default = []
-dev = []
+dev = [] # add dev mode flag
+debug_game = [] # add debug game mode flag
 
 # deprecated dependencies
 #macroquad = { version = "0.4.14", features = ["audio"] }

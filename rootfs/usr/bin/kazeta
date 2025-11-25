@@ -338,7 +338,7 @@ if [ $EXIT_CODE -ne 0 ] && [ $DURATION -lt $CRASH_THRESHOLD ]; then
 		kill "$PLAYTIME_PID" 2>/dev/null
 	fi
 
-	PHYSICAL_LOG_PATH="/var/kazeta/saves/default/${cart_id}/.kazeta/var/run.log"
+	PHYSICAL_LOG_PATH="/var/kazeta/saves/default/${cart_id}.kazeta/var/run.log"
 
 	echo "" >> /var/kazeta/session.log
 	echo "========== [KAZETA+] GAME LAUNCH FAILURE ==========" >> /var/kazeta/session.log

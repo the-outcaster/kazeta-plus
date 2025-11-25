@@ -14,18 +14,6 @@ SOURCE_DIR="$HOME/Programs/kazeta-plus"
 DEST_BASE_DIR="$HOME/Desktop/kazeta_assets/upgrade_kits"
 MAIN_RS_PATH="$SOURCE_DIR/bios/src/main.rs"
 
-# --- Pre-flight Checks ---
-echo "Performing pre-flight checks..."
-if grep -q "const DEBUG_GAME_LAUNCH: bool = true;" "$MAIN_RS_PATH" || grep -q "const DEV_MODE: bool = true;" "$MAIN_RS_PATH"; then
-    echo "-----------------------------------------------------"
-    echo "ERROR: A debug flag is set to 'true' in main.rs."
-    echo "Please set DEBUG_GAME_LAUNCH and DEV_MODE to 'false' before creating a release kit."
-    echo "-----------------------------------------------------"
-    exit 1
-fi
-echo "Checks passed. Proceeding with kit creation."
-echo "-----------------------------------------------------"
-
 # --- Main Logic ---
 read -p "Enter the version number for the new upgrade kit (e.g., 1.2): " VERSION
 if [ -z "$VERSION" ]; then

@@ -1,18 +1,22 @@
-use chrono::DateTime;
-use std::path::{Path, PathBuf};
-use std::{fs, fmt};
-use std::collections::VecDeque;
-use std::io::{self, BufRead, Write, Read};
-use sysinfo::Disks;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Arc;
-use std::process::{Command, Child, Stdio};
-use tar::{Builder, Archive};
 use walkdir;
+use chrono::DateTime;
+use std::{
+    fs, fmt,
+    collections::VecDeque,
+    io::{self, BufRead, Write, Read},
+    path::{Path, PathBuf},
+    process::{Command, Child, Stdio},
+    sync::Arc,
+    sync::atomic::{AtomicU16, Ordering},
+};
+use sysinfo::Disks;
+use tar::{Builder, Archive};
 
-use crate::DEV_MODE;
-use crate::config::get_user_data_dir;
-use crate::types::StorageMedia;
+use crate::{
+    DEV_MODE,
+    config::get_user_data_dir,
+    types::StorageMedia,
+};
 
 // ===================================
 // CONSTANTS
@@ -33,6 +37,7 @@ const EXCLUDED_DIRS: &[&str] = &[
 // ===================================
 
 // get cart info
+#[derive(Default, Clone, Debug)]
 pub struct CartInfo {
     pub name: Option<String>,
     pub id: String,
@@ -43,16 +48,9 @@ pub struct CartInfo {
 
 #[derive(Clone, Debug)]
 pub struct StorageMediaState {
-
-    // all storage media, including disabled media
-    pub all_media: Vec<StorageMedia>,
-
-    // media that can actually be used
-    pub media: Vec<StorageMedia>,
-
-    // the index of selection in 'media'
-    pub selected: usize,
-
+    pub all_media: Vec<StorageMedia>, // all storage media, including disabled media
+    pub media: Vec<StorageMedia>,    // media that can actually be used
+    pub selected: usize,    // the index of selection in 'media'
     pub needs_memory_refresh: bool,
 }
 
@@ -157,9 +155,10 @@ fn should_exclude_path(path: &Path) -> bool {
     EXCLUDED_DIRS.iter().any(|&excluded| path_str.contains(excluded))
 }
 
+// [UPDATED] Accept a slice of extensions instead of a single &str
 fn search_breadth_first(
     start_dir: &Path,
-    extension: &str,
+    extensions: &[&str],
     max_depth: usize,
     find_first: bool,
     results: &mut Vec<PathBuf>,
@@ -194,9 +193,11 @@ fn search_breadth_first(
             };
 
             if metadata.is_file() {
-                // Check if file has the desired extension
+                // Check if file has any of the desired extensions
                 if let Some(file_ext) = path.extension() {
-                    if file_ext.to_string_lossy().eq_ignore_ascii_case(extension) {
+                    let ext_str = file_ext.to_string_lossy();
+                    // [UPDATED] Check against all allowed extensions
+                    if extensions.iter().any(|e| ext_str.eq_ignore_ascii_case(e)) {
                         results.push(path);
                         if find_first {
                             return; // Exit immediately if we only want the first match
@@ -226,7 +227,6 @@ fn get_attribute(info_file: &Path, attribute: &str) -> io::Result<String> {
             return Ok(line[attribute.len() + 1..].to_string());
         }
     }
-
     Ok(String::new())
 }
 
@@ -420,18 +420,19 @@ pub fn write_launch_command(kzi_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn find_all_kzi_files() -> Result<(Vec<PathBuf>, Vec<String>), SaveError> {
+// [UPDATED] Searches for both kzi and kzp
+pub fn find_all_game_files() -> Result<(Vec<PathBuf>, Vec<String>), SaveError> {
     let mut debug_log = Vec::new();
     let mount_dir = "/run/media/";
 
-    debug_log.push(format!("[Debug] Searching for .kzi files in '{}' (max depth: 2)...", mount_dir));
+    debug_log.push(format!("[Debug] Searching for .kzi and .kzp files in '{}' (max depth: 2)...", mount_dir));
 
-    // Directly search 2 levels deep from /run/media, just like the original script
-    match find_files_by_extension(mount_dir, "kzi", 2, false) {
+    // Search for both extensions
+    match find_files_by_extension(mount_dir, &["kzi", "kzp"], 2, false) {
         Ok(files) => {
             debug_log.push(format!("[Debug] Found {} potential game file(s).", files.len()));
             for (i, path) in files.iter().enumerate() {
-                debug_log.push(format!("[Debug]   {}: {}", i + 1, path.display()));
+                debug_log.push(format!("[Debug]    {}: {}", i + 1, path.display()));
             }
             Ok((files, debug_log))
         }
@@ -474,8 +475,25 @@ pub fn parse_kzi_file(kzi_path: &Path) -> Result<CartInfo, SaveError> {
 }
 
 // for debug game launch
+// [UPDATED] Added logic to handle .kzp files by invoking the wrapper script directly
 pub fn launch_game(cart_info: &CartInfo, kzi_path: &Path) -> std::io::Result<Child> {
-    // 1. Get the directory of the .kzi file (e.g., /run/media/fedora/dudelings_linux/)
+
+    // Check if this is a compressed package (.kzp)
+    if kzi_path.extension().map_or(false, |ext| ext.eq_ignore_ascii_case("kzp")) {
+        println!("[Debug] Launching compressed package directly via kazeta wrapper: {}", kzi_path.display());
+
+        // We cannot use standard 'Exec' logic because the exec path is inside the image.
+        // We just tell the wrapper script to handle this package.
+        let mut command = Command::new("/usr/bin/kazeta");
+        command.arg(kzi_path);
+
+        return command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    }
+
+    // --- Standard Folder-Based Launch Logic (.kzi) ---
     let game_root = kzi_path.parent().unwrap();
 
     println!("[Debug] Game Root: {}", game_root.display());
@@ -503,23 +521,10 @@ pub fn launch_game(cart_info: &CartInfo, kzi_path: &Path) -> std::io::Result<Chi
 }
 
 /// Searches for files with a given extension within a directory up to a specified depth
-///
-/// # Arguments
-/// * `dir` - The directory to search in
-/// * `extension` - The file extension to search for (without the dot, e.g., "txt", "rs")
-/// * `max_depth` - Maximum depth to search (0 = only current directory)
-/// * `find_first` - If true, stops after finding the first match
-///
-/// # Returns
-/// * `Result<Vec<PathBuf>, io::Error>` - Vector of found file paths or an error
-///
-/// # Note
-/// This function ignores permission errors and other I/O errors for individual files/directories
-/// and continues searching. It only returns an error if the initial directory is inaccessible.
-/// Searches breadth-first (higher level directories first).
+/// [UPDATED] 'extension' argument changed to 'extensions' (slice of &str)
 pub fn find_files_by_extension<P: AsRef<Path>>(
     dir: P,
-    extension: &str,
+    extensions: &[&str],
     max_depth: usize,
     find_first: bool,
 ) -> Result<Vec<PathBuf>, io::Error> {
@@ -537,7 +542,7 @@ pub fn find_files_by_extension<P: AsRef<Path>>(
     fs::read_dir(dir_path)?;
 
     let mut results = Vec::new();
-    search_breadth_first(dir_path, extension, max_depth, find_first, &mut results);
+    search_breadth_first(dir_path, extensions, max_depth, find_first, &mut results);
     Ok(results)
 }
 
@@ -659,6 +664,7 @@ pub fn has_save_dir(drive_name: &str) -> bool {
     Path::new(&save_dir).exists()
 }
 
+// [UPDATED] Logic now checks for both kzi and kzp
 pub fn is_cart(drive_name: &str) -> bool {
     if drive_name == "internal" {
         return false;
@@ -667,7 +673,7 @@ pub fn is_cart(drive_name: &str) -> bool {
     let save_dir = get_save_dir_from_drive_name(drive_name);
     let mount_point: String = Path::new(&save_dir).parent().unwrap().parent().unwrap().display().to_string();
 
-    if let Ok(files) = find_files_by_extension(mount_point, "kzi", 1, true) {
+    if let Ok(files) = find_files_by_extension(mount_point, &["kzi", "kzp"], 1, true) {
         if files.len() > 0 {
             return true;
         }
@@ -676,8 +682,9 @@ pub fn is_cart(drive_name: &str) -> bool {
     false
 }
 
+// [UPDATED] Logic now checks for both kzi and kzp
 pub fn is_cart_connected() -> bool {
-    if let Ok(files) = find_files_by_extension("/run/media", "kzi", 2, true) {
+    if let Ok(files) = find_files_by_extension("/run/media", &["kzi", "kzp"], 2, true) {
         if files.len() > 0 {
             return true;
         }
