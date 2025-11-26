@@ -63,9 +63,6 @@ mod video;
 - add option to safely unmount cart in main menu
 - support for local multiplayer (i.e. add support for controllers 2-4)
 
-Hard
-- MP4 support for background videos?
-
 Maybe
 - built-in AppImage updater for things like RetroArch, Slippi, Project+, Ship of Harkinian, etc.
 
@@ -83,23 +80,18 @@ Maybe
 // CONSTANTS
 // ===================================
 
+// FEATURE FLAGS
 #[cfg(feature = "dev")]
 pub const DEV_MODE: bool = true; // run with "cargo run --release --features dev"
 
 #[cfg(not(feature = "dev"))]
 pub const DEV_MODE: bool = false;
 
-#[cfg(feature = "debug_game")]
-pub const DEBUG_GAME_LAUNCH: bool = true; // run with "cargo run --release --features debug_game"
-
-#[cfg(not(feature = "debug_game"))]
-pub const DEBUG_GAME_LAUNCH: bool = false;
-
 macro_rules! ver { () => { "1.43" } } // Define the version number here
-#[cfg(feature = "debug_version")]
-const VERSION_NUMBER: &str = concat!("V", ver!(), "d.KAZETA+"); // The compiler constructs the string for you
+#[cfg(feature = "dev")]
+const VERSION_NUMBER: &str = concat!("V", ver!(), "d.KAZETA+");
 
-#[cfg(not(feature = "debug_version"))]
+#[cfg(not(feature = "dev"))]
 const VERSION_NUMBER: &str = concat!("V", ver!(), ".KAZETA+");
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
@@ -546,10 +538,8 @@ async fn main() {
 
     if DEV_MODE {
         println!("DEV MODE enabled");
-    }
-
-    if DEBUG_GAME_LAUNCH {
-        println!("DEBUG_GAME_LAUNCH enabled");
+    } else {
+        println!("DEV MODE disabled, we're in production mode")
     }
 
     let mut dialogs: Vec<Dialog> = Vec::new();
@@ -1236,7 +1226,7 @@ async fn main() {
                     if let Some((cart_info, kzi_path)) = available_games.get(game_selection) {
                         sound_effects.play_select(&config);
 
-                        if DEBUG_GAME_LAUNCH {
+                        if DEV_MODE {
                             // --- DEBUG MODE ---
                             log_messages.lock().unwrap().clear();
                             { // Scoped lock to add messages

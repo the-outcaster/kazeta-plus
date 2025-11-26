@@ -1,5 +1,5 @@
 use crate::{
-    Screen, UIFocus, InputState, copy_session_logs_to_sd, trigger_session_restart, start_log_reader, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, text_disabled, DEBUG_GAME_LAUNCH, FLASH_MESSAGE_DURATION, FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, ShakeTarget, save, StorageMediaState, VideoPlayer,
+    Screen, UIFocus, InputState, copy_session_logs_to_sd, trigger_session_restart, start_log_reader, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, text_disabled, DEV_MODE, FLASH_MESSAGE_DURATION, FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, ShakeTarget, save, StorageMediaState, VideoPlayer,
     audio::SoundEffects,
     config::Config,
     types::{AnimationState, BackgroundState, BatteryInfo, MenuPosition},
@@ -124,7 +124,7 @@ pub fn update(
                                     let (cart_info, kzi_path) = games.remove(0);
                                     sound_effects.play_select(&config);
 
-                                    if DEBUG_GAME_LAUNCH {
+                                    if DEV_MODE {
                                         { // Scoped lock to add messages
                                             let mut logs = log_messages.lock().unwrap();
                                             logs.push("--- CARTRIDGE FOUND ---".to_string());
