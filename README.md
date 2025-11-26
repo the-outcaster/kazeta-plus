@@ -1,5 +1,5 @@
 # Kazeta+
-The "overly complex" fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project.
+The "overly complex" fork of the original [Kazeta](https://github.com/kazetaos/kazeta) project that features several enhancements, QoL improvements, and bug fixes.
 
 Features:
 - [multi-cart support](https://github.com/the-outcaster/kazeta-plus/wiki/Multi%E2%80%90Cart-Logic)
@@ -20,6 +20,7 @@ Improvements:
 - no need to store runtimes on your removable media; runtimes can be downloaded directly to the hard drive in the BIOS for faster load times, while also saving space on your disc/removable media
 - easier troubleshooting thanks to a button on the main menu to copy the session logs over to the user's SD card, as opposed to having to copy them manually via the terminal
 - error screen that reads off the session log in the event a cart failed to load
+- compressed `.kzp` EROFS image support for games to save disk space and simplify the way games are packaged/transferred
 
 Fixes:
 - fixes for missing fonts in certain applications (and may even fix apps that only had a black screen)
@@ -28,3 +29,5 @@ Fixes:
 ![Kazeta+ About page](https://i.imgur.com/kQiAVvc.png)
 
 Check the [Wiki](https://github.com/the-outcaster/kazeta-plus/wiki/Installation) for installation instructions.
+
+Kazeta+ brought to you by [Linux Gaming Central](https://linuxgamingcentral.org/). Original concept by Alkazar.
