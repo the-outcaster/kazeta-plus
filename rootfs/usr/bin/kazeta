@@ -54,31 +54,22 @@ function start_playtime_capture {
 	done
 }
 
-# old cart logic
-<<COMMENT
-# Check if a specific .kzi file was passed as an argument
+# Check if a specific .kzi file was passed as an argument (in the BIOS)
 if [ -n "$1" ] && [ -f "$1" ]; then
-	cart_info="$1"
-else
-	# If not, wait up to 2 seconds for any cart (original behavior)
-	for i in $(seq 1 20); do
-		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" | head -1)
-		if [[ -f "${cart_info}" ]]; then
-			break
-		else
-			sleep 0.1
-		fi
-	done
-fi
-COMMENT
+	filename=$(basename -- "$1")
+	extension="${filename##*.}"
 
-# Check if a specific .kzi file was passed as an argument
-# this new method checks to see if there are any .kzi files that have the default game boot option
-if [ -n "$1" ] && [ -f "$1" ]; then
-	cart_info="$1"
+	if [[ "$extension" == "kzp" ]]; then
+		echo "DEBUG: Specific .kzp package passed: $1"
+		cart_pkg="$1"
+		# We intentionally leave cart_info empty here;
+		# it will be filled after the package is mounted.
+	else
+		echo "DEBUG: Specific .kzi metadata passed: $1"
+		cart_info="$1"
+	fi
 else
-	# If not, wait up to 2 seconds for any cart
-	for i in $(seq 1 20); do
+	for i in $(seq 1 20); do # If not, wait up to 2 seconds for any cart
 		# First, try to find a "default" cart.
 		# We use -exec grep -l ... {} + which is efficient.
 		# It finds all *.kzi, greps them, and lists files that match.
@@ -87,34 +78,38 @@ else
 		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" -exec grep -l "^SetAsDefaultGame=true$" {} + 2>/dev/null | head -1)
 
 		if [ -f "$cart_info" ]; then
-			# Found a default cart. Break the loop.
-			echo "DEBUG: Found default cart: $cart_info"
+			echo "DEBUG: Found default cart: $cart_info" # Found a default cart. Break the loop.
 			break
 		fi
 
-		# If no default cart was found, try to find *any* cart (original behavior)
-		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" 2>/dev/null | head -1)
+		cart_info=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzi" 2>/dev/null | head -1) # If no default cart was found, try to find *any* cart (original behavior)
+		cart_pkg=$(find ${BASE_EXT} -maxdepth 2 -name "*.kzp" 2>/dev/null | head -1) # if no .kzi, find a .kzp
 
-		if [ -f "$cart_info" ]; then
-			# Found *a* cart (just not a default). Break the loop.
-			echo "DEBUG: Found first available cart: $cart_info"
+		if [[ -f "${cart_info}" ]] || [[ -f "${cart_pkg}" ]]; then
+			echo "DEBUG: Found first available cart." # Found *a* cart (just not a default). Break the loop.
 			break
 		else
-			# No .kzi files found at all. Sleep and try again.
-			sleep 0.1
+			sleep 0.1 # No .kzi files found at all. Sleep and try again.
 		fi
 	done
 fi
 
-if [[ ! -f "${cart_info}" ]]; then
-	# no cart found, start bios/memory management app
-	echo "DEBUG: No valid cart_info, launching BIOS."
-
+if [[ ! -f "${cart_info}" ]] && [[ ! -f "${cart_pkg}" ]]; then
+	echo "DEBUG: No valid cart_info, launching BIOS." # no cart found, start bios/memory management app
 	gamescope --filter pixel -- kazeta-bios
 	exit 0
 fi
 
-cart_path=$(dirname "${cart_info}")
+if [[ -f "${cart_pkg}" ]]; then
+	cart_path="${BASE_DIR}/run/pkg"
+	mkdir -p "${cart_path}"
+	sudo kazeta-mount kzp "${cart_pkg}" "${cart_path}"
+	cart_info=$(find "${cart_path}" -maxdepth 2 -name "*.kzi" | head -1)
+	media_path=$(dirname "${cart_pkg}")
+else
+	cart_path=$(dirname "${cart_info}")
+	media_path="${cart_path}"
+fi
 cart_id="$(get_attribute 'Id' ${cart_info})"
 cart_icon="${cart_path}/$(get_attribute 'Icon' ${cart_info})"
 
@@ -133,25 +128,6 @@ if [[ ! -d "${upper}" ]]; then
 	rm -f "${upper}"
 	mkdir -p "${upper}"
 fi
-
-# old runtime block
-<<COMMENT
-runtime_name="$(get_attribute 'Runtime' ${cart_info})"
-if [ -n "$runtime_name" ]; then
-	runtime="${cart_path}/${runtime_name}"
-	if [ ! -f "$runtime" ]; then
-		runtime="${cart_path}/${runtime_name}.kzr"
-		if [ ! -f "$runtime" ]; then
-			runtime="$(ls ${cart_path}/${runtime_name}-*.kzr)"
-			if [ ! -f "$runtime" ]; then
-				runtime="/usr/share/kazeta/runtimes/none.kzr"
-			fi
-		fi
-	fi
-else
-	runtime="/usr/share/kazeta/runtimes/none.kzr"
-fi
-COMMENT
 
 # --- Helper function to find a runtime in a given directory ---
 # Usage: runtime_path=$(find_runtime "name_to_find" "/path/to/search")
@@ -180,7 +156,8 @@ function find_runtime {
 
 # --- Define runtime paths ---
 SYSTEM_RUNTIME_DIR="/usr/share/kazeta/runtimes"
-DVD_RUNTIME_DIR="${cart_path}" # This path is already defined earlier in the script
+MOUNTED_GAME_DIR="${cart_path}" # inside the .kzp or folder
+PHYSICAL_MEDIA_DIR="${media_path}" # the SD card or folder containing the .kzp
 DEFAULT_RUNTIME="${SYSTEM_RUNTIME_DIR}/none.kzr"
 
 runtime_name="$(get_attribute 'Runtime' ${cart_info})"
@@ -189,24 +166,28 @@ runtime="" # Initialize as empty
 if [ -n "$runtime_name" ]; then
 	echo "DEBUG: Runtime requested: '$runtime_name'"
 
-	# --- 1. Check Internal Drive (Priority 1) ---
+	# --- 1. Check Internal Drive (/usr/share/kazeta/runtimes) (priority 1) ---
 	echo "DEBUG: Checking for runtime on internal drive..."
 	runtime=$(find_runtime "$runtime_name" "$SYSTEM_RUNTIME_DIR")
 
-	# --- 2. Check DVD (Fallback) ---
-	if [ -z "$runtime" ]; then # -z checks if the string is empty (not found)
-		echo "DEBUG: Runtime not found internally. Checking DVD drive ($DVD_RUNTIME_DIR)..."
-		runtime=$(find_runtime "$runtime_name" "$DVD_RUNTIME_DIR")
-
-		if [ -n "$runtime" ]; then
-			echo "DEBUG: Found runtime on DVD. Load times may be slow."
-		fi
+	# --- 2. Check physical media (/run/media/<name-of-removable-media-label>) (fallback) ---
+	if [ -z "$runtime" ] && [ -n "$PHYSICAL_MEDIA_DIR" ]; then # -z checks if the string is empty (not found)
+		echo "DEBUG: Runtime not found internally. Checking media source ($PHYSICAL_MEDIA_DIR)..."
+		runtime=$(find_runtime "$runtime_name" "$PHYSICAL_MEDIA_DIR")
 	fi
 
-	# --- 3. Set Default (if still not found) ---
+	# --- 3. Check game folder/mounted image (/run/pkg inside of .kzp) (fallback #2) ---
 	if [ -z "$runtime" ]; then
-		echo "WARNING: Runtime '$runtime_name' not found in $SYSTEM_RUNTIME_DIR or $DVD_RUNTIME_DIR. Defaulting to 'none'."
+		echo "DEBUG: Runtime not found on media. Checking inside game mount ($MOUNTED_GAME_DIR)..."
+		runtime=$(find_runtime "$runtime_name" "$MOUNTED_GAME_DIR")
+	fi
+
+	# --- 4. Set default (if still not found) ---
+	if [ -z "$runtime" ]; then
+		echo "WARNING: Runtime '$runtime_name' not found anywhere. Defaulting to 'none'."
 		runtime="$DEFAULT_RUNTIME"
+	else
+		echo "DEBUG: Runtime found: $runtime"
 	fi
 else
 	# No runtime specified, use 'none'
@@ -216,28 +197,10 @@ fi
 
 # Final check in case 'none.kzr' is missing
 if [ ! -f "$runtime" ]; then
-	echo "CRITICAL: Runtime file '$runtime' not found! The system may fail to mount."
-	# We still pass the path to kazeta-mount, which will then fail.
+	echo "CRITICAL: Runtime file '$runtime' not found! The system may fail to mount." # We still pass the path to kazeta-mount, which will then fail.
 fi
 
 echo "DEBUG: Using runtime: $runtime"
-
-# old mounting filesystem block
-<<COMMENT
-# saving this in case I need it for later:
-# 	rm -f /tmp/kazeta_game.pid; \
-#	rm -rf "${upper}/.kazeta/share"; \
-#	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
-runtimedir="${BASE_DIR}/run/runtime"
-sudo kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
-trap "\
-	popd; \
-	sudo kazeta-mount --unmount "${target}" "${runtimedir}"; \
-	rm -rf "${work}"; \
-	rm -rf "${upper}/.kazeta/share"; \
-	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
-" EXIT
-COMMENT
 
 # --- Mount the filesystem ---
 runtimedir="${BASE_DIR}/run/runtime"
@@ -251,24 +214,13 @@ post_exec_cmd=$(get_attribute 'PostExec' ${cart_info})
 
 # Now build the trap. ${post_exec_cmd} will be safely empty
 # or it will be "some_command;"
-<<COMMENT
-trap "\
-	popd; \
-	echo 'DEBUG: Running PostExec cleanup...'; \
-	${post_exec_cmd} \
-	sudo kazeta-mount --unmount "${target}" "${runtimedir}"; \
-	sudo rm -rf "${work}"; \
-	sudo rm -rf "${upper}/.kazeta/share"; \
-	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
-" EXIT
-COMMENT
-
 trap "\
 	if [ -n \"\$PLAYTIME_PID\" ]; then kill \"\$PLAYTIME_PID\" 2>/dev/null; fi; \
 	popd; \
 	echo 'DEBUG: Running PostExec cleanup...'; \
 	${post_exec_cmd} \
 	sudo kazeta-mount --unmount "${target}" "${runtimedir}"; \
+	sudo kazeta-mount kzp --unmount "${cart_path}"; \
 	sudo rm -rf "${work}"; \
 	sudo rm -rf "${upper}/.kazeta/share"; \
 	rmdir --ignore-fail-on-non-empty "${upper}/.kazeta"; \
@@ -338,7 +290,7 @@ if [ $EXIT_CODE -ne 0 ] && [ $DURATION -lt $CRASH_THRESHOLD ]; then
 		kill "$PLAYTIME_PID" 2>/dev/null
 	fi
 
-	PHYSICAL_LOG_PATH="/var/kazeta/saves/default/${cart_id}.kazeta/var/run.log"
+	PHYSICAL_LOG_PATH="/var/kazeta/saves/default/${cart_id}/.kazeta/var/run.log"
 
 	echo "" >> /var/kazeta/session.log
 	echo "========== [KAZETA+] GAME LAUNCH FAILURE ==========" >> /var/kazeta/session.log
