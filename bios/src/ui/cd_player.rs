@@ -1,3 +1,11 @@
+use crate::{
+    audio::SoundEffects,
+    cd_player_backend::{CdPlayerBackend, PlayerStatus},
+    config::Config,
+    types::{AnimationState, BackgroundState, Screen},
+    ui::text_with_color,
+    render_background, get_current_font, measure_text, text_with_config_color, InputState, VideoPlayer,
+};
 use macroquad::prelude::*;
 use rodio::Sink;
 use std::{
@@ -5,14 +13,6 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
     thread,
-};
-use crate::{
-    audio::SoundEffects,
-    cd_player_backend::{CdPlayerBackend, PlayerStatus},
-    config::Config,
-    types::{AnimationState, BackgroundState, Screen},
-    ui::text_with_color,
-    render_background, get_current_font, measure_text, text_with_config_color, InputState,
 };
 
 const TRACK_FONT_SIZE: u16 = 16;
@@ -217,6 +217,7 @@ pub fn draw(
     ui_state: &mut CdPlayerUiState,
     animation_state: &AnimationState,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
@@ -230,7 +231,7 @@ pub fn draw(
     let current_font = get_current_font(font_cache, config);
 
     // --- Common UI ---
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
 
     let mut y_pos = 50.0 * scale_factor;

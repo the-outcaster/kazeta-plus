@@ -7,7 +7,7 @@ use crate::{
     types::{AnimationState, BackgroundState, BatteryInfo, Screen},
     ui::text_with_color,
     render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color,
-    FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, InputState,
+    FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, InputState, VideoPlayer,
 };
 
 pub const EXTRAS_MENU_OPTIONS: &[&str] = &[
@@ -62,6 +62,7 @@ pub fn draw(
     animation_state: &AnimationState,
     logo_cache: &HashMap<String, Texture2D>,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
@@ -70,7 +71,7 @@ pub fn draw(
     gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
 ) {
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
 
     // dim the background for easier legibility
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
@@ -123,12 +124,5 @@ pub fn draw(
         } else {
             text_with_config_color(font_cache, config, option, x_pos, y_pos, font_size);
         }
-
-        /*
-        // Draw text
-        let slot_center_y = y_pos + (menu_option_height / 2.0);
-        let y_pos_text = slot_center_y + (text_dims.offset_y / 2.0);
-        text_with_config_color(font_cache, config, option, x_pos, y_pos_text, font_size);
-        */
     }
 }

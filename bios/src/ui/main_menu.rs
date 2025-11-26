@@ -1,3 +1,10 @@
+use crate::{
+    Screen, UIFocus, InputState, copy_session_logs_to_sd, trigger_session_restart, start_log_reader, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, text_disabled, DEBUG_GAME_LAUNCH, FLASH_MESSAGE_DURATION, FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, ShakeTarget, save, StorageMediaState, VideoPlayer,
+    audio::SoundEffects,
+    config::Config,
+    types::{AnimationState, BackgroundState, BatteryInfo, MenuPosition},
+    ui::text_with_color,
+};
 use macroquad::prelude::*;
 use rodio::{buffer::SamplesBuffer, Sink};
 use std::{
@@ -5,13 +12,6 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
     sync::atomic::Ordering,
-};
-use crate::{
-    Screen, UIFocus, InputState, copy_session_logs_to_sd, trigger_session_restart, start_log_reader, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, text_disabled, DEBUG_GAME_LAUNCH, FLASH_MESSAGE_DURATION, FONT_SIZE, MENU_PADDING, MENU_OPTION_HEIGHT, ShakeTarget, save, StorageMediaState,
-    audio::SoundEffects,
-    config::Config,
-    types::{AnimationState, BackgroundState, BatteryInfo, MenuPosition},
-    ui::text_with_color,
 };
 
 pub const MAIN_MENU_OPTIONS: &[&str] = &["DATA", "PLAY", "COPY SESSION LOGS", "SETTINGS", "EXTRAS", "ABOUT"];
@@ -257,13 +257,14 @@ pub fn draw(
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     battery_info: &Option<BatteryInfo>,
     current_time_str: &str,
     gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
     flash_message: Option<&str>,
 ) {
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, gcc_adapter_poll_rate, scale_factor);
 
     // --- Define layout constants ---

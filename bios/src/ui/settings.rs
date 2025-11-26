@@ -1,20 +1,18 @@
-use macroquad::prelude::*;
-use rodio::{buffer::SamplesBuffer, Sink};
-use std::collections::HashMap;
-use std::process::Command;
-use std::thread;
-
-// Import things from our new modules
-use crate::audio::{SoundEffects, play_new_bgm};
-use crate::config::Config;
-use crate::system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness};
-use crate::utils::{apply_resolution, trim_extension};
-
-// Import types/structs/constants that are still in main.rs
 use crate::{
     AnimationState, AudioSink, BackgroundState, BatteryInfo, InputState, Screen,
     render_background, render_ui_overlay, get_current_font, measure_text,
-    text_with_config_color, DEV_MODE, theme, text_with_color,
+    text_with_config_color, DEV_MODE, theme, text_with_color, VideoPlayer,
+    audio::{SoundEffects, play_new_bgm},
+    config::Config,
+    system::{adjust_system_volume, get_system_volume, set_brightness, get_current_brightness},
+    utils::{apply_resolution, trim_extension},
+};
+use macroquad::prelude::*;
+use rodio::{buffer::SamplesBuffer, Sink};
+use std::{
+    collections::HashMap,
+    process::Command,
+    thread,
 };
 
 const FONT_SIZE: u16 = 10;
@@ -128,6 +126,7 @@ pub fn render_settings_page(
     options: &[&str],
     logo_cache: &HashMap<String, Texture2D>,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &mut Config,
     selection: usize,
@@ -151,14 +150,12 @@ pub fn render_settings_page(
     // get currently selected font at start
     let current_font = get_current_font(font_cache, config);
 
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
 
     // dim the background for easier legibility
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
 
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, gcc_adapter_poll_rate, scale_factor);
-
-    //render_debug_info(config);
 
     // Loop through and draw all settings options
     for (i, label_text) in options.iter().enumerate() {
@@ -170,37 +167,6 @@ pub fn render_settings_page(
         let text_y = y_pos_base + (settings_option_height / 2.0) + (value_dims.offset_y * 0.5);
 
         let is_selected = i == selection;
-
-        /*
-        // --- Draw the highlight rectangle if this item is selected ---
-        if i == selection {
-            let cursor_color = animation_state.get_cursor_color(config);
-            let cursor_scale = animation_state.get_cursor_scale();
-            //let value_dims = measure_text(&value_text.to_uppercase(), Some(current_font), FONT_SIZE as u16, 1.0);
-
-            let base_width = value_dims.width + (menu_padding * 2.0);
-            let base_height = value_dims.height + (menu_padding * 2.0);
-            let scaled_width = base_width * cursor_scale;
-            let scaled_height = base_height * cursor_scale;
-            let offset_x = (scaled_width - base_width) / 2.0;
-            let offset_y = (scaled_height - base_height) / 2.0;
-
-            let value_x = screen_width() - value_dims.width - right_margin;
-            //let rect_x = value_x - MENU_PADDING - offset_x;
-            let rect_x = value_x - menu_padding;
-            //let rect_y = y_pos_base - 7.0 - offset_y;
-            let rect_y = y_pos_base + (settings_option_height / 2.0) - (base_height / 2.0);
-            //draw_rectangle_lines(rect_x, rect_y, scaled_width, scaled_height / 1.5, 4.0, cursor_color);
-            draw_rectangle_lines(rect_x - offset_x, rect_y - offset_y, scaled_width, scaled_height, 4.0 * scale_factor, cursor_color);
-        }
-
-        // --- Draw the text ---
-        let value_x = screen_width() - value_dims.width - right_margin;
-        let text_y = y_pos_base + (settings_option_height / 2.0) + (value_dims.offset_y * 0.5);
-
-        text_with_config_color(font_cache, config, label_text, left_margin, text_y, font_size);
-        text_with_config_color(font_cache, config, &value_text, value_x, text_y, font_size);
-        */
 
         // 1. Handle Box Drawing (Only if selected AND style is BOX)
         if is_selected && config.cursor_style == "BOX" {
@@ -350,10 +316,8 @@ pub fn update(
     brightness: &mut f32,
     system_volume: &mut f32,
     available_sinks: &Vec<AudioSink>,
-    //current_bgm: &mut Option<Sound>,
     current_bgm: &mut Option<Sink>,
     bgm_choices: &Vec<String>,
-    //music_cache: &HashMap<String, Sound>,
     music_cache: &HashMap<String, SamplesBuffer>,
     sfx_pack_to_reload: &mut Option<String>,
     logo_choices: &Vec<String>,

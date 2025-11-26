@@ -1,19 +1,19 @@
-use macroquad::prelude::*;
-use regex::Regex;
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::fs;
-use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use std::process::{Command, exit};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
-
 use crate::{
     audio::SoundEffects,
     config::Config,
-    FONT_SIZE, VERSION_NUMBER, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text,
+    FONT_SIZE, VERSION_NUMBER, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text, VideoPlayer,
+};
+use macroquad::prelude::*;
+use regex::Regex;
+use serde::Deserialize;
+use std::{
+    fs, thread,
+    collections::HashMap,
+    io::{self, Write},
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    process::{Command, exit},
+    sync::mpsc::{channel, Receiver, Sender},
 };
 
 // --- State Management & Structs ---
@@ -204,12 +204,13 @@ pub fn update(
 pub fn draw(
     state: &mut UpdateCheckerState,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
     scale_factor: f32,
 ) {
-    render_background(&background_cache, &config, background_state);
+    render_background(&background_cache, video_cache, &config, background_state);
     let font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
     let line_height = font_size as f32 * 1.5;

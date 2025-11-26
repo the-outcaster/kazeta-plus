@@ -1,11 +1,11 @@
-use macroquad::prelude::*;
-use std::collections::HashMap;
-
 use crate::{
+    VideoPlayer,
     audio::SoundEffects,
     config::Config, FONT_SIZE, SystemInfo, Screen, BackgroundState, BatteryInfo, render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color, InputState,
     system::get_ip_address,
 };
+use macroquad::prelude::*;
+use std::collections::HashMap;
 
 pub fn update(
     input_state: &InputState,
@@ -23,6 +23,7 @@ pub fn draw(
     system_info: &SystemInfo,
     logo_cache: &HashMap<String, Texture2D>,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
@@ -31,7 +32,7 @@ pub fn draw(
     gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
 ) {
-    render_background(&background_cache, &config, background_state);
+    render_background(&background_cache, video_cache, &config, background_state);
 
     // Dim the background to improve text readability
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
@@ -79,7 +80,6 @@ pub fn draw(
         let dims = measure_text(line, Some(current_font), about_font_size, 1.0);
         let x_pos = screen_width() / 2.0 - dims.width / 2.0;
 
-        // --- MODIFIED: Use the new shadow text function here as well ---
         text_with_config_color(
             font_cache, config, line,
             x_pos, current_y,

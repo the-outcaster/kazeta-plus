@@ -1,26 +1,26 @@
-use bluer::{AdapterEvent, Result, Session, DiscoveryFilter};
-use bluer::agent::{
-    Agent, RequestAuthorization, RequestConfirmation, RequestPasskey, RequestPinCode,
+use bluer::{
+    AdapterEvent, Result, Session, DiscoveryFilter,
+    agent::{Agent, RequestAuthorization, RequestConfirmation, RequestPasskey, RequestPinCode},
 };
-use futures::StreamExt;
-use macroquad::prelude::*;
-use std::collections::HashMap;
-use std::result::Result as StdResult; // Good, keep this
-use std::thread;
-use tokio::runtime::Runtime;
-use tokio::time::{sleep, Duration};
-use tokio::sync::mpsc::{
-    unbounded_channel as tokio_channel, UnboundedReceiver as TokioReceiver,
-    UnboundedSender as TokioSender,
-};
-
 use crate::{
     audio::SoundEffects,
     config::Config,
     types::{AnimationState, BackgroundState, BatteryInfo, Screen},
     ui::text_with_color,
     render_background, render_ui_overlay, get_current_font, measure_text, text_with_config_color,
-    FONT_SIZE, InputState, DEV_MODE,
+    FONT_SIZE, InputState, DEV_MODE, VideoPlayer,
+};
+use futures::StreamExt;
+use macroquad::prelude::*;
+use std::{
+    thread,
+    collections::HashMap,
+    result::Result as StdResult,
+};
+use tokio::{
+    runtime::Runtime,
+    sync::mpsc::{unbounded_channel as tokio_channel, UnboundedReceiver as TokioReceiver, UnboundedSender as TokioSender},
+    time::{sleep, Duration},
 };
 
 // ===================================
@@ -208,6 +208,7 @@ pub fn draw(
     animation_state: &AnimationState,
     logo_cache: &HashMap<String, Texture2D>,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
@@ -216,7 +217,7 @@ pub fn draw(
     gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
 ) {
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
 
     // dim the background for easier legibility
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));

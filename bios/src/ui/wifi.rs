@@ -1,15 +1,15 @@
+use crate::{
+    text_with_config_color, get_current_font, DEV_MODE, VideoPlayer,
+    audio::SoundEffects,
+    config::Config, FONT_SIZE, Screen, BackgroundState, render_background, measure_text, InputState,
+    ui::text_with_color,
+};
 use macroquad::prelude::*;
 use std::{
     collections::HashMap,
     process::Command,
     sync::mpsc::{channel, Receiver, Sender},
     thread,
-};
-use crate::{
-    text_with_config_color, get_current_font, DEV_MODE,
-    audio::SoundEffects,
-    config::Config, FONT_SIZE, Screen, BackgroundState, render_background, measure_text, InputState,
-    ui::text_with_color,
 };
 
 // Define the keyboard layout
@@ -291,12 +291,13 @@ pub fn draw(
     wifi_state: &WifiState,
     animation_state: &mut crate::AnimationState,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
     scale_factor: f32,
 ) {
-    render_background(&background_cache, &config, background_state);
+    render_background(&background_cache, video_cache, &config, background_state);
 
     let font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;

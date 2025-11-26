@@ -1,9 +1,10 @@
-// Add necessary imports for the shared functions
-use crate::config::Config;
-use crate::memory::{get_game_playtime, get_game_size};
-use crate::{string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
+use crate::{
+    string_to_color, FONT_SIZE, BatteryInfo, MenuPosition, VERSION_NUMBER, BackgroundState, COLOR_TARGETS, UI_BG_COLOR,
     save, PathBuf, AnimationState, RECT_COLOR, Memory, Arc, Mutex, PlaytimeCache, SizeCache, TILE_SIZE,
     PADDING, GRID_OFFSET, GRID_WIDTH, ShakeTarget, Dialog, CopyOperationState, UI_BG_COLOR_DIALOG,
+    config::Config,
+    memory::{get_game_playtime, get_game_size},
+    video::VideoPlayer,
 };
 use macroquad::prelude::*;
 use std::collections::HashMap;
@@ -25,13 +26,46 @@ pub mod wifi;
 // SCREEN RENDERING
 // ===================================
 
-// BACKGROUND
+// OLD BACKGROUND RENDERING
+/*
 pub fn render_background(
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     config: &Config,
     state: &mut BackgroundState,
 ) {
-    if let Some(background_texture) = background_cache.get(&config.background_selection) {
+    if config.background_selection.ends_with(".mp4") { // check if it's a video
+        if let Some(player) = video_cache.get_mut(&config.background_selection) {
+            // We need to calculate an elapsed time for the video.
+            // Since we don't track "when did this background start",
+            // we'll just use the modulo of global time vs duration.
+            // This effectively loops the time signal sent to the player.
+            let loop_time = get_time() % player.duration_secs;
+
+            // Check if we wrapped around (loop start)
+            if loop_time < 0.1 {
+                player.reset();
+            }
+
+            player.update(loop_time);
+
+            let tint_color = if config.color_shift_speed == "OFF" { WHITE } else { state.bg_color };
+
+            draw_texture_ex(
+                &player.texture,
+                0.0,
+                0.0,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(screen_width(), screen_height())),
+                    ..Default::default()
+                },
+            );
+        }
+        // If video fails to load/find, fall through? Or just draw black?
+        // Ideally fallback to default image, but for now it will just show UI_BG color.
+    }
+    if let Some(background_texture) = background_cache.get(&config.background_selection) { // check if it's an image
         let tint_color = if config.color_shift_speed == "OFF" {
             WHITE
         } else {
@@ -105,7 +139,107 @@ pub fn render_background(
         clear_background(UI_BG_COLOR);
     }
 }
+*/
+pub fn render_background(
+    background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
+    config: &Config,
+    state: &mut BackgroundState,
+) {
+    // 1. Try to draw Video
+    if config.background_selection.ends_with(".mp4") {
+        if let Some(player) = video_cache.get_mut(&config.background_selection) {
+            let loop_time = get_time() % player.duration_secs;
+            if loop_time < 0.1 {
+                player.reset();
+            }
+            player.update(loop_time);
 
+            let tint_color = if config.color_shift_speed == "OFF" { WHITE } else { state.bg_color };
+
+            draw_texture_ex(
+                &player.texture,
+                0.0, 0.0,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(screen_width(), screen_height())),
+                    ..Default::default()
+                },
+            );
+
+            // [!] IMPORTANT: Return early so we don't run the image logic
+            // or clear the screen over the video.
+            // We still want to run color shifting logic? No, that's handled inside the draw.
+            // Wait, the color shift update logic (updating state.bg_color) is at the bottom.
+            // We should probably move that logic *before* drawing or duplicate it?
+            // Actually, let's keep the structure simple:
+            update_color_shift(config, state); // Helper function we'll extract
+            return;
+        }
+    }
+
+    // 2. Try to draw Image
+    if let Some(background_texture) = background_cache.get(&config.background_selection) {
+        let tint_color = if config.color_shift_speed == "OFF" { WHITE } else { state.bg_color };
+
+        if config.background_scroll_speed == "OFF" {
+            // Static
+            draw_texture_ex(
+                background_texture, 0.0, 0.0, tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(screen_width(), screen_height())),
+                            ..Default::default()
+                },
+            );
+        } else {
+            // Scrolling
+            let speed = match config.background_scroll_speed.as_str() {
+                "SLOW" => 0.05, "NORMAL" => 0.1, "FAST" => 0.2, _ => 0.0
+            };
+            let aspect_ratio = background_texture.width() / background_texture.height();
+            let scaled_height = screen_height();
+            let scaled_width = scaled_height * aspect_ratio;
+            let params = DrawTextureParams {
+                dest_size: Some(vec2(scaled_width, scaled_height)),
+                ..Default::default()
+            };
+
+            state.bgx = (state.bgx + speed) % scaled_width;
+            draw_texture_ex(background_texture, state.bgx - scaled_width, 0.0, tint_color, params.clone());
+            draw_texture_ex(background_texture, state.bgx, 0.0, tint_color, params);
+        }
+
+        update_color_shift(config, state);
+        return;
+    }
+
+    // 3. Fallback (Clear to Black/Grey)
+    clear_background(UI_BG_COLOR);
+    update_color_shift(config, state);
+}
+
+// Extracts the color math so we can call it from any branch
+fn update_color_shift(config: &Config, state: &mut BackgroundState) {
+    let transition_speed = match config.color_shift_speed.as_str() {
+        "SLOW" => 0.05, "NORMAL" => 0.1, "FAST" => 0.2, _ => 0.0,
+    };
+
+    if transition_speed > 0.0 {
+        let frame_time = get_frame_time();
+        state.bg_color.r += (state.tg_color.r - state.bg_color.r) * transition_speed * frame_time;
+        state.bg_color.g += (state.tg_color.g - state.bg_color.g) * transition_speed * frame_time;
+        state.bg_color.b += (state.tg_color.b - state.bg_color.b) * transition_speed * frame_time;
+
+        let red_done = (state.bg_color.r - state.tg_color.r).abs() < 0.01;
+        let green_done = (state.bg_color.g - state.tg_color.g).abs() < 0.01;
+        let blue_done = (state.bg_color.b - state.tg_color.b).abs() < 0.01;
+
+        if red_done && green_done && blue_done {
+            state.target = (state.target + 1) % COLOR_TARGETS.len();
+            state.tg_color = COLOR_TARGETS[state.target];
+        }
+    }
+}
 
 // UI
 pub fn render_ui_overlay(
@@ -121,7 +255,6 @@ pub fn render_ui_overlay(
 
     let current_font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
-    let padding = 20.0 * scale_factor;
 
     // --- UPDATED: Dynamic Logo Drawing ---
     if config.logo_selection != "None" {
@@ -219,21 +352,27 @@ pub fn render_ui_overlay(
         );
     }
 
-    // --- Version Number Drawing (now fully dynamic) ---
+    // --- Version Number Drawing ---
     let version_dims = measure_text(VERSION_NUMBER, Some(current_font), font_size, 1.0);
+
+    // Define tighter margins specifically for the version text
+    // Reduced from 20.0 to 5.0 to push it into the corner
+    let version_margin = 5.0 * scale_factor;
+    let version_bottom_margin = 8.0 * scale_factor; // Slightly up from absolute bottom
 
     // If the menu is in the bottom-right, move the version to the bottom-left.
     let version_x = if config.menu_position == MenuPosition::BottomRight {
-        20.0 * scale_factor
+        20.0 * scale_factor // Keep standard padding on the left side
     } else {
-        screen_width() - version_dims.width - (20.0 * scale_factor)
+        screen_width() - version_dims.width - version_margin // Push it further to the right (closer to edge)
     };
+
     text_with_config_color(
         font_cache,
         config,
         VERSION_NUMBER,
-        version_x, // Position from right edge
-        screen_height() - padding, // Position from bottom edge
+        version_x,
+        screen_height() - version_bottom_margin, // Push it lower
         font_size,
     );
 }
@@ -247,6 +386,7 @@ pub fn render_game_selection_menu(
     animation_state: &AnimationState,
     logo_cache: &HashMap<String, Texture2D>,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
@@ -255,7 +395,7 @@ pub fn render_game_selection_menu(
     gcc_adapter_poll_rate: &Option<u32>,
     scale_factor: f32,
 ) {
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
     render_ui_overlay(logo_cache, font_cache, config, battery_info, current_time_str, gcc_adapter_poll_rate, scale_factor);
 
     const TILE_SIZE: f32 = 60.0;
@@ -342,18 +482,15 @@ pub fn render_debug_screen(
     config: &Config,
     scale_factor: f32,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     background_state: &mut BackgroundState,
 ) {
     // --- Render the screen ---
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
 
     let font_size = (12.0 * scale_factor) as u16;
     let line_height = font_size as f32 + (4.0 * scale_factor);
     let x_pos = 20.0 * scale_factor;
-    //let top_margin = 20.0 * scale_factor;
-
-    // Calculate how many lines can fit on the screen
-    //let max_lines = ((screen_height() - (top_margin * 2.0)) / line_height).floor() as usize;
 
     // Determine which part of the log to show
     let start_index = scroll_offset;

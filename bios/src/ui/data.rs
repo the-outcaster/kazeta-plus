@@ -2,7 +2,6 @@ use std::panic;
 use futures;
 use crate::{*, ui::dialog::*, memory::*}; // Use wildcards for convenience or specify each type
 use crate::audio::SoundEffects;
-//use macroquad::prelude::*;
 
 // This function will handle all input and state changes for the data screen
 pub async fn update(
@@ -354,7 +353,6 @@ pub async fn update(
 }
 
 // This function will handle all drawing for the data screen
-// this was originally fn render_data_view() from mod.rs
 pub fn draw(
     selected_memory: usize,
     memories: &Vec<Memory>,

@@ -1,16 +1,19 @@
-use macroquad::prelude::*;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::{fs, io, path::{Path, PathBuf}, process::Command, thread};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use toml;
-
 use crate::{
     audio::SoundEffects,
     config::{Config, get_user_data_dir},
-    FONT_SIZE, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text,
+    FONT_SIZE, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text, VideoPlayer,
 };
+use macroquad::prelude::*;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::{
+    fs, io, thread,
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    process::Command,
+    sync::mpsc::{channel, Receiver, Sender},
+};
+use toml;
 
 // --- CONSTANTS ---
 const ITEMS_PER_PAGE: usize = 5;
@@ -357,12 +360,13 @@ pub fn draw(
     state: &ThemeDownloaderState,
     animation_state: &mut crate::AnimationState,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
     scale_factor: f32,
 ) {
-    render_background(&background_cache, &config, background_state);
+    render_background(&background_cache, video_cache, &config, background_state);
 
     let font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;

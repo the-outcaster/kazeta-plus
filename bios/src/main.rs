@@ -95,11 +95,12 @@ pub const DEBUG_GAME_LAUNCH: bool = true; // run with "cargo run --release --fea
 #[cfg(not(feature = "debug_game"))]
 pub const DEBUG_GAME_LAUNCH: bool = false;
 
+macro_rules! ver { () => { "1.43" } } // Define the version number here
 #[cfg(feature = "debug_version")]
-const VERSION_NUMBER: &str = "V1.43d.KAZETA+";
+const VERSION_NUMBER: &str = concat!("V", ver!(), "d.KAZETA+"); // The compiler constructs the string for you
 
 #[cfg(not(feature = "debug_version"))]
-const VERSION_NUMBER: &str = "V1.43.KAZETA+";
+const VERSION_NUMBER: &str = concat!("V", ver!(), ".KAZETA+");
 
 const WINDOW_TITLE: &str = "Kazeta+ BIOS";
 const SCREEN_WIDTH: i32 = 640;
@@ -296,7 +297,7 @@ fn find_all_asset_files() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>, Vec<Path
     let mut music_files_set = HashSet::new();
 
     // 2. Gather system/default assets and add them to the sets
-    background_files_set.extend(utils::find_asset_files("../backgrounds", &["png"]));
+    background_files_set.extend(utils::find_asset_files("../backgrounds", &["png", "mp4"])); // add support for mp4 videos
     logo_files_set.extend(utils::find_asset_files("../logos", &["png"]));
     font_files_set.extend(utils::find_asset_files("../fonts", &["ttf"]));
     music_files_set.extend(utils::find_asset_files("../music", &["ogg", "wav"]));
@@ -304,7 +305,7 @@ fn find_all_asset_files() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>, Vec<Path
     // 3. Gather user-installed and theme assets
     if let Some(user_dir) = get_user_data_dir() {
         // Add assets from global user folders first
-        background_files_set.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png"]));
+        background_files_set.extend(utils::find_asset_files(&user_dir.join("backgrounds").to_string_lossy(), &["png", "mp4"]));
         logo_files_set.extend(utils::find_asset_files(&user_dir.join("logos").to_string_lossy(), &["png"]));
         font_files_set.extend(utils::find_asset_files(&user_dir.join("fonts").to_string_lossy(), &["ttf"]));
         music_files_set.extend(utils::find_asset_files(&user_dir.join("bgm").to_string_lossy(), &["ogg", "wav"]));
@@ -317,7 +318,7 @@ fn find_all_asset_files() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>, Vec<Path
                     let theme_path = entry.path();
 
                     // Find all assets within this theme folder just ONCE
-                    let theme_images = utils::find_asset_files(&theme_path.to_string_lossy(), &["png"]);
+                    let theme_images = utils::find_asset_files(&theme_path.to_string_lossy(), &["png", "mp4"]);
                     let theme_fonts = utils::find_asset_files(&theme_path.to_string_lossy(), &["ttf"]);
                     let theme_music = utils::find_asset_files(&theme_path.to_string_lossy(), &["wav", "ogg"]);
 
@@ -326,7 +327,7 @@ fn find_all_asset_files() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>, Vec<Path
                         if let Some(filename) = image_path.file_name().and_then(|s| s.to_str()) {
                             if filename.ends_with("_logo.png") {
                                 logo_files_set.insert(image_path);
-                            } else if filename.ends_with("_background.png") {
+                            } else if filename.ends_with("_background.png") || filename.ends_with("_background.mp4") {
                                 background_files_set.insert(image_path);
                             }
                         }
@@ -364,9 +365,9 @@ async fn load_all_assets(
     music_files: &[PathBuf],
     scale_factor: f32,
 ) -> (
-    HashMap<String, Texture2D>, // background cache
+    HashMap<String, Texture2D>, // background cache (images)
+    HashMap<String, VideoPlayer>, // video cache
     HashMap<String, Texture2D>, // logo cache
-    //HashMap<String, Sound>, // music cache
     HashMap<String, SamplesBuffer>,
     HashMap<String, Font>, // font cache
     SoundEffects, // sfx
@@ -429,6 +430,7 @@ async fn load_all_assets(
     // --- SETUP ---
     let mut assets_loaded = 0;
     let mut background_cache = HashMap::new();
+    let mut video_cache = HashMap::new();
     let mut logo_cache = HashMap::new();
     let mut music_cache = HashMap::new();
     let mut font_cache: HashMap<String, Font> = HashMap::new();
@@ -481,8 +483,40 @@ async fn load_all_assets(
     assets_loaded += 1;
     animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
 
+    // --- CUSTOM ASSETS ---
     println!("\n[INFO] Pre-loading custom assets...");
-    load_asset_category!(background_files, "BACKGROUND", load_texture, &mut background_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+
+    // separate image backgrounds from video backgrounds
+    let image_backgrounds: Vec<PathBuf> = background_files.iter()
+        .filter(|p| p.extension().map_or(false, |e| e == "png"))
+        .cloned().collect();
+
+    let video_backgrounds: Vec<PathBuf> = background_files.iter()
+        .filter(|p| p.extension().map_or(false, |e| e == "mp4"))
+        .cloned().collect();
+
+    load_asset_category!(&image_backgrounds, "BACKGROUND", load_texture, &mut background_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
+
+    // Load Videos Manually (Macros struggle with complex types like VideoPlayer)
+    for path in video_backgrounds {
+        if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+            let status = format!("LOADING VIDEO: {}", file_name);
+            draw_loading_screen(&status, display_progress);
+            next_frame().await;
+
+            // VideoPlayer::new is blocking (FFmpeg), so we don't await it
+            match VideoPlayer::new(&path) {
+                Ok(player) => {
+                    println!("[OK] Loaded video: {}", file_name);
+                    video_cache.insert(file_name.to_string(), player);
+                    assets_loaded += 1;
+                    animate_step!(&mut display_progress, &mut assets_loaded, total_asset_count, animation_speed, &status, &draw_loading_screen);
+                }
+                Err(e) => eprintln!("[ERROR] Failed to load video {}: {}", file_name, e),
+            }
+        }
+    }
+
     load_asset_category!(logo_files, "LOGO", load_texture, &mut logo_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
     load_asset_category!(font_files, "FONT", load_ttf_font, &mut font_cache, &mut assets_loaded, total_asset_count, &mut display_progress, animation_speed, &draw_loading_screen);
 
@@ -499,7 +533,7 @@ async fn load_all_assets(
     //let sound_effects = audio::SoundEffects::load(&config.sfx_pack).await;
     let sound_effects = audio::SoundEffects::load(&config.sfx_pack);
 
-    (background_cache, logo_cache, music_cache, font_cache, sound_effects)
+    (background_cache, video_cache, logo_cache, music_cache, font_cache, sound_effects)
 }
 
 // ===================================
@@ -629,7 +663,7 @@ async fn main() {
     let scale_factor = screen_height() / BASE_SCREEN_HEIGHT;
 
     // load them
-    let (mut background_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) =
+    let (mut background_cache, mut video_cache, mut logo_cache, mut music_cache, mut font_cache, mut sound_effects) =
     load_all_assets(
         &config,
         loading_text,
@@ -688,9 +722,16 @@ async fn main() {
 
     // backgrounds
     let mut background_choices: Vec<String> = background_cache.keys()
-    .filter(|k| k.ends_with("_background.png") || *k == "Default") // Add this filter
-    .cloned()
-    .collect();
+        .filter(|k| k.ends_with("_background.png") || *k == "Default") // Add this filter
+        .cloned()
+        .collect();
+
+    let video_choices: Vec<String> = video_cache.keys() // video backgrounds
+        .filter(|k| k.ends_with("_background.mp4"))
+        .cloned()
+        .collect();
+
+    background_choices.extend(video_choices);
     background_choices.sort();
 
     // fonts
@@ -713,106 +754,6 @@ async fn main() {
     if let Some(track_name) = &config.bgm_track {
         play_new_bgm(track_name, config.bgm_volume, &music_cache, &mut current_bgm);
     }
-
-    // old splash screen logic
-    /*
-    // SPLASH SCREEN
-    if config.show_splash_screen {
-        // Mute the main BGM if it's already playing
-        if let Some(sink) = &current_bgm {
-            sink.set_volume(0.0); // Use the rodio Sink method
-        }
-
-        // --- Load only what the splash screen needs ---
-        let splash_logo = Texture2D::from_file_with_format(include_bytes!("../logo.png"), Some(ImageFormat::Png));
-
-        let sink = Sink::connect_new(&AUDIO.stream.mixer());
-
-        // 1. Embed the bytes into the binary at compile time
-        // Note: The path is relative to this .rs file
-        let splash_bytes = include_bytes!("../splash.wav");
-
-        // 2. Create a "Cursor" which allows the decoder to read the raw bytes
-        // as if they were a file stream
-        let cursor = Cursor::new(splash_bytes);
-
-        // 3. Decode the audio from memory
-        let source = Decoder::new(cursor).unwrap();
-
-        // Play the splash sound
-        //play_sound(&splash_sfx, PlaySoundParams { looped: false, volume: 0.2 });
-        sink.append(source);
-
-        // --- Animation Durations ---
-        const FADE_DURATION: f64 = 1.0;
-        const SHOW_DURATION: f64 = 2.0;
-        const BASE_LOGO_WIDTH: f32 = 200.0;
-
-        let mut state = SplashState::FadingIn;
-        let mut alpha = 0.0;
-        let mut state_start_time = get_time();
-
-        // --- Splash Screen Loop ---
-        while !matches!(state, SplashState::Done) {
-            let elapsed = get_time() - state_start_time;
-
-            // Update logic for fading in, showing, and fading out
-            match state {
-                SplashState::FadingIn => {
-                    alpha = (elapsed / FADE_DURATION).min(1.0) as f32;
-                    if elapsed >= FADE_DURATION {
-                        state = SplashState::Showing;
-                        state_start_time = get_time();
-                    }
-                }
-                SplashState::Showing => {
-                    if elapsed >= SHOW_DURATION {
-                        state = SplashState::FadingOut;
-                        state_start_time = get_time();
-                    }
-                }
-                SplashState::FadingOut => {
-                    alpha = 1.0 - (elapsed / FADE_DURATION).min(1.0) as f32;
-                    if elapsed >= FADE_DURATION {
-                        state = SplashState::Done;
-                    }
-                }
-                SplashState::Done => {}
-            }
-
-            // Drawing logic
-            clear_background(BLACK);
-
-            let scale_factor = screen_height() / BASE_SCREEN_HEIGHT;
-
-            // Calculate the scaled width and height
-            let aspect_ratio = splash_logo.height() / splash_logo.width();
-            let scaled_logo_width = BASE_LOGO_WIDTH * scale_factor;
-            let scaled_logo_height = scaled_logo_width * aspect_ratio;
-
-            let x = (screen_width() / 2.0) - (scaled_logo_width / 2.0);
-            let y = (screen_height() / 2.0) - (scaled_logo_height / 2.0);
-
-            //draw_texture(&splash_logo, x, y, Color::new(1.0, 1.0, 1.0, alpha));
-            draw_texture_ex(
-                &splash_logo,
-                x,
-                y,
-                Color::new(1.0, 1.0, 1.0, alpha),
-                DrawTextureParams {
-                    dest_size: Some(vec2(scaled_logo_width, scaled_logo_height)),
-                    source: Some(Rect::new(0.0, 0.0, splash_logo.width(), splash_logo.height())),
-                    ..Default::default()
-                },
-            );
-            next_frame().await;
-        }
-
-        if let Some(sink) = &current_bgm {
-            sink.set_volume(config.bgm_volume);
-        }
-    }
-    */
 
     // Initialize gamepad support
     let mut gilrs = Gilrs::new().unwrap();
@@ -1092,6 +1033,7 @@ async fn main() {
                     &system_info,
                     &logo_cache,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1179,11 +1121,12 @@ async fn main() {
                     &font_cache,
                     &config,
                     &mut background_state,
+                    &mut video_cache,
                     &battery_info,
                     &current_time_str,
                     &app_state.gcc_adapter_poll_rate,
                     scale_factor,
-                    flash_message.as_ref().map(|(msg, _)| msg.as_str()),
+                    flash_message.as_ref().map(|(msg, _)| msg.as_str())
                 );
             },
             Screen::GeneralSettings | Screen::AudioSettings | Screen::GuiSettings | Screen::AssetSettings => {
@@ -1208,7 +1151,7 @@ async fn main() {
                 // --- Draw the UI ---
                 if page_number > 0 {
                     ui::settings::render_settings_page(
-                        page_number, options, &logo_cache, &background_cache, &font_cache,
+                        page_number, options, &logo_cache, &background_cache, &mut video_cache, &font_cache,
                         &mut config, settings_menu_selection, &animation_state, &mut background_state,
                         &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate,
                         scale_factor, system_volume, brightness,
@@ -1230,6 +1173,7 @@ async fn main() {
                     &animation_state,
                     &logo_cache,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1337,7 +1281,7 @@ async fn main() {
                 // --- Render ---
                 render_game_selection_menu(
                     &available_games, &game_icon_cache, &placeholder, game_selection, &animation_state, &logo_cache,
-                    &background_cache, &font_cache, &config, &mut background_state,
+                    &background_cache, &mut video_cache, &font_cache, &config, &mut background_state,
                     &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate, scale_factor
                 );
             },
@@ -1397,6 +1341,7 @@ async fn main() {
                     &config,
                     scale_factor,
                     &background_cache,
+                    &mut video_cache,
                     &mut background_state,
                 );
             },
@@ -1427,7 +1372,7 @@ async fn main() {
                 // --- Render ---
                 // First, render the settings page in the background
                 render_settings_page(
-                    1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
+                    1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &mut video_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
                     &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate,
                     scale_factor, system_volume, brightness,
@@ -1449,7 +1394,7 @@ async fn main() {
 
                 // --- Render ---
                 render_settings_page(
-                    1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &font_cache,
+                    1, &GENERAL_SETTINGS, &logo_cache, &background_cache, &mut video_cache, &font_cache,
                     &mut config, settings_menu_selection, &animation_state, &mut background_state,
                     &battery_info, &current_time_str, &app_state.gcc_adapter_poll_rate,
                     scale_factor, system_volume, brightness
@@ -1478,7 +1423,7 @@ async fn main() {
                     scale_factor, &copy_op_state
                 ).await;
 
-                render_background(&background_cache, &config, &mut background_state);
+                render_background(&background_cache, &mut video_cache, &config, &mut background_state);
 
                 ui::data::draw(
                     selected_memory, &memories, &icon_cache, &font_cache,
@@ -1512,6 +1457,7 @@ async fn main() {
                     &wifi_state,
                     &mut animation_state,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1532,6 +1478,7 @@ async fn main() {
                     &animation_state,
                     &logo_cache,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1553,6 +1500,7 @@ async fn main() {
                     &theme_downloader_state,
                     &mut animation_state,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1572,7 +1520,7 @@ async fn main() {
                 let reloading_text = "APPLYING NEW THEME ASSETS...";
 
                 // 3. Re-load all assets and assign them to the original mutable caches
-                (background_cache, logo_cache, music_cache, font_cache, sound_effects) =
+                (background_cache, video_cache, logo_cache, music_cache, font_cache, sound_effects) =
                 load_all_assets(
                     &config,
                     reloading_text,
@@ -1599,6 +1547,7 @@ async fn main() {
                     &runtime_downloader_state,
                     &mut animation_state,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1616,6 +1565,7 @@ async fn main() {
                 ui::update_checker::draw(
                     &mut update_checker_state,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,
@@ -1636,6 +1586,7 @@ async fn main() {
                     &mut cd_player_ui_state,
                     &animation_state,
                     &background_cache,
+                    &mut video_cache,
                     &font_cache,
                     &config,
                     &mut background_state,

@@ -142,4 +142,11 @@ impl VideoPlayer {
             // if the game lags, ensuring A/V sync.
         }
     }
+
+    pub fn reset(&mut self) { // allow video to loop (for themes that use a video background)
+        // Seek to the beginning of the file
+        let _ = self.input_context.seek(0, ..);
+        // Clear the frame ready flag so we decode immediately
+        self.frame_ready = false;
+    }
 }

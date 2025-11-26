@@ -1,3 +1,8 @@
+use crate::{
+    audio::SoundEffects,
+    config::{Config, get_user_data_dir},
+    FONT_SIZE, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text, DEV_MODE, VideoPlayer,
+};
 use macroquad::prelude::*;
 use serde::Deserialize;
 use std::{
@@ -10,12 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tempfile::{Builder, NamedTempFile};
-
-use crate::{
-    audio::SoundEffects,
-    config::{Config, get_user_data_dir},
-    FONT_SIZE, Screen, BackgroundState, render_background, get_current_font, text_with_config_color, InputState, wrap_text, DEV_MODE,
-};
 
 // --- CONSTANTS ---
 const ITEMS_PER_PAGE: usize = 5;
@@ -347,12 +346,13 @@ pub fn draw(
     state: &RuntimeDownloaderState,
     animation_state: &mut crate::AnimationState,
     background_cache: &HashMap<String, Texture2D>,
+    video_cache: &mut HashMap<String, VideoPlayer>,
     font_cache: &HashMap<String, Font>,
     config: &Config,
     background_state: &mut BackgroundState,
     scale_factor: f32,
 ) {
-    render_background(background_cache, config, background_state);
+    render_background(background_cache, video_cache, config, background_state);
 
     let font = get_current_font(font_cache, config);
     let font_size = (FONT_SIZE as f32 * scale_factor) as u16;
