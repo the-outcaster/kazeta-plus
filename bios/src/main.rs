@@ -95,6 +95,13 @@ pub const DEBUG_GAME_LAUNCH: bool = true; // run with "cargo run --release --fea
 #[cfg(not(feature = "debug_game"))]
 pub const DEBUG_GAME_LAUNCH: bool = false;
 
+#[cfg(feature = "debug_version")]
+const VERSION_NUMBER: &str = "V1.43d.KAZETA+";
+
+#[cfg(not(feature = "debug_version"))]
+const VERSION_NUMBER: &str = "V1.43.KAZETA+";
+
+const WINDOW_TITLE: &str = "Kazeta+ BIOS";
 const SCREEN_WIDTH: i32 = 640;
 const SCREEN_HEIGHT: i32 = 360;
 const BASE_SCREEN_HEIGHT: f32 = 360.0;
@@ -108,14 +115,9 @@ const UI_BG_COLOR: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.5 };
 const UI_BG_COLOR_DARK: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.3 };
 const UI_BG_COLOR_DIALOG: Color = Color {r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
 const SELECTED_OFFSET: f32 = 5.0;
-
-const WINDOW_TITLE: &str = "Kazeta+ BIOS";
-const VERSION_NUMBER: &str = "V1.43d.KAZETA+";
-
 const MENU_OPTION_HEIGHT: f32 = 30.0;
 const MENU_PADDING: f32 = 8.0;
 const RECT_COLOR: Color = Color::new(0.15, 0.15, 0.15, 1.0);
-
 const FLASH_MESSAGE_DURATION: f32 = 5.0; // Show message for 5 seconds
 
 const COLOR_TARGETS: [Color; 6] = [

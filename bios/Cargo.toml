@@ -38,6 +38,7 @@ image = "0.25.9"
 default = []
 dev = [] # add dev mode flag
 debug_game = [] # add debug game mode flag
+debug_version = [] # append "d" to version number in BIOS
 
 # deprecated dependencies
 #macroquad = { version = "0.4.14", features = ["audio"] }
