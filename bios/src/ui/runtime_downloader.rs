@@ -629,7 +629,7 @@ fn fetch_runtime_list(tx: Sender<DownloaderMessage>) {
 
         // --- 2. Fetch Outcaster & Third-Party Runtimes ---
         // From: https://github.com/the-outcaster/kazeta-plus/releases/tag/runtimes
-        let outcaster_files = ["dolphin-1.0.kzr", "linux-1.1.kzr", "windows-1.1.kzr"];
+        let outcaster_files = ["dolphin-1.0.kzr", "linux-1.1.kzr", "windows-1.1.kzr", "windows-1.2-experimental.kzr"];
         let third_party_files = ["pcengine-1.0.zip", "playstation-1.01.zip", "saturn-1.0.zip", "segacd-1.0.zip"];
         let response_plus = client
         .get("https://api.github.com/repos/the-outcaster/kazeta-plus/releases/tags/runtimes")
