@@ -1,6 +1,15 @@
 #! /bin/bash
 
 set -e
+
+cleanup_on_error() {
+    echo "Script failed! Attempting to clean up mounts..."
+    umount "${BUILD_PATH}" 2>/dev/null || true
+    umount "${MOUNT_PATH}" 2>/dev/null || true
+    losetup -j "${BUILD_IMG}" | cut -d : -f 1 | xargs -r losetup -d
+}
+trap cleanup_on_error ERR
+
 set -x
 
 if [ $EUID -ne 0 ]; then
@@ -35,10 +44,10 @@ if [ -n "$1" ]; then
 	BUILD_ID="${1}"
 fi
 
-MOUNT_PATH=/tmp/${SYSTEM_NAME}-build
+MOUNT_PATH=/home/fedora/kazeta_build/${SYSTEM_NAME}-build
 BUILD_PATH=${MOUNT_PATH}/subvolume
 SNAP_PATH=${MOUNT_PATH}/${SYSTEM_NAME}-${VERSION}
-BUILD_IMG=/output/${SYSTEM_NAME}-build.img
+BUILD_IMG=/home/fedora/kazeta_build/${SYSTEM_NAME}-build.img
 
 mkdir -p ${MOUNT_PATH}
 
@@ -131,14 +140,6 @@ rm -rf /var/cache/pacman/pkg
 # doing yes | pacman omitting --noconfirm is a necessity
 yes | pacman -S iptables-nft
 
-# create user first
-groupadd -r autologin
-useradd -m ${USERNAME} -G autologin,wheel
-echo "${USERNAME}:${USERNAME}" | chpasswd
-
-# run post install hook
-postinstallhook
-
 # enable services
 if [ -n "${SERVICES}" ]; then
 	systemctl enable ${SERVICES}
@@ -151,6 +152,11 @@ fi
 
 # disable root login
 passwd --lock root
+
+# create user
+groupadd -r autologin
+useradd -m ${USERNAME} -G autologin,wheel
+echo "${USERNAME}:${USERNAME}" | chpasswd
 
 # set the default editor, so visudo works
 echo "export EDITOR=/usr/bin/vim" >> /etc/bash.bashrc
@@ -203,6 +209,9 @@ if [ -n "$(ls -A '/extra_certs')" ]; then
 	trust anchor --store /extra_certs/*.crt
 fi
 
+# run post install hook
+postinstallhook
+
 # record installed packages & versions
 pacman -Q > /manifest
 
@@ -210,7 +219,7 @@ pacman -Q > /manifest
 mkdir -p /usr/var/lib/pacman
 cp -r /var/lib/pacman/local /usr/var/lib/pacman/
 
-# move kernel image and initrd to a defualt location if "linux" is not used
+# move kernel image and initrd to a default location if "linux" is not used
 if [ ${KERNEL_PACKAGE} != 'linux' ] ; then
 	mv /boot/vmlinuz-${KERNEL_PACKAGE} /boot/vmlinuz-linux
 	mv /boot/initramfs-${KERNEL_PACKAGE}.img /boot/initramfs-linux.img
@@ -247,8 +256,13 @@ echo "" >> ${BUILD_PATH}/build_info
 cat ${BUILD_PATH}/manifest >> ${BUILD_PATH}/build_info
 rm ${BUILD_PATH}/manifest
 
-echo "Server=https://archive.archlinux.org/repos/${TODAY_DATE}/\$repo/os/\$arch" > \
-${BUILD_PATH}/etc/pacman.d/mirrorlist
+# freeze archive date of build to avoid package drift on unlock
+# if no archive date is set
+if [ -z "${ARCHIVE_DATE}" ]; then
+	export TODAY_DATE=$(date +%Y/%m/%d)
+	echo "Server=https://archive.archlinux.org/repos/${TODAY_DATE}/\$repo/os/\$arch" > \
+	${BUILD_PATH}/etc/pacman.d/mirrorlist
+fi
 
 btrfs subvolume snapshot -r ${BUILD_PATH} ${SNAP_PATH}
 btrfs send -f ${SYSTEM_NAME}-${VERSION}.img ${SNAP_PATH}
@@ -256,14 +270,33 @@ btrfs send -f ${SYSTEM_NAME}-${VERSION}.img ${SNAP_PATH}
 cp ${BUILD_PATH}/build_info build_info.txt
 
 # clean up
-umount -l ${BUILD_PATH}
-umount -l ${MOUNT_PATH}
-rm -rf ${MOUNT_PATH}
-rm -rf ${BUILD_IMG}
+# 1. Unmount the bind-mounted subvolume (Wait for it to finish!)
+if mountpoint -q "${BUILD_PATH}"; then
+    echo "Unmounting subvolume..."
+    umount "${BUILD_PATH}"
+fi
+
+# 2. Unmount the main image mount
+if mountpoint -q "${MOUNT_PATH}"; then
+    echo "Unmounting image..."
+    umount "${MOUNT_PATH}"
+fi
+
+# 3. Force-detach the loop device used by this specific image file
+# This prevents the kernel from holding onto the file lock
+losetup -j "${BUILD_IMG}" | cut -d : -f 1 | xargs -r losetup -d
+
+# 4. Sync to ensure all writes are flushed to disk
+sync
+
+# 5. Now it is safe to delete
+echo "Removing temporary files..."
+rm -rf "${MOUNT_PATH}"
+rm -f "${BUILD_IMG}"
 
 IMG_FILENAME="${SYSTEM_NAME}-${VERSION}.img.tar.xz"
 if [ -z "${NO_COMPRESS}" ]; then
-	tar -c -I'xz -8 -T4' -f ${IMG_FILENAME} ${SYSTEM_NAME}-${VERSION}.img
+	tar -c -I'xz -9e -T4' -f ${IMG_FILENAME} ${SYSTEM_NAME}-${VERSION}.img
 	rm ${SYSTEM_NAME}-${VERSION}.img
 
 	sha256sum ${SYSTEM_NAME}-${VERSION}.img.tar.xz > sha256sum.txt

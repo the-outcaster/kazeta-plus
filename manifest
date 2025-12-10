@@ -1,27 +1,39 @@
 #! /bin/bash
 
-export VERSION="2025-1" # Updated version for the new release
-export SYSTEM_DESC="Kazeta+" # Updated to Kazeta+
+export VERSION="1.43"
+export SYSTEM_DESC="Kazeta+"
 export SYSTEM_NAME="kazeta-plus"
 export USERNAME="gamer"
 export SIZE="5000MB"
-export ARCHIVE_DATE=$(date -d 'yesterday' +%Y/%m/%d)
-export WEBSITE="https://kazeta.org"
-export DOCUMENTATION_URL="https://kazeta.org"
+export WEBSITE="https://github.com/the-outcaster/kazeta-plus"
+export DOCUMENTATION_URL="https://github.com/the-outcaster/kazeta-plus/wiki"
 export BUG_REPORT_URL="https://github.com/the-outcaster/kazeta-plus/issues"
 
 export KERNEL_PACKAGE="linux"
 
 export PACKAGES="\
 	accountsservice \
+	alsa-utils \
+	base-devel \
+	bluez \
+	bluez-utils \
+	brightnessctl \
+	clang \
+	dkms \
+	ffmpeg \
 	fuse2 \
 	fuse3 \
 	fuse-overlayfs \
+	gamemode \
 	gamescope \
 	htop \
 	inputplumber \
+	iwd \
+	keyd \
 	less \
+	lib32-gamemode \
 	lib32-libxfixes \
+	lib32-mangohud \
 	lib32-nvidia-utils \
 	lib32-pipewire \
 	lib32-vulkan-intel \
@@ -29,36 +41,56 @@ export PACKAGES="\
 	lib32-vulkan-radeon \
 	lightdm \
 	linux-firmware \
+	linux-headers \
+	mangohud \
+	nano \
+	networkmanager \
+	noto-fonts \
+	noto-fonts-emoji \
 	nvidia-open \
 	nvidia-utils \
+	openssh \
+	pipewire-alsa \
 	pipewire-jack \
 	pipewire-pulse \
+	rsync \
 	rtkit \
+	steam \
 	sudo \
+	ttf-dejavu \
+	ttf-liberation \
+	unzip \
 	vim \
 	vulkan-intel \
 	vulkan-mesa-layers \
 	vulkan-radeon \
 	wireplumber \
-	brightnessctl \
-	keyd \
-	networkmanager \
-	iwd \
+	xxhash \
 "
 
 export AUR_PACKAGES="\
 	downgrade \
 	frzr \
+	gcadapter-oc-dkms \
 	pikaur \
 	udev-media-automount \
 "
 
 export SERVICES="\
+	bluetooth.service \
 	fstrim.timer \
-	inputplumber \
-	lightdm \
-	keyd \
+	inputplumber.service \
+	iwd.service \
+	keyd.service \
 	kazeta-profile-loader.service \
+	lightdm.service \
+	NetworkManager.service \
+	sshd.service \
+"
+
+export USER_SERVICES="\
+	pipewire-pulse.service \
+	wireplumber.service \
 "
 
 export FILES_TO_DELETE="\
@@ -71,49 +103,51 @@ export FILES_TO_DELETE="\
 "
 
 postinstallhook() {
-	# --- IMPROVED: Use sudoers.d for better security and consistency ---
-	mkdir -p /etc/sudoers.d
-	cat <<- 'EOF' > /etc/sudoers.d/99-kazeta-plus
-	# Allow running the mount and log copy helpers without a password
-	%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/kazeta-mount, /usr/bin/kazeta-copy-logs
-	EOF
-	chmod 440 /etc/sudoers.d/99-kazeta-plus
+    # Add generic sudo permissions
+    sed -i '/%wheel ALL=(ALL:ALL) ALL/s/^# //g' /etc/sudoers
 
-	# Disable SPDIF/IEC958 audio output
-	sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
+    # Secure the specific sudoers file
+    if [ -f /etc/sudoers.d/99-kazeta-plus ]; then
+        chown root:root /etc/sudoers.d/99-kazeta-plus
+        chmod 440 /etc/sudoers.d/99-kazeta-plus
+    fi
 
-	# Set a default timezone
-	ln -s /usr/share/zoneinfo/UTC /etc/localtime
+    # Ensure all Kazeta binaries are executable and owned by root
+    # This covers kazeta, kazeta-bios, kazeta-wifi-setup, kazeta-show-error, etc.
+    # Doing this here guarantees they work, regardless of how they were on your dev PC.
+    if compgen -G "/usr/bin/kazeta*" > /dev/null; then
+        chown root:root /usr/bin/kazeta*
+        chmod 755 /usr/bin/kazeta*
+    fi
 
-	# Persist kazeta save data
-	mkdir -p /home/${USERNAME}/.local/share
-	ln -s /var/kazeta /home/${USERNAME}/.local/share/kazeta
+    # Disable SPDIF/IEC958 audio output
+    sed -e '/\[Mapping iec958/,+5 s/^/#/' -i '/usr/share/alsa-card-profile/mixer/profile-sets/default.conf'
 
-	# Persist wireplumber settings
-	mkdir -p /home/${USERNAME}/.local/state
-	ln -s /var/kazeta/state/wireplumber /home/${USERNAME}/.local/state/wireplumber
+    # Set a default timezone
+    ln -s /usr/share/zoneinfo/UTC /etc/localtime
 
-	# make /var/kazeta dir before setting its permissions
-	mkdir -p /var/kazeta
+    # Persist kazeta save data
+    mkdir -p /var/kazeta/state/wireplumber
+    mkdir -p /home/${USERNAME}/.local/share
+    ln -s /var/kazeta /home/${USERNAME}/.local/share/kazeta
 
-	# Set permissions
-	chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
-	chown -R ${USERNAME}:${USERNAME} /var/kazeta
+    # Persist wireplumber settings
+    mkdir -p /home/${USERNAME}/.local/state
+    ln -s /var/kazeta/state/wireplumber /home/${USERNAME}/.local/state/wireplumber
 
-	# Automount storage to /run/media
-	sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
-	sed -i -e 's,}.$TYPE",}",' /usr/bin/media-automount
+    # Set permissions for user home and var data
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    chown -R ${USERNAME}:${USERNAME} /var/kazeta
 
-	# Force Xbox 360 emulation for all controller devices
-	sed -i -e 's/- xbox-elite/- xb360/' /usr/share/inputplumber/devices/*.yaml
-	sed -i -e 's/- xbox-series/- xb360/' /usr/share/inputplumber/devices/*.yaml
-	sed -i -e 's/- ds5/- xb360/' /usr/share/inputplumber/devices/*.yaml
-	sed -i -e 's/- ds5-edge/- xb360/' /usr/share/inputplumber/devices/*.yaml
+    # Automount storage to /run/media
+    sed -i -e 's,mediadir=/media,mediadir=/run/media,' /usr/bin/media-automount
 
-    # --- NEW: Configure NetworkManager to use iwd as the Wi-Fi backend ---
-    mkdir -p /etc/NetworkManager/conf.d
-    cat <<- 'EOF' > /etc/NetworkManager/conf.d/wifi_backend.conf
-    [device]
-    wifi.backend=iwd
-EOF
+    # Drop filesystem type from mount directory name
+    sed -i -e 's,}.$TYPE",}",' /usr/bin/media-automount
+
+    # Force Xbox 360 emulation for all controller devices
+    sed -i -e 's/- xbox-elite/- xb360/' /usr/share/inputplumber/devices/*.yaml
+    sed -i -e 's/- xbox-series/- xb360/' /usr/share/inputplumber/devices/*.yaml
+    sed -i -e 's/- ds5/- xb360/' /usr/share/inputplumber/devices/*.yaml
+    sed -i -e 's/- ds5-edge/- xb360/' /usr/share/inputplumber/devices/*.yaml
 }
