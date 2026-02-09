@@ -87,7 +87,7 @@ pub const DEV_MODE: bool = true; // run with "cargo run --release --features dev
 #[cfg(not(feature = "dev"))]
 pub const DEV_MODE: bool = false;
 
-macro_rules! ver { () => { "1.43" } } // Define the version number here
+macro_rules! ver { () => { "1.44" } } // Define the version number here
 #[cfg(feature = "dev")]
 const VERSION_NUMBER: &str = concat!("V", ver!(), "d.KAZETA+");
 

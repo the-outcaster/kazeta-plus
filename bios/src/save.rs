@@ -546,6 +546,7 @@ pub fn find_files_by_extension<P: AsRef<Path>>(
     Ok(results)
 }
 
+/*
 pub fn get_save_dir_from_drive_name(drive_name: &str) -> String {
     let base_dir = dirs::home_dir().unwrap().join(".local/share/kazeta");
     if drive_name == "internal" || drive_name.is_empty() {
@@ -573,6 +574,35 @@ pub fn get_save_dir_from_drive_name(drive_name: &str) -> String {
                 eprintln!("Failed to create save directory: {}", e);
             });
         }
+        save_dir.to_string_lossy().into_owned()
+    }
+}
+*/
+pub fn get_save_dir_from_drive_name(drive_name: &str) -> String {
+    let base_dir = dirs::home_dir().unwrap().join(".local/share/kazeta");
+    if drive_name == "internal" || drive_name.is_empty() {
+        let save_dir = base_dir.join("saves/default");
+
+        // Only create the INTERNAL directory automatically, as that is required for the OS.
+        if !save_dir.exists() {
+            fs::create_dir_all(&save_dir).unwrap_or_else(|e| {
+                eprintln!("Failed to create save directory: {}", e);
+            });
+        }
+        save_dir.to_string_lossy().into_owned()
+    } else {
+        let base_ext = if Path::new("/media").read_dir().map(|mut d| d.next().is_none()).unwrap_or(true) {
+            if Path::new(&format!("/run/media/{}", whoami::username())).exists() {
+                format!("/run/media/{}", whoami::username())
+            } else {
+                "/run/media".to_string()
+            }
+        } else {
+            "/media".to_string()
+        };
+
+        // Just return the path. DO NOT CREATE IT.
+        let save_dir = Path::new(&base_ext).join(drive_name).join("kazeta/saves");
         save_dir.to_string_lossy().into_owned()
     }
 }

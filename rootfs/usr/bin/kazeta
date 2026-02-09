@@ -206,19 +206,10 @@ echo "DEBUG: Using runtime: $runtime"
 runtimedir="${BASE_DIR}/run/runtime"
 sudo kazeta-mount "${lower}" "${upper}" "${work}" "${target}" "${runtime}" "${runtimedir}"
 
-# Get the post-exec command *before* setting the trap
-post_exec_cmd=$(get_attribute 'PostExec' ${cart_info})
-
-# If the command is not empty, add a semicolon to it
-[[ -n "$post_exec_cmd" ]] && post_exec_cmd+=";"
-
-# Now build the trap. ${post_exec_cmd} will be safely empty
-# or it will be "some_command;"
+# --- TRAP SETUP (Clean up on exit) ---
 trap "\
 	if [ -n \"\$PLAYTIME_PID\" ]; then kill \"\$PLAYTIME_PID\" 2>/dev/null; fi; \
 	popd; \
-	echo 'DEBUG: Running PostExec cleanup...'; \
-	${post_exec_cmd} \
 	sudo kazeta-mount --unmount "${target}" "${runtimedir}"; \
 	sudo kazeta-mount kzp --unmount "${cart_path}"; \
 	sudo rm -rf "${work}"; \
@@ -234,14 +225,35 @@ unset XDG_DATA_HOME
 unset XDG_STATE_HOME
 pushd "${HOME}"
 
-# --- Run PreExec command ---
-cart_preexec="$(get_attribute 'PreExec' ${cart_info})"
-if [ -n "$cart_preexec" ]; then
-	echo "DEBUG: Running PreExec command: $cart_preexec"
-	eval "$cart_preexec"
-	echo "DEBUG: PreExec complete."
+# --- Handle InputPlumber Controller Profile ---
+cart_controller="$(get_attribute 'Controller' ${cart_info})"
+
+if [ -n "$cart_controller" ]; then
+	echo "DEBUG: Controller profile requested: $cart_controller"
+
+	controller_path=""
+
+	# 1. Look in the immediate game directory (where the .kzi is)
+	if [ -f "${cart_path}/${cart_controller}" ]; then
+		controller_path="${cart_path}/${cart_controller}"
+	# 2. Look in the root of the physical media (useful if kzi is in a subfolder but yaml is at root)
+	elif [ -f "${media_path}/${cart_controller}" ]; then
+		controller_path="${media_path}/${cart_controller}"
+	# 3. Check if user provided a full absolute path
+	elif [ -f "${cart_controller}" ]; then
+		controller_path="${cart_controller}"
+	fi
+
+	if [ -n "$controller_path" ]; then
+		echo "DEBUG: Loading InputPlumber profile: $controller_path"
+		busctl call org.shadowblip.InputPlumber \
+			/org/shadowblip/InputPlumber/CompositeDevice0 \
+			org.shadowblip.Input.CompositeDevice \
+			LoadProfilePath "s" "$controller_path"
+	else
+		echo "WARNING: Controller profile '$cart_controller' not found in cart or media path."
+	fi
 fi
-# --- End PreExec ---
 
 cart_exec="$(get_attribute 'Exec' ${cart_info})"
 cart_gsopts="$(get_attribute 'GamescopeOptions' ${cart_info})"
